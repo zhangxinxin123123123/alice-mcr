@@ -187,6 +187,10 @@ def next_no(c):
 
 def ensure_customer(c, raw='', remark=''):
     raw = str(raw or '').strip()
+    force_name = False
+    if raw.startswith('__NAME__:'):
+        force_name = True
+        raw = raw[len('__NAME__:'):].strip()
 
     def make_new_customer_no():
         rows = c.execute("SELECT customer_no FROM customers").fetchall()
@@ -209,12 +213,12 @@ def ensure_customer(c, raw='', remark=''):
                     pass
         return f"{max_no + 1:04d}"
 
-    if raw and raw.isdigit():
+    if raw and raw.isdigit() and not force_name:
         no = f'{int(raw):04d}'
         row = c.execute('SELECT * FROM customers WHERE customer_no=?', (no,)).fetchone()
         if row:
             return row
-        c.execute('INSERT INTO customers(customer_no,name,remark) VALUES(?,?,?)', (no, f'客户{no}', remark))
+        raise ValueError(f'客人ID {no} 不存在。第一次预约请在价格后填写客人用户名；如果用户名本身是数字，请写成 //{raw}。')
     elif raw:
         row = c.execute('SELECT * FROM customers WHERE name=?', (raw,)).fetchone()
         if row:
@@ -371,15 +375,86 @@ def strip_chain_prefix(line):
     s = re.sub(r"^\s*\d+\s*[.、]\s*", "", s)
     return s.strip()
 
+def normalize_chain_time_token(token):
+    """
+    接龙时间显示标准化。
+    - 23.30-0.30 会保存为 23.30-24.30
+    - 0.30-1.30 会保存为 24.30-25.30
+    这样凌晨 0 点以后不会被看成当天上午。
+    """
+    token = re.sub(r"\s+", "", str(token or ""))
+    m = re.match(r"^(\d{1,2})([:.](\d{1,2}))?([-~ー～])(\d{1,2})([:.](\d{1,2}))?$", token)
+    if not m:
+        return token
+
+    sh, ssep, sm, dash, eh, esep, em = m.groups()
+    sh_i, eh_i = int(sh), int(eh)
+
+    # 用户输入 0.30 时，夜场业务里按 24.30 处理。
+    if sh_i == 0:
+        sh_i += 24
+    if eh_i == 0:
+        eh_i += 24
+    if eh_i < sh_i:
+        eh_i += 24
+
+    ssep = ssep or ''
+    esep = esep or ''
+    sm = sm or ''
+    em = em or ''
+    return f"{sh_i}{ssep}{sm}-{eh_i}{esep}{em}"
+
 def parse_chain_service_time(line):
     body = strip_chain_prefix(line)
     if "包夜" in body:
         return "包夜 12.00-5.00", body
-    # support 5.30-6.30, 10-12, 6.40-7.40, 8:45-9:45
+    # support 5.30-6.30, 10-12, 6.40-7.40, 8:45-9:45, 23.30-0.30
     m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?\s*[-~ー～]\s*\d{1,2}(?:[:.]\d{1,2})?)(.*)$", body)
     if not m:
         return None, body
-    return re.sub(r"\s+", "", m.group(1)), m.group(2)
+    return normalize_chain_time_token(m.group(1)), m.group(2)
+
+def split_chain_fields(rest_raw):
+    """
+    接龙字段解析：时间之后按 / 或空白分字段。
+    规则：价格后的字段必须是客人。纯数字=既有客人ID；字符串=第一次预约用户名。
+    如果用户名本身是纯数字，用双斜杠写法强制当用户名：8-9/10000//123/备注。
+    """
+    text = str(rest_raw or '').strip().replace('（', ' ').replace('）', ' ').replace('(', ' ').replace(')', ' ')
+    fields, buf, force_next_name = [], [], False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '/':
+            if i + 1 < len(text) and text[i + 1] == '/':
+                token = ''.join(buf).strip()
+                if token:
+                    fields.append((token, False))
+                buf = []
+                force_next_name = True
+                i += 2
+                continue
+            token = ''.join(buf).strip()
+            if token:
+                fields.append((token, force_next_name))
+            buf = []
+            force_next_name = False
+            i += 1
+            continue
+        if ch.isspace():
+            token = ''.join(buf).strip()
+            if token:
+                fields.append((token, force_next_name))
+                buf = []
+                force_next_name = False
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    token = ''.join(buf).strip()
+    if token:
+        fields.append((token, force_next_name))
+    return fields
 
 
 @app.route('/api/import_chain',methods=['POST'])
@@ -404,18 +479,19 @@ def import_chain():
                 if not st:
                     continue
 
-                rest = rest_raw.replace('（',' ').replace('）',' ').replace('(',' ').replace(')',' ').replace('/',' ').strip()
-                parts = [p for p in re.split(r'\s+', rest) if p]
+                parts = split_chain_fields(rest_raw)
 
-                if parts and '包夜' in parts[0]:
+                if parts and '包夜' in parts[0][0]:
                     parts.pop(0)
                 if not parts:
                     continue
 
-                rec = yen_to_int(parts.pop(0))
-                cust = ''
-                if parts and parts[0].isdigit():
-                    cust = parts.pop(0)
+                rec = yen_to_int(parts.pop(0)[0])
+                if not parts:
+                    raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
+                cust_token, force_name = parts.pop(0)
+                cust = ('__NAME__:' + cust_token) if force_name else cust_token
+                remark_parts = [p[0] for p in parts]
 
                 create_or_update_order(c, {
                     'order_date': od,
@@ -423,7 +499,7 @@ def import_chain():
                     'girl_id': g['id'],
                     'received_amount': rec,
                     'customer_raw': cust,
-                    'remark': ' '.join(parts),
+                    'remark': ' '.join(remark_parts),
                     'settlement_status': d.get('settlement_status','未结算'),
                     'raw_text': line
                 })
