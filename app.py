@@ -10,7 +10,7 @@ app.config['JSON_AS_ASCII'] = False
 
 # 固定登录账号：需要改账号密码就在这里改
 USERS = {
-    "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
+    "admin": {"password": "admin789", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
 PUBLIC_PATHS = {"/", "/api/login", "/api/health", "/api/db_info"}
