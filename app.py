@@ -98,7 +98,7 @@ def api_login():
 
 
 def conn():
-    c=sqlite3.connect(DB_PATH); c.row_factory=sqlite3.Row; return c
+    c=sqlite3.connect("/var/data/alice_academy_mcr.db"); c.row_factory=sqlite3.Row; return c
 def rows(rs): return [dict(r) for r in rs]
 def yen_to_int(s):
     s=str(s or '').strip().replace('（','').replace('）','').replace('(','').replace(')','').replace(',','').replace('¥','').replace('円','')
