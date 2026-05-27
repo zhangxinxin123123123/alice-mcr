@@ -662,6 +662,7 @@ def api_delete_hotel_room(item_id):
     return jsonify(ok=True)
 
 def open_browser(): webbrowser.open('http://127.0.0.1:5057')
-if __name__=='__main__':
-     port = int(os.environ.get("PORT", 5057))
+import os
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5057))
     app.run(host="0.0.0.0", port=port)
