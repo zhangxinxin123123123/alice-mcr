@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>爱丽丝学院 · 纯出勤表</title>
+<style>
+:root{
+  --poster-text:#00d9ff;
+  --poster-scale:1;
+  --pink:#ff8fc7;
+  --pink2:#ffd8ea;
+  --lav:#d9c8ff;
+  --blue:#dff5ff;
+  --ink:#5d4566;
+  --line:#f0c6dc;
+  --paper:#fffafd;
+  --danger:#ff6e92;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at 12% 8%,rgba(255,255,255,.9) 0 5%,transparent 6%),
+    linear-gradient(135deg,#fff7fb,#f4edff 48%,#eaf8ff);
+  padding:18px;
+}
+.wrap{max-width:1280px;margin:0 auto}
+.hero{
+  border:3px solid var(--line);
+  border-radius:30px;
+  padding:18px 22px;
+  background:linear-gradient(135deg,var(--pink),var(--lav));
+  color:white;
+  box-shadow:0 12px 28px #ff8fc755;
+  margin-bottom:16px;
+}
+.hero h1{margin:0;font-size:30px;letter-spacing:.04em}
+.hero p{margin:8px 0 0;font-weight:700;opacity:.95}
+.card{
+  background:rgba(255,255,255,.94);
+  border:2px solid var(--line);
+  border-radius:26px;
+  padding:16px;
+  margin-bottom:14px;
+  box-shadow:0 10px 24px #b68bac1f;
+}
+.toolbar{
+  display:grid;
+  grid-template-columns:1.2fr 1.2fr 1fr 1fr 1fr 1.6fr auto auto;
+  gap:10px;
+}
+input,select,button{
+  border:2px solid var(--line);
+  border-radius:15px;
+  padding:10px 12px;
+  background:white;
+  color:var(--ink);
+  outline:none;
+  font-weight:700;
+}
+button{cursor:pointer;font-weight:900}
+.primary{border:0;background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}
+.soft{background:white}
+.danger{border:0;background:var(--danger);color:white}
+.note{font-size:calc(13px * var(--poster-scale));opacity:.82;line-height:1.6}
+.count{
+  font-size:16px;
+  font-weight:900;
+  color:#e75ca2;
+}
+.preview{
+  width:300px;
+  min-height:600px;
+  margin:0 auto;
+  background:
+    linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.08)),
+    var(--poster-bg, linear-gradient(135deg,#ffe9f4,#f3eaff,#eaf8ff));
+  background-size:cover;
+  background-position:center;
+  border:0;
+  border-radius:0;
+  padding:18px 16px;
+  overflow:hidden;
+  position:relative;
+  box-shadow:0 12px 30px #0002;
+}
+.preview-title{
+  text-align:left;
+  font-size:calc(14px * var(--poster-scale));
+  line-height:1.15;
+  font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffff99;
+  letter-spacing:.02em;
+  margin-bottom:2px;
+}
+.preview-sub{
+  text-align:left;
+  margin:0 0 8px;
+  font-size:10px;
+  color:var(--poster-text);
+  font-weight:900;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffff99;
+}
+.shift-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:stretch;
+}
+
+.shift-card{
+  width:100%;
+  min-height:auto;
+  border:0;
+  border-radius:0;
+  padding:0;
+  background:transparent;
+  box-shadow:none;
+  position:relative;
+}
+.shift-name{
+  font-size:calc(13px * var(--poster-scale));
+  line-height:1.25;
+  font-weight:900;
+  color:var(--poster-text);
+  padding-right:0;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.shift-row{
+  margin-top:2px;
+  font-size:13px;
+  line-height:1.15;
+  font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.time-price-line{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  font-size:13px;
+  line-height:1.15;
+  font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.price{font-size:calc(13px * var(--poster-scale));font-weight:900;color:var(--poster-text)}
+.tag-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.tag{
+  display:inline-block;
+  padding:2px 5px;
+  border-radius:999px;
+  background:linear-gradient(135deg,#fff0f7,#f2eaff);
+  border:1px solid #f0c6dc;
+  color:#e75ca2;
+  font-size:calc(12px * var(--poster-scale));
+  font-weight:900;
+}
+.gold-tag{
+  display:inline-block;
+  padding:4px 10px;
+  border-radius:999px;
+  background:linear-gradient(120deg,#5a4300,#ffd95e,#fff4b0,#d8a500,#5a4300);
+  background-size:300% 300%;
+  color:#fff8d6;
+  border:1px solid #ffd95e;
+  font-size:12px;
+  font-weight:900;
+  box-shadow:0 0 12px #ffd95e88;
+  animation:goldFlow 3s linear infinite;
+}
+@keyframes goldFlow{
+  0%{background-position:0% 50%}
+  100%{background-position:100% 50%}
+}
+.del{display:none}
+.empty{
+  width:100%;
+  text-align:center;
+  padding:34px 10px;
+  color:var(--poster-text);
+  font-size:16px;
+  font-weight:900;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.table{
+  overflow:auto;border:2px solid var(--line);border-radius:18px;background:white;
+}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}
+th{background:#fff0f7}
+@media(max-width:980px){
+  .toolbar{grid-template-columns:1fr}
+  .shift-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .shift-list{grid-template-columns:1fr}
+}
+@media print{
+  body{background:white;padding:0}
+  .no-print{display:none!important}
+  .wrap{max-width:none}
+  .preview{border:0;box-shadow:none}
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero no-print">
+    <h1>🎀 ALICE ACADEMY · SHIFT LIST 🎀</h1>
+    <p>纯出勤表页面｜日期做标题｜女孩表下拉｜价格 1万～3万｜TAG 可手动编辑</p>
+  </div>
+
+  <div class="card no-print">
+    <h2>出勤录入</h2>
+    <p class="note">女孩名从女孩表读取；价格固定为 ¥10,000～¥30,000 下拉；TAG 可自己输入，多个 TAG 用空格、逗号或顿号分隔。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="soft" onclick="setPresetBg('pink')">粉色学院背景</button>
+      <button class="soft" onclick="setPresetBg('night')">夜色背景</button>
+      <button class="soft" onclick="setPresetBg('gold')">金色背景</button>
+      <button class="soft" onclick="setPresetBg('blue')">蓝色清爽背景</button>
+      <button class="soft" onclick="setPresetBg('clear')">清除背景</button>
+    </div>
+    <div class="toolbar">
+      <input id="shiftDate" type="date">
+      <div style="position:relative">
+<input id="girlSearch" placeholder="搜索女孩名字...">
+<div id="girlSuggest" style="position:absolute;left:0;right:0;top:48px;background:white;border:2px solid #f0c6dc;border-radius:16px;max-height:260px;overflow:auto;z-index:999;display:none;box-shadow:0 10px 24px #0001"></div>
+</div>
+      <select id="startSelect"></select>
+      <select id="endSelect"></select>
+      <select id="priceSelect"></select>
+      <input id="tagInput" placeholder="TAG 例：新人 推荐 可预约"><input id="goldTagInput" placeholder="金色TAG 例：TOP 回归 王牌">
+      <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
+      <button class="danger" onclick="removeLast()">－ 删除最后</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span class="count">出勤人数：<span id="shiftCount">0</span></span>
+      <button class="soft" onclick="clearAll()">清空全部</button>
+      <button class="soft" onclick="scrollToPreview()">定位截图区</button>
+      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">一键截图</button>
+      <button class="soft" onclick="loadGirls()">刷新女孩表</button>
+    </div>
+  </div>
+
+  <div class="card no-print">
+    <h2>当前列表</h2>
+    <div id="dataTable"></div>
+  </div>
+
+  <div class="preview" id="previewBox">
+    <div class="preview-title"><span id="posterTitle"></span></div>
+    <div class="preview-sub"><span id="previewDateText"></span> ｜ 出勤人数 <span id="previewCount">0</span></div>
+    <div class="shift-list" id="shiftList"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const today = new Date().toISOString().slice(0,10);
+  let girls = [];
+  let shifts = [];
+  let editingShiftId = null;
+
+  window.yen = function(n){ return "¥" + Math.round(Number(n||0)).toLocaleString(); };
+
+  function timeOptions(selected){
+    let out = "";
+    for(let h=0; h<24; h++){
+      for(const m of [0,30]){
+        const v = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+        out += `<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
+      }
+    }
+    return out;
+  }
+
+  function priceOptions(selected=""){
+    if(!selected || Number(selected)<=0){
+      return `<option value="">定价为空，不显示价格</option>`;
+    }
+    return `<option value="${Number(selected)}" selected>${yen(selected)}</option>`;
+  }
+
+  function currentGirl(){
+    return girls.find(g=>String(g.name||"")===String(selectedGirl||girlSearch.value||""));
+  }
+
+  function refreshPriceBySelectedGirl(){
+    const g = currentGirl();
+    const p = Number(g?.list_price || 0);
+    priceSelect.innerHTML = priceOptions(p);
+  }
+
+  function splitTags(text){
+    return String(text||"")
+      .split(/[,\s，、]+/)
+      .map(x=>x.trim())
+      .filter(Boolean);
+  }
+
+  window.loadGirls = async function(){
+    try{
+      const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
+      const headers = auth ? {"X-Alice-Role":auth.role} : {};
+      const r = await fetch("/api/all?v=" + Date.now(), {cache:"no-store", headers});
+      const data = await r.json();
+      girls = data.girls || [];
+      const imported = (data.schedules||[]).filter(x=>String(x.note||'').includes('房间安排自动生成')).map(x=>({
+        id:'room_'+x.id, date:x.schedule_date, girl:x.girl_name, start:x.start_time||'00:00', end:x.end_time||'04:00', price:Number(x.price||0), tags:['房间'], goldTags:[]
+      }));
+      const manual = shifts.filter(x=>!String(x.id).startsWith('room_'));
+      shifts = [...imported, ...manual];
+      renderGirlSelect();
+      render();
+    }catch(e){
+      console.error(e);
+      alert("读取女孩表失败，请确认主系统后端正在运行，并已在主页面登录管理员账号。");
+    }
+  };
+
+  function renderGirlSelect(){
+    renderGirlSuggest("");
+  }
+
+  window.addShift = function(){
+    const girlName = selectedGirl || girlSearch.value.trim();
+    if(!girlName){
+      alert("请先选择女孩");
+      return;
+    }
+    const row = {
+      id: editingShiftId || (Date.now() + Math.random()),
+      date: shiftDate.value || today,
+      girl: girlName,
+      start: startSelect.value,
+      end: endSelect.value,
+      price: Number(priceSelect.value || 0),
+      tags: splitTags(tagInput.value),
+      goldTags: splitTags(goldTagInput.value)
+    };
+    if(editingShiftId){
+      shifts = shifts.map(s => String(s.id)===String(editingShiftId) ? row : s);
+      editingShiftId = null;
+      addShiftBtn.textContent = "＋ 新增";
+    }else{
+      shifts.push(row);
+    }
+    goldTagInput.value = "";
+    tagInput.value = "";
+    render();
+    scrollToPreview();
+  };
+
+  window.removeLast = function(){
+    shifts.pop();
+    render();
+  };
+
+  window.deleteShift = function(id){
+    shifts = shifts.filter(s => String(s.id) !== String(id));
+    render();
+  };
+
+  window.editShift = function(id){
+    const s = shifts.find(x => String(x.id)===String(id));
+    if(!s) return;
+    editingShiftId = s.id;
+    shiftDate.value = s.date || today;
+    selectedGirl = s.girl || "";
+    girlSearch.value = s.girl || "";
+    startSelect.value = s.start || "00:00";
+    endSelect.value = s.end || "04:00";
+    priceSelect.innerHTML = priceOptions(Number(s.price||0));
+    tagInput.value = (s.tags||[]).join(" ");
+    goldTagInput.value = (s.goldTags||[]).join(" ");
+    addShiftBtn.textContent = "保存修改";
+    document.querySelector('.card.no-print').scrollIntoView({behavior:'smooth', block:'start'});
+  };
+
+  window.clearAll = function(){
+    if(!confirm("确认清空当前出勤表？")) return;
+    shifts = [];
+    render();
+  };
+
+  window.scrollToPreview = function(){
+    document.getElementById("previewBox").scrollIntoView({behavior:"smooth", block:"start"});
+  };
+
+  function renderTable(){
+    if(!shifts.length){
+      dataTable.innerHTML = '<div class="note">还没有出勤数据。</div>';
+      return;
+    }
+    let h = '<div class="table"><table><thead><tr><th>女孩</th><th>时间</th><th>价格</th><th>TAG</th><th>金色TAG</th><th>操作</th></tr></thead><tbody>';
+    shifts.forEach(s=>{
+      h += `<tr>
+        <td>${s.girl}</td>
+        <td>${s.start}-${s.end}</td>
+        <td>${Number(s.price||0)>0 ? yen(s.price) : ""}</td>
+        <td>${(s.tags||[]).join(" / ")}</td>
+        <td>${(s.goldTags||[]).join(" / ")}</td>
+        <td><button class="soft" onclick="editShift('${s.id}')">编辑</button> <button class="danger" onclick="deleteShift('${s.id}')">删除</button></td>
+      </tr>`;
+    });
+    dataTable.innerHTML = h + "</tbody></table></div>";
+  }
+
+  function renderTags(tags,goldTags){
+    const normal = (tags||[]).map(t=>`<span class="tag">${t}</span>`).join("");
+    const gold = (goldTags||[]).map(t=>`<span class="gold-tag">${t}</span>`).join("");
+    if(!normal && !gold) return "";
+    return `<div class="tag-wrap">${gold}${normal}</div>`;
+  }
+
+  function renderPreview(){
+    const d = shiftDate.value || today;
+    const rows = shifts.filter(s => s.date === d);
+    previewDateText.textContent = "";
+    posterTitle.textContent = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤`;
+    previewCount.textContent = rows.length;
+    shiftCount.textContent = shifts.length;
+
+    if(!rows.length){
+      shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>';
+      return;
+    }
+
+    shiftList.innerHTML = rows.map(s=>{
+      const priceText = Number(s.price||0)>0 ? `<span>${yen(s.price)} /h</span>` : `<span></span>`;
+      return `
+      <div class="shift-card">
+        <div class="shift-name">${s.girl}${renderTags(s.tags,s.goldTags)}</div>
+        <div class="time-price-line"><span>${s.start} - ${s.end}</span>${priceText}</div>
+      </div>`;
+    }).join("");
+  }
+
+  
+  
+  let selectedGirl = "";
+
+  function renderGirlSuggest(keyword=""){
+    const box = document.getElementById("girlSuggest");
+    keyword = String(keyword||"").trim().toLowerCase();
+
+    const rows = girls.filter(g=>{
+      if(!keyword) return true;
+      return String(g.name||"").toLowerCase().includes(keyword);
+    });
+
+    if(!rows.length){
+      box.style.display="none";
+      return;
+    }
+
+    box.innerHTML = rows.map(g=>`
+      <div onclick="chooseGirl('${String(g.name).replace(/'/g,"\\'")}')" 
+           style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f7d7e6;font-weight:800">
+        🎀 ${g.name}
+      </div>
+    `).join("");
+
+    box.style.display = "block";
+  }
+
+  window.chooseGirl = function(name){
+    selectedGirl = name;
+    girlSearch.value = name;
+    girlSuggest.style.display = "none";
+    refreshPriceBySelectedGirl();
+  };
+
+  async function captureShift(){
+    try{
+      const el = document.getElementById("previewBox");
+
+      const canvas = await html2canvas(el,{
+        backgroundColor:"#ffffff",
+        scale:2,
+        useCORS:true
+      });
+
+      const link = document.createElement("a");
+      link.download = "alice_shift.png";
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    }catch(e){
+      console.error(e);
+      alert("截图失败");
+    }
+  }
+
+
+
+  window.setPosterBg = function(e){
+    const file = e.target.files && e.target.files[0];
+    if(!file)return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      document.getElementById("previewBox").style.setProperty("--poster-bg", `url('${ev.target.result}')`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.setPosterSize = function(){
+    const v = posterSize.value;
+    const box = document.getElementById("previewBox");
+    if(v==="360x640"){box.style.width="360px";box.style.minHeight="640px";}
+    else if(v==="400x711"){box.style.width="400px";box.style.minHeight="711px";}
+    else {box.style.width="300px";box.style.minHeight="600px";}
+  };
+
+
+  window.setPosterColor = function(color){
+    document.documentElement.style.setProperty("--poster-text", color);
+    if(window.fontColorPicker) fontColorPicker.value = color;
+  };
+
+  window.setPosterFontSize = function(){
+    const v = fontSizeSelect.value || "1";
+    document.documentElement.style.setProperty("--poster-scale", v);
+  };
+
+  window.setPresetBg = function(type){
+    const box = document.getElementById("previewBox");
+    const bgs = {
+      pink:"linear-gradient(135deg,rgba(255,210,235,.72),rgba(235,220,255,.72)), radial-gradient(circle at 50% 35%,#ffffff55 0 18%,transparent 19%), linear-gradient(160deg,#ff9ccc,#d9c8ff)",
+      night:"linear-gradient(135deg,rgba(20,10,30,.68),rgba(45,15,60,.55)), radial-gradient(circle at 70% 18%,#ffffff77 0 8%,transparent 9%), linear-gradient(160deg,#1a0d2d,#5b1a55,#111827)",
+      gold:"linear-gradient(135deg,rgba(80,40,0,.52),rgba(255,220,120,.45)), radial-gradient(circle at 40% 25%,#fff0aa99 0 16%,transparent 17%), linear-gradient(160deg,#6c4300,#d19b22,#fff2b0)",
+      blue:"linear-gradient(135deg,rgba(160,235,255,.58),rgba(230,245,255,.55)), radial-gradient(circle at 60% 25%,#ffffffaa 0 18%,transparent 19%), linear-gradient(160deg,#b8f0ff,#dff5ff,#f7fbff)"
+    };
+    if(type==="clear"){
+      box.style.removeProperty("--poster-bg");
+      return;
+    }
+    box.style.setProperty("--poster-bg", bgs[type]);
+  };
+
+
+  window.captureShift = async function(){
+    try{
+      const el = document.getElementById("previewBox");
+      const canvas = await html2canvas(el,{
+        backgroundColor:null,
+        scale:3,
+        useCORS:true
+      });
+      canvas.toBlob(blob=>{
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "alice_shift.png";
+        a.click();
+        URL.revokeObjectURL(url);
+      },"image/png");
+    }catch(e){
+      console.error(e);
+      alert("截图失败，请确认浏览器允许下载。");
+    }
+  };
+
+  function weekdayCN(dateStr){
+    const ds=["周日","周一","周二","周三","周四","周五","周六"];
+    const d = new Date(dateStr+"T00:00:00");
+    if(isNaN(d.getTime()))return "";
+    return ds[d.getDay()];
+  }
+
+function buildCopyText(){
+    const d = shiftDate.value || today;
+    const rows = shifts.filter(s => s.date === d);
+    let out = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤\n\n`;
+    rows.forEach(s=>{
+      const tags = (s.tags||[]).map(t=>`（${t}）`).join("");
+      const gold = (s.goldTags||[]).map(t=>`【${t}】`).join("");
+      out += `${gold}${s.girl}${tags}\n`;
+      if(Number(s.price||0)>0){
+        out += `${s.start}-${s.end}             ${Math.round(s.price/1000)}000/h\n\n`;
+      }else{
+        out += `${s.start}-${s.end}\n\n`;
+      }
+    });
+    out += "https://ailisi99.com/";
+    return out;
+  }
+
+  window.copyShiftText = async function(){
+    try{
+      const text = buildCopyText();
+      await navigator.clipboard.writeText(text);
+      alert("已复制出勤文本");
+    }catch(e){
+      console.error(e);
+      alert("复制失败");
+    }
+  };
+
+function render(){
+    renderTable();
+    renderPreview();
+  }
+
+  shiftDate.value = today;
+  startSelect.innerHTML = timeOptions("19:00");
+  endSelect.innerHTML = timeOptions("23:00");
+  priceSelect.innerHTML = priceOptions(0);
+  shiftDate.addEventListener("change", render);
+
+  window.addEventListener("DOMContentLoaded", async()=>{
+    await loadGirls();
+
+    girlSearch.addEventListener("input", e=>{
+      selectedGirl = e.target.value;
+      renderGirlSuggest(e.target.value);
+      refreshPriceBySelectedGirl();
+    });
+
+    girlSearch.addEventListener("focus", ()=>{
+      renderGirlSuggest(girlSearch.value);
+    });
+
+    document.addEventListener("click",(e)=>{
+      if(!e.target.closest("#girlSuggest") && e.target.id!=="girlSearch"){
+        girlSuggest.style.display="none";
+      }
+    });
+
+    render();
+  });
+})();
+</script>
+</body>
+</html>
