@@ -133,7 +133,7 @@ button{cursor:pointer;font-weight:900}
 }
 .shift-row{
   margin-top:2px;
-  font-size:13px;
+  font-size:calc(13px * var(--poster-scale));
   line-height:1.15;
   font-weight:900;
   color:var(--poster-text);
@@ -143,7 +143,7 @@ button{cursor:pointer;font-weight:900}
   display:flex;
   justify-content:space-between;
   gap:8px;
-  font-size:13px;
+  font-size:calc(13px * var(--poster-scale));
   line-height:1.15;
   font-weight:900;
   color:var(--poster-text);
@@ -194,6 +194,22 @@ button{cursor:pointer;font-weight:900}
 table{border-collapse:collapse;width:100%;min-width:760px}
 th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}
 th{background:#fff0f7}
+
+.modal-mask{
+  position:fixed; inset:0; background:rgba(0,0,0,.38); z-index:2000;
+  display:none; align-items:center; justify-content:center; padding:18px;
+}
+.modal{
+  width:min(560px,100%); background:white; border:3px solid var(--line); border-radius:26px;
+  padding:18px; box-shadow:0 20px 60px #0004;
+}
+.modal h3{margin:0 0 12px;color:#e75ca2}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-grid label{font-size:13px;font-weight:900;color:var(--ink)}
+.form-grid input,.form-grid select{width:100%;margin-top:5px}
+.price-pill{display:inline-block;padding:10px 12px;border:2px solid var(--line);border-radius:15px;background:#fff8fb;font-weight:900;color:#e75ca2}
+@media(max-width:640px){.form-grid{grid-template-columns:1fr}}
+
 @media(max-width:980px){
   .toolbar{grid-template-columns:1fr}
   .shift-list{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -219,7 +235,7 @@ th{background:#fff0f7}
 
   <div class="card no-print">
     <h2>出勤录入</h2>
-    <p class="note">女孩名从女孩表读取；价格固定为 ¥10,000～¥30,000 下拉；TAG 可自己输入，多个 TAG 用空格、逗号或顿号分隔。</p>
+    <p class="note">当前列表只显示选定日期；女孩价格强制读取女孩表“定价”，没有定价显示 0；编辑用弹框修改，截图实时同步。</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <button class="soft" onclick="setPresetBg('pink')">粉色学院背景</button>
       <button class="soft" onclick="setPresetBg('night')">夜色背景</button>
@@ -240,12 +256,12 @@ th{background:#fff0f7}
       <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放">
       <select id="priceSelect"></select>
       <select id="tagInput">
+<option value="女孩">女孩</option>
+<option value="筛选">筛选</option>
 <option value="新人">新人</option>
 <option value="推荐">推荐</option>
 <option value="可预约">可预约</option>
 <option value="王牌">王牌</option>
-<option value="筛选">筛选</option>
-<option value="女孩">女孩</option>
 </select><input id="goldTagInput" placeholder="金色TAG 例：TOP 回归 王牌">
       <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
@@ -262,6 +278,36 @@ th{background:#fff0f7}
   <div class="card no-print">
     <h2>当前列表</h2>
     <div id="dataTable"></div>
+
+    <div id="editModalMask" class="modal-mask">
+      <div class="modal">
+        <h3>编辑当前出勤</h3>
+        <div class="form-grid">
+          <label>女孩
+            <select id="editGirlSelect" onchange="syncEditPrice()"></select>
+          </label>
+          <label>定价
+            <div id="editPriceShow" class="price-pill">¥0</div>
+          </label>
+          <label>开始时间
+            <select id="editStartSelect"></select>
+          </label>
+          <label>结束时间
+            <select id="editEndSelect"></select>
+          </label>
+          <label>第一个TAG
+            <select id="editTagSelect"><option value="女孩">女孩</option><option value="新人">新人</option><option value="推荐">推荐</option><option value="可预约">可预约</option><option value="王牌">王牌</option><option value="筛选">筛选</option></select>
+          </label>
+          <label>金色TAG
+            <input id="editGoldTagInput" placeholder="例：TOP 回归 王牌">
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+          <button class="soft" onclick="closeEditModal()">取消</button>
+          <button class="primary" onclick="saveEditModal()">保存修改</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="preview" id="previewBox">
@@ -276,52 +322,76 @@ th{background:#fff0f7}
   const today = new Date().toISOString().slice(0,10);
   let girls = [];
   let shifts = [];
+  let selectedGirl = "";
   let editingShiftId = null;
 
   window.yen = function(n){ return "¥" + Math.round(Number(n||0)).toLocaleString(); };
 
+  function escapeHtml(v){
+    return String(v ?? "").replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  }
+  function jsStr(v){ return String(v ?? "").replace(/\\/g,"\\\\").replace(/'/g,"\\'"); }
+
+  function normalizeTime(t){
+    t = String(t || "").trim();
+    const m = t.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+    if(!m) return t || "24:00";
+    let h = Number(m[1]), min = Number(m[2] || 0);
+    if(h >= 0 && h <= 5) h += 24;
+    return String(h).padStart(2,"0") + ":" + String(min).padStart(2,"0");
+  }
+
+  function displayTime(t){
+    const nt = normalizeTime(t);
+    const m = nt.match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return nt;
+    const h = Number(m[1]);
+    const mm = m[2];
+    const showH = h >= 24 ? h - 24 : h;
+    return mm === "00" ? `${showH}点` : `${showH}点${mm}分`;
+  }
+
   function timeOptions(selected){
+    selected = normalizeTime(selected);
     let out = "";
     for(let h=12; h<=29; h++){
       for(const m of [0,30]){
         const v = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
-        out += `<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
+        out += `<option value="${v}" ${v===selected?"selected":""}>${displayTime(v)}</option>`;
       }
     }
     return out;
   }
 
-  function priceOptions(selected=""){
-    if(!selected || Number(selected)<=0){
-      return `<option value="">定价为空，不显示价格</option>`;
-    }
-    return `<option value="${Number(selected)}" selected>${yen(selected)}</option>`;
+  function splitTags(text){
+    return String(text||"").split(/[,\s，、]+/).map(x=>x.trim()).filter(Boolean);
   }
 
-  function currentGirl(){
-    return girls.find(g=>String(g.name||"")===String(selectedGirl||girlSearch.value||""));
+  function getGirlByName(name){
+    return girls.find(g => String(g.name||"") === String(name||""));
+  }
+  function getGirlPrice(name){
+    const g = getGirlByName(name);
+    return Number(g?.list_price || 0);
+  }
+  function currentGirl(){ return getGirlByName(selectedGirl || girlSearch.value); }
+
+  function priceOptions(selected=""){
+    const p = Number(selected || 0);
+    if(p <= 0) return `<option value="0" selected>¥0（女孩表未设置定价）</option>`;
+    return `<option value="${p}" selected>${yen(p)}</option>`;
   }
 
   function refreshPriceBySelectedGirl(){
-    const g = currentGirl();
-    const p = Number(g?.list_price || 0);
+    const p = Number(currentGirl()?.list_price || 0);
     priceSelect.innerHTML = priceOptions(p);
   }
 
-
   function applyPreviewStyle(){
-    const size = fontSizeRange?.value || 20;
-    const bg = bgSizeRange?.value || 100;
-    document.documentElement.style.setProperty("--preview-font", size+"px");
-    previewBox.style.backgroundSize = bg + "%";
-    document.querySelectorAll('.shift-name,.shift-time').forEach(el=>el.style.fontSize=size+'px');
-  }
-
-  function splitTags(text){
-    return String(text||"")
-      .split(/[,\s，、]+/)
-      .map(x=>x.trim())
-      .filter(Boolean);
+    const scale = Number(fontSizeRange?.value || 20) / 20;
+    const bg = Number(bgSizeRange?.value || 100);
+    document.documentElement.style.setProperty("--poster-scale", String(scale));
+    previewBox.style.backgroundSize = bg + "% auto";
   }
 
   window.loadGirls = async function(){
@@ -331,165 +401,117 @@ th{background:#fff0f7}
       const r = await fetch("/api/all?v=" + Date.now(), {cache:"no-store", headers});
       const data = await r.json();
       girls = data.girls || [];
-      const imported = (data.schedules||[]).filter(x=>String(x.note||'').includes('房间安排自动生成')).map(x=>({
-        id:'room_'+x.id, date:x.schedule_date, girl:x.girl_name, start:x.start_time||'00:00', end:x.end_time||'04:00', price:Number(x.price||0), tags:['房间'], goldTags:[]
-      }));
-      const manual = shifts.filter(x=>!String(x.id).startsWith('room_'));
+      const imported = (data.schedules||[])
+        .filter(x => String(x.status||"出勤") === "出勤")
+        .map(x => ({
+          id:"room_"+x.id,
+          date:x.schedule_date,
+          girl:x.girl_name,
+          start:normalizeTime(x.start_time || "24:00"),
+          end:normalizeTime(x.end_time || "28:00"),
+          tags:["女孩"],
+          goldTags:String(x.note||"").includes("房间安排自动生成") ? ["房间"] : [],
+          source:"schedule"
+        }));
+      const manual = shifts.filter(x => x.source === "manual");
       shifts = [...imported, ...manual];
       renderGirlSelect();
+      refreshPriceBySelectedGirl();
       render();
     }catch(e){
       console.error(e);
-      alert("读取女孩表失败，请确认主系统后端正在运行，并已在主页面登录管理员账号。");
+      alert("读取女孩表/房间安排失败，请确认主系统后端正在运行，并已登录管理员账号。");
     }
   };
 
-  function renderGirlSelect(){
-    renderGirlSuggest("");
-  }
+  function renderGirlSelect(){ renderGirlSuggest(""); }
 
   window.addShift = function(){
     const girlName = selectedGirl || girlSearch.value.trim();
-    if(!girlName){
-      alert("请先选择女孩");
-      return;
-    }
-    const row = {
-      id: editingShiftId || (Date.now() + Math.random()),
-      date: shiftDate.value || today,
-      girl: girlName,
-      start: startSelect.value,
-      end: endSelect.value,
-      price: Number(priceSelect.value || 0),
-      tags: splitTags(tagInput.value),
-      goldTags: splitTags(goldTagInput.value)
-    };
-    if(editingShiftId){
-      shifts = shifts.map(s => String(s.id)===String(editingShiftId) ? row : s);
-      editingShiftId = null;
-      addShiftBtn.textContent = "＋ 新增";
-    }else{
-      shifts.push(row);
-    }
+    if(!girlName){ alert("请先选择女孩"); return; }
+    shifts.push({
+      id:"manual_" + Date.now() + "_" + Math.random(),
+      source:"manual",
+      date:shiftDate.value || today,
+      girl:girlName,
+      start:normalizeTime(startSelect.value),
+      end:normalizeTime(endSelect.value),
+      tags:[tagInput.value || "女孩"],
+      goldTags:splitTags(goldTagInput.value)
+    });
     goldTagInput.value = "";
-    tagInput.value = "新人";
+    tagInput.value = "女孩";
     render();
     scrollToPreview();
   };
 
   window.removeLast = function(){
-    shifts.pop();
+    const d = shiftDate.value || today;
+    const idx = shifts.map((s,i)=>[s,i]).filter(([s])=>s.date===d).map(([,i])=>i).pop();
+    if(idx !== undefined) shifts.splice(idx,1);
     render();
   };
-
-  window.deleteShift = function(id){
-    shifts = shifts.filter(s => String(s.id) !== String(id));
-    render();
-  };
-
-  window.editShift = function(id){
-    const s = shifts.find(x => String(x.id)===String(id));
-    if(!s) return;
-    editingShiftId = s.id;
-    shiftDate.value = s.date || today;
-    selectedGirl = s.girl || "";
-    girlSearch.value = s.girl || "";
-    startSelect.value = s.start || "00:00";
-    endSelect.value = s.end || "04:00";
-    priceSelect.innerHTML = priceOptions(Number(s.price||0));
-    tagInput.value = (s.tags||[]).join(" ");
-    goldTagInput.value = (s.goldTags||[]).join(" ");
-    addShiftBtn.textContent = "保存修改";
-    document.querySelector('.card.no-print').scrollIntoView({behavior:'smooth', block:'start'});
-  };
-
+  window.deleteShift = function(id){ shifts = shifts.filter(s => String(s.id) !== String(id)); render(); };
   window.clearAll = function(){
-    if(!confirm("确认清空当前出勤表？")) return;
-    shifts = [];
+    const d = shiftDate.value || today;
+    if(!confirm("确认清空当前日期的出勤表？")) return;
+    shifts = shifts.filter(s => s.date !== d);
     render();
   };
+  window.scrollToPreview = function(){ previewBox.scrollIntoView({behavior:"smooth", block:"start"}); };
 
-  window.scrollToPreview = function(){
-    document.getElementById("previewBox").scrollIntoView({behavior:"smooth", block:"start"});
-  };
+  function rowsForDate(){
+    const d = shiftDate.value || today;
+    return shifts.filter(s => s.date === d);
+  }
 
   function renderTable(){
-    if(!shifts.length){
-      dataTable.innerHTML = '<div class="note">还没有出勤数据。</div>';
-      return;
-    }
-    let h = '<div class="table"><table><thead><tr><th>女孩</th><th>时间</th><th>价格</th><th>TAG</th><th>金色TAG</th><th>操作</th></tr></thead><tbody>';
-    shifts.forEach(s=>{
+    const rows = rowsForDate();
+    if(!rows.length){ dataTable.innerHTML = '<div class="note">当前日期还没有出勤数据。房间安排录入后会显示在这里。</div>'; return; }
+    let h = '<div class="table"><table><thead><tr><th>女孩</th><th>时间</th><th>定价</th><th>第一个TAG</th><th>金色TAG</th><th>来源</th><th>操作</th></tr></thead><tbody>';
+    rows.forEach(s=>{
       h += `<tr>
-        <td contenteditable="true" onblur="updateShiftField('${s.id}','girl',this.innerText)">${s.girl}</td>
-        <td><select onchange="updateShiftField('${s.id}','start',this.value)">${timeOptions(s.start)}</select> - <select onchange="updateShiftField('${s.id}','end',this.value)">${timeOptions(s.end)}</select></td>
-        <td><input value="${Number(s.price||0)}" onchange="updateShiftField('${s.id}','price',this.value)"></td>
-        <td><select onchange="updateShiftField('${s.id}','tags',this.value)"><option>新人</option><option>推荐</option><option>可预约</option><option>王牌</option><option>筛选</option><option>女孩</option></select></td>
-        <td>${(s.goldTags||[]).join(" / ")}</td>
-        <td><button class="soft" onclick="editShift('${s.id}')">编辑</button> <button class="danger" onclick="deleteShift('${s.id}')">删除</button></td>
+        <td>${escapeHtml(s.girl)}</td>
+        <td>${escapeHtml(displayTime(s.start))} - ${escapeHtml(displayTime(s.end))}</td>
+        <td>${yen(getGirlPrice(s.girl))}</td>
+        <td>${escapeHtml((s.tags||[])[0] || "女孩")}</td>
+        <td>${escapeHtml((s.goldTags||[]).join(" / "))}</td>
+        <td>${s.source === "manual" ? "手动新增" : "房间安排"}</td>
+        <td><button class="soft" onclick="openEditModal('${jsStr(s.id)}')">编辑</button> <button class="danger" onclick="deleteShift('${jsStr(s.id)}')">删除</button></td>
       </tr>`;
     });
     dataTable.innerHTML = h + "</tbody></table></div>";
   }
 
   function renderTags(tags,goldTags){
-    const normal = (tags||[]).map(t=>`<span class="tag">${t}</span>`).join("");
-    const gold = (goldTags||[]).map(t=>`<span class="gold-tag">${t}</span>`).join("");
-    if(!normal && !gold) return "";
-    return `<div class="tag-wrap">${gold}${normal}</div>`;
+    const normal = (tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join("");
+    const gold = (goldTags||[]).map(t=>`<span class="gold-tag">${escapeHtml(t)}</span>`).join("");
+    return normal || gold ? `<div class="tag-wrap">${gold}${normal}</div>` : "";
   }
 
   function renderPreview(){
     const d = shiftDate.value || today;
-    const rows = shifts.filter(s => s.date === d);
-    previewDateText.textContent = "";
+    const rows = rowsForDate();
     posterTitle.textContent = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤`;
+    previewDateText.textContent = "";
     previewCount.textContent = rows.length;
-    shiftCount.textContent = shifts.length;
-
-    if(!rows.length){
-      shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>';
-      return;
-    }
-
+    shiftCount.textContent = rows.length;
+    if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
     shiftList.innerHTML = rows.map(s=>{
-      const priceText = Number(s.price||0)>0 ? `<span>${yen(s.price)} /h</span>` : `<span></span>`;
-      return `
-      <div class="shift-card">
-        <div class="shift-name">${s.girl}${renderTags(s.tags,s.goldTags)}</div>
-        <div class="time-price-line"><span>${s.start} - ${s.end}</span>${priceText}</div>
-      </div>`;
+      const p = getGirlPrice(s.girl);
+      const priceText = p > 0 ? `<span>${yen(p)} /h</span>` : `<span>¥0</span>`;
+      return `<div class="shift-card"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTime(s.start))} - ${escapeHtml(displayTime(s.end))}</span>${priceText}</div></div>`;
     }).join("");
   }
 
-  
-  
-  let selectedGirl = "";
-
   function renderGirlSuggest(keyword=""){
-    const box = document.getElementById("girlSuggest");
+    const box = girlSuggest;
     keyword = String(keyword||"").trim().toLowerCase();
-
-    const rows = girls.filter(g=>{
-      if(!keyword) return true;
-      return String(g.name||"").toLowerCase().includes(keyword);
-    });
-
-    if(!rows.length){
-      box.style.display="none";
-      return;
-    }
-
-    box.innerHTML = rows.map(g=>`
-      <div onclick="chooseGirl('${String(g.name).replace(/'/g,"\\'")}')" 
-           style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f7d7e6;font-weight:800">
-        🎀 ${g.name}
-      </div>
-    `).join("");
-
+    const rows = girls.filter(g => !keyword || String(g.name||"").toLowerCase().includes(keyword));
+    if(!rows.length){ box.style.display="none"; return; }
+    box.innerHTML = rows.map(g=>`<div onclick="chooseGirl('${jsStr(g.name)}')" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f7d7e6;font-weight:800">🎀 ${escapeHtml(g.name)} <span style="float:right;color:#e75ca2">${yen(g.list_price||0)}</span></div>`).join("");
     box.style.display = "block";
   }
-
   window.chooseGirl = function(name){
     selectedGirl = name;
     girlSearch.value = name;
@@ -497,161 +519,108 @@ th{background:#fff0f7}
     refreshPriceBySelectedGirl();
   };
 
-  async function captureShift(){
-    try{
-      const el = document.getElementById("previewBox");
-
-      const canvas = await html2canvas(el,{
-        backgroundColor:"#ffffff",
-        scale:2,
-        useCORS:true
-      });
-
-      const link = document.createElement("a");
-      link.download = "alice_shift.png";
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    }catch(e){
-      console.error(e);
-      alert("截图失败");
-    }
+  function girlSelectOptions(selected){
+    return girls.map(g=>`<option value="${escapeHtml(g.name)}" ${String(g.name)===String(selected)?"selected":""}>${escapeHtml(g.name)}｜${yen(g.list_price||0)}</option>`).join("");
   }
-
-
-
-  window.setPosterBg = function(e){
-    const file = e.target.files && e.target.files[0];
-    if(!file)return;
-    const reader = new FileReader();
-    reader.onload = function(ev){
-      document.getElementById("previewBox").style.setProperty("--poster-bg", `url('${ev.target.result}')`);
-    };
-    reader.readAsDataURL(file);
+  window.openEditModal = function(id){
+    const s = shifts.find(x => String(x.id) === String(id));
+    if(!s) return;
+    editingShiftId = s.id;
+    editGirlSelect.innerHTML = girlSelectOptions(s.girl);
+    editStartSelect.innerHTML = timeOptions(s.start);
+    editEndSelect.innerHTML = timeOptions(s.end);
+    editTagSelect.value = (s.tags||[])[0] || "女孩";
+    editGoldTagInput.value = (s.goldTags||[]).join(" ");
+    syncEditPrice();
+    editModalMask.style.display = "flex";
   };
-
-  window.setPosterSize = function(){
-    const v = posterSize.value;
-    const box = document.getElementById("previewBox");
-    if(v==="360x640"){box.style.width="360px";box.style.minHeight="640px";}
-    else if(v==="400x711"){box.style.width="400px";box.style.minHeight="711px";}
-    else {box.style.width="300px";box.style.minHeight="600px";}
-  };
-
-
-  window.setPosterColor = function(color){
-    document.documentElement.style.setProperty("--poster-text", color);
-    if(window.fontColorPicker) fontColorPicker.value = color;
-  };
-
-  window.setPosterFontSize = function(){
-    const v = fontSizeSelect.value || "1";
-    document.documentElement.style.setProperty("--poster-scale", v);
+  window.syncEditPrice = function(){ editPriceShow.textContent = yen(getGirlPrice(editGirlSelect.value)); };
+  window.closeEditModal = function(){ editModalMask.style.display = "none"; editingShiftId = null; };
+  window.saveEditModal = function(){
+    const s = shifts.find(x => String(x.id) === String(editingShiftId));
+    if(!s) return closeEditModal();
+    s.girl = editGirlSelect.value;
+    s.start = normalizeTime(editStartSelect.value);
+    s.end = normalizeTime(editEndSelect.value);
+    s.tags = [editTagSelect.value || "女孩"];
+    s.goldTags = splitTags(editGoldTagInput.value);
+    closeEditModal();
+    render();
   };
 
   window.setPresetBg = function(type){
-    const box = document.getElementById("previewBox");
     const bgs = {
       pink:"linear-gradient(135deg,rgba(255,210,235,.72),rgba(235,220,255,.72)), radial-gradient(circle at 50% 35%,#ffffff55 0 18%,transparent 19%), linear-gradient(160deg,#ff9ccc,#d9c8ff)",
       night:"linear-gradient(135deg,rgba(20,10,30,.68),rgba(45,15,60,.55)), radial-gradient(circle at 70% 18%,#ffffff77 0 8%,transparent 9%), linear-gradient(160deg,#1a0d2d,#5b1a55,#111827)",
       gold:"linear-gradient(135deg,rgba(80,40,0,.52),rgba(255,220,120,.45)), radial-gradient(circle at 40% 25%,#fff0aa99 0 16%,transparent 17%), linear-gradient(160deg,#6c4300,#d19b22,#fff2b0)",
       blue:"linear-gradient(135deg,rgba(160,235,255,.58),rgba(230,245,255,.55)), radial-gradient(circle at 60% 25%,#ffffffaa 0 18%,transparent 19%), linear-gradient(160deg,#b8f0ff,#dff5ff,#f7fbff)"
     };
-    if(type==="clear"){
-      box.style.removeProperty("--poster-bg");
-      return;
-    }
-    box.style.setProperty("--poster-bg", bgs[type]);
+    if(type === "clear") previewBox.style.removeProperty("--poster-bg");
+    else previewBox.style.setProperty("--poster-bg", bgs[type]);
   };
-
 
   window.captureShift = async function(){
     try{
-      const el = document.getElementById("previewBox");
-      const canvas = await html2canvas(el,{
-        backgroundColor:null,
-        scale:3,
-        useCORS:true
-      });
+      applyPreviewStyle();
+      const canvas = await html2canvas(previewBox,{backgroundColor:null,scale:3,useCORS:true});
       canvas.toBlob(blob=>{
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = "alice_shift.png";
-        a.click();
-        URL.revokeObjectURL(url);
+        a.href = url; a.download = "alice_shift.png"; a.click(); URL.revokeObjectURL(url);
       },"image/png");
-    }catch(e){
-      console.error(e);
-      alert("截图失败，请确认浏览器允许下载。");
-    }
+    }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许下载。"); }
   };
 
   function weekdayCN(dateStr){
     const ds=["周日","周一","周二","周三","周四","周五","周六"];
     const d = new Date(dateStr+"T00:00:00");
-    if(isNaN(d.getTime()))return "";
-    return ds[d.getDay()];
+    return isNaN(d.getTime()) ? "" : ds[d.getDay()];
   }
-
-function buildCopyText(){
+  function buildCopyText(){
     const d = shiftDate.value || today;
-    const rows = shifts.filter(s => s.date === d);
+    const rows = rowsForDate();
     let out = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤\n\n`;
     rows.forEach(s=>{
       const tags = (s.tags||[]).map(t=>`（${t}）`).join("");
       const gold = (s.goldTags||[]).map(t=>`【${t}】`).join("");
+      const p = getGirlPrice(s.girl);
       out += `${gold}${s.girl}${tags}\n`;
-      if(Number(s.price||0)>0){
-        out += `${s.start}-${s.end}             ${Math.round(s.price/1000)}000/h\n\n`;
-      }else{
-        out += `${s.start}-${s.end}\n\n`;
-      }
+      out += p > 0 ? `${displayTime(s.start)}-${displayTime(s.end)}             ${Math.round(p/1000)}000/h\n\n` : `${displayTime(s.start)}-${displayTime(s.end)}             ¥0\n\n`;
     });
     out += "https://ailisi99.com/";
     return out;
   }
-
   window.copyShiftText = async function(){
-    try{
-      const text = buildCopyText();
-      await navigator.clipboard.writeText(text);
-      alert("已复制出勤文本");
-    }catch(e){
-      console.error(e);
-      alert("复制失败");
-    }
+    try{ await navigator.clipboard.writeText(buildCopyText()); alert("已复制出勤文本"); }
+    catch(e){ console.error(e); alert("复制失败"); }
   };
 
-function render(){
-    renderTable();
-    renderPreview();
-  }
+  function render(){ applyPreviewStyle(); renderTable(); renderPreview(); }
 
   shiftDate.value = today;
   startSelect.innerHTML = timeOptions("19:00");
   endSelect.innerHTML = timeOptions("23:00");
   priceSelect.innerHTML = priceOptions(0);
+  tagInput.value = "女孩";
   shiftDate.addEventListener("change", render);
 
   window.addEventListener("DOMContentLoaded", async()=>{
     await loadGirls();
-
-    girlSearch.addEventListener("input", e=>{
-      selectedGirl = e.target.value;
-      renderGirlSuggest(e.target.value);
-      refreshPriceBySelectedGirl();
+    girlSearch.addEventListener("input", e=>{ selectedGirl = e.target.value; renderGirlSuggest(e.target.value); refreshPriceBySelectedGirl(); });
+    girlSearch.addEventListener("focus", ()=>renderGirlSuggest(girlSearch.value));
+    bgUpload.addEventListener("change", e=>{
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => { previewBox.style.setProperty("--poster-bg", `url("${ev.target.result}")`); applyPreviewStyle(); };
+      reader.readAsDataURL(file);
     });
-
-    girlSearch.addEventListener("focus", ()=>{
-      renderGirlSuggest(girlSearch.value);
+    fontSizeRange.addEventListener("input", render);
+    bgSizeRange.addEventListener("input", applyPreviewStyle);
+    document.addEventListener("click", e=>{
+      if(!e.target.closest("#girlSuggest") && e.target.id !== "girlSearch") girlSuggest.style.display="none";
+      if(e.target === editModalMask) closeEditModal();
     });
-
-    document.addEventListener("click",(e)=>{
-      if(!e.target.closest("#girlSuggest") && e.target.id!=="girlSearch"){
-        girlSuggest.style.display="none";
-      }
-    });
-
     render();
   });
 })();
