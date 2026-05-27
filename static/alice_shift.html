@@ -226,6 +226,7 @@ th{background:#fff0f7}
       <button class="soft" onclick="setPresetBg('gold')">金色背景</button>
       <button class="soft" onclick="setPresetBg('blue')">蓝色清爽背景</button>
       <button class="soft" onclick="setPresetBg('clear')">清除背景</button>
+      <input type="file" id="bgUpload" accept="image/*" style="max-width:220px">
     </div>
     <div class="toolbar">
       <input id="shiftDate" type="date">
@@ -235,8 +236,17 @@ th{background:#fff0f7}
 </div>
       <select id="startSelect"></select>
       <select id="endSelect"></select>
+      <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小">
+      <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放">
       <select id="priceSelect"></select>
-      <input id="tagInput" placeholder="TAG 例：新人 推荐 可预约"><input id="goldTagInput" placeholder="金色TAG 例：TOP 回归 王牌">
+      <select id="tagInput">
+<option value="新人">新人</option>
+<option value="推荐">推荐</option>
+<option value="可预约">可预约</option>
+<option value="王牌">王牌</option>
+<option value="筛选">筛选</option>
+<option value="女孩">女孩</option>
+</select><input id="goldTagInput" placeholder="金色TAG 例：TOP 回归 王牌">
       <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
@@ -272,7 +282,7 @@ th{background:#fff0f7}
 
   function timeOptions(selected){
     let out = "";
-    for(let h=0; h<24; h++){
+    for(let h=12; h<=29; h++){
       for(const m of [0,30]){
         const v = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
         out += `<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
@@ -296,6 +306,15 @@ th{background:#fff0f7}
     const g = currentGirl();
     const p = Number(g?.list_price || 0);
     priceSelect.innerHTML = priceOptions(p);
+  }
+
+
+  function applyPreviewStyle(){
+    const size = fontSizeRange?.value || 20;
+    const bg = bgSizeRange?.value || 100;
+    document.documentElement.style.setProperty("--preview-font", size+"px");
+    previewBox.style.backgroundSize = bg + "%";
+    document.querySelectorAll('.shift-name,.shift-time').forEach(el=>el.style.fontSize=size+'px');
   }
 
   function splitTags(text){
@@ -353,7 +372,7 @@ th{background:#fff0f7}
       shifts.push(row);
     }
     goldTagInput.value = "";
-    tagInput.value = "";
+    tagInput.value = "新人";
     render();
     scrollToPreview();
   };
@@ -402,10 +421,10 @@ th{background:#fff0f7}
     let h = '<div class="table"><table><thead><tr><th>女孩</th><th>时间</th><th>价格</th><th>TAG</th><th>金色TAG</th><th>操作</th></tr></thead><tbody>';
     shifts.forEach(s=>{
       h += `<tr>
-        <td>${s.girl}</td>
-        <td>${s.start}-${s.end}</td>
-        <td>${Number(s.price||0)>0 ? yen(s.price) : ""}</td>
-        <td>${(s.tags||[]).join(" / ")}</td>
+        <td contenteditable="true" onblur="updateShiftField('${s.id}','girl',this.innerText)">${s.girl}</td>
+        <td><select onchange="updateShiftField('${s.id}','start',this.value)">${timeOptions(s.start)}</select> - <select onchange="updateShiftField('${s.id}','end',this.value)">${timeOptions(s.end)}</select></td>
+        <td><input value="${Number(s.price||0)}" onchange="updateShiftField('${s.id}','price',this.value)"></td>
+        <td><select onchange="updateShiftField('${s.id}','tags',this.value)"><option>新人</option><option>推荐</option><option>可预约</option><option>王牌</option><option>筛选</option><option>女孩</option></select></td>
         <td>${(s.goldTags||[]).join(" / ")}</td>
         <td><button class="soft" onclick="editShift('${s.id}')">编辑</button> <button class="danger" onclick="deleteShift('${s.id}')">删除</button></td>
       </tr>`;
