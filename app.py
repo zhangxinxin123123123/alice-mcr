@@ -72,7 +72,7 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
             girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-        defaults=[('customer_type','新客',1),('customer_type','常客',2),('girl_type','普通',1),('girl_status','在职',1),('order_status','已结束',1),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
+        defaults=[('customer_type','新客',1),('customer_type','常客',2),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
         # v16.4: existing databases get the new girl list price column automatically
@@ -147,8 +147,37 @@ def calc_hours(t):
 
 
 
+def parse_service_end_datetime(order_date, service_time):
+    """把 23.30-0.30 / 20:00-21:00 这类预约时间转换为结束 datetime；凌晨自动按次日处理。"""
+    try:
+        base = datetime.strptime(str(order_date), "%Y-%m-%d")
+    except Exception:
+        return None
+    text = str(service_time or "")
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*[-~ー～]\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
+    if not m:
+        return None
+    sh = int(m.group(1)); eh = int(m.group(3)); em = int(m.group(4) or 0)
+    day_add = 0
+    if eh >= 24:
+        day_add = eh // 24
+        eh = eh % 24
+    elif eh < sh or sh >= 24:
+        day_add = 1
+    if sh >= 24 and day_add == 0:
+        day_add = 1
+    try:
+        return base + timedelta(days=day_add, hours=eh, minutes=em)
+    except Exception:
+        return None
 
-
+def auto_finish_reservations(c):
+    """预约结束时间已经超过当前时间时，自动把预约中改成已结束；取消不动。"""
+    now = datetime.now()
+    for o in c.execute("SELECT id,order_date,service_time,order_status FROM orders WHERE COALESCE(order_status,'')='预约中'").fetchall():
+        end_dt = parse_service_end_datetime(o['order_date'], o['service_time'])
+        if end_dt and end_dt < now:
+            c.execute("UPDATE orders SET order_status='已结束', updated_at=CURRENT_TIMESTAMP WHERE id=?", (o['id'],))
 
 
 def next_customer_no(c):
@@ -314,6 +343,7 @@ def index(): return send_from_directory(APP_DIR/'static','index.html')
 def all_data():
     init_db()
     with conn() as c:
+        auto_finish_reservations(c)
         return jsonify({
             'customers':rows(c.execute('SELECT * FROM customers ORDER BY id DESC').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
@@ -519,6 +549,113 @@ def import_chain():
         return jsonify(ok=False, error=str(e)), 500
 
 
+def order_to_chain_line(o, idx, full=True):
+    service_time = str(o['service_time'] or '').strip()
+    price = int(o['received_amount'] or 0)
+    remark = str(o['remark'] or '').strip()
+    if full:
+        # 完整版：时间/价格/客户ID/客户名/备注
+        parts = [service_time, str(price), str(o['customer_no'] or '').strip(), str(o['customer_name'] or '').strip()]
+        if remark:
+            parts.append(remark)
+    else:
+        # 普通版：只给女孩/群里看的时间、价格、备注，不暴露客户ID和名字
+        parts = [service_time, str(price)]
+        if remark:
+            parts.append(remark)
+    return f"{idx}.{ '/'.join([p for p in parts if p != '']) }"
+
+@app.route('/api/chain_page', methods=['POST'])
+def api_chain_page():
+    init_db()
+    d = request.json or {}
+    date_str = d.get('date') or str(date.today())
+    girl_name = str(d.get('girl_name') or '').strip()
+    with conn() as c:
+        auto_finish_reservations(c)
+        shifts = pure_shift_rows_for_date(c, date_str)
+        # 给每个纯出勤女孩补上女孩表价格/ID，接龙预约用这个自动定价。
+        out_shifts = []
+        for sft in shifts:
+            g = c.execute('SELECT * FROM girls WHERE name=?', (sft.get('girl') or '',)).fetchone()
+            row = dict(sft)
+            row['girl_id'] = g['id'] if g else 0
+            row['price'] = int((g['list_price'] if g else 0) or 0)
+            out_shifts.append(row)
+        if not girl_name and out_shifts:
+            girl_name = out_shifts[0]['girl']
+        orders = rows(c.execute("""SELECT * FROM orders
+            WHERE order_date=? AND girl_name=?
+            ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
+        return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders)
+
+@app.route('/api/chain_order', methods=['POST'])
+def api_chain_order():
+    init_db()
+    d = request.json or {}
+    date_str = d.get('order_date') or str(date.today())
+    girl_id = d.get('girl_id')
+    girl_name = d.get('girl_name') or ''
+    with conn() as c:
+        g = None
+        if girl_id:
+            g = c.execute('SELECT * FROM girls WHERE id=?', (int(girl_id),)).fetchone()
+        if not g:
+            g = ensure_girl(c, girl_name)
+        if not g:
+            return jsonify(ok=False, error='缺少女孩'), 400
+        amount = int(d.get('received_amount') or (g['list_price'] or 0) or 0)
+        create_or_update_order(c, {
+            'id': d.get('id') or None,
+            'order_date': date_str,
+            'service_time': normalize_chain_time_token(d.get('service_time') or ''),
+            'girl_id': g['id'],
+            'received_amount': amount,
+            'customer_raw': d.get('customer_raw') or '',
+            'remark': d.get('remark') or '',
+            'order_status': d.get('order_status') or '预约中',
+            'settlement_status': d.get('settlement_status') or '未结算',
+            'payment_method': d.get('payment_method') or '',
+            'raw_text': d.get('raw_text') or ''
+        })
+        auto_finish_reservations(c)
+    return jsonify(ok=True)
+
+@app.route('/api/orders/status', methods=['POST'])
+def api_order_status():
+    init_db()
+    d = request.json or {}
+    oid = int(d.get('id') or 0)
+    status = str(d.get('order_status') or '').strip()
+    if not oid or not status:
+        return jsonify(ok=False, error='缺少订单ID或状态'), 400
+    with conn() as c:
+        c.execute("UPDATE orders SET order_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, oid))
+    return jsonify(ok=True)
+
+@app.route('/api/chain_export', methods=['POST'])
+def api_chain_export():
+    init_db()
+    d = request.json or {}
+    date_str = d.get('date') or str(date.today())
+    girl_name = str(d.get('girl_name') or '').strip()
+    with conn() as c:
+        auto_finish_reservations(c)
+        orders = c.execute("""SELECT * FROM orders
+            WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'
+            ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()
+        try:
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            header = f"{dt.month:02d}{dt.day:02d}{girl_name}"
+            display_header = f"{dt.month}月{dt.day}日 {girl_name} 接龙"
+        except Exception:
+            header = f"{date_str} {girl_name}"
+            display_header = f"{date_str} {girl_name} 接龙"
+        full_lines = [header] + [order_to_chain_line(o, i, True) for i, o in enumerate(orders, start=1)]
+        basic_lines = [display_header] + [order_to_chain_line(o, i, False) for i, o in enumerate(orders, start=1)]
+        return jsonify(ok=True, full='\n'.join(full_lines), basic='\n'.join(basic_lines), count=len(orders))
+
+
 @app.route("/api/db_info")
 def api_db_info():
     init_db()
@@ -528,7 +665,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v16_5_user_permission_stats_daily_only",
+            "version": "v17_chain_reservation",
             "port": 5057,
         })
 
@@ -547,28 +684,13 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v16_5_user_permission_stats_daily_only",
+            "version": "v17_chain_reservation",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
         })
-
-@app.route("/api/db_info")
-def api_db_info_v10():
-    init_db()
-    with conn() as c:
-        return jsonify({
-            "ok": True,
-            "version": "v16_5_user_permission_stats_daily_only",
-            "port": 5057,
-            "db_path": str(DB_PATH),
-            "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
-            "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
-            "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-        })
-
 
 
 @app.route("/api/enums", methods=["POST"])
