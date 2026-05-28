@@ -1,16 +1,17 @@
 
-import re, math, sqlite3, webbrowser, threading
+import re, math, sqlite3, webbrowser, threading, os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
-APP_DIR=Path(__file__).resolve().parent; DB_PATH=APP_DIR/'alice_academy_mcr.db'
+APP_DIR=Path(__file__).resolve().parent
+DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db' if Path('/var/data').exists() else str(APP_DIR/'alice_academy_mcr.db')))
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
 
 # 固定登录账号：需要改账号密码就在这里改
 USERS = {
-    "admin": {"password": "admin789", "role": "admin", "label": "管理员"},
+    "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
 PUBLIC_PATHS = {"/", "/api/login", "/api/health", "/api/db_info"}
@@ -64,6 +65,13 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, assignment_date TEXT NOT NULL, hotel_name TEXT NOT NULL, room_no TEXT NOT NULL,
             girl_id INTEGER DEFAULT 0, girl_name TEXT DEFAULT '', daily_cost INTEGER DEFAULT 0, note TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(assignment_date, hotel_name, room_no))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS pure_shifts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, shift_date TEXT NOT NULL, girl_name TEXT NOT NULL,
+            start_time TEXT DEFAULT '19:00', end_time TEXT DEFAULT '23:00', tags TEXT DEFAULT '', gold_tags TEXT DEFAULT '',
+            sort_order INTEGER DEFAULT 0, source TEXT DEFAULT 'manual', note TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
+            girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         defaults=[('customer_type','新客',1),('customer_type','常客',2),('girl_type','普通',1),('girl_status','在职',1),('order_status','已结束',1),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
@@ -98,7 +106,7 @@ def api_login():
 
 
 def conn():
-    c=sqlite3.connect("/var/data/alice_academy_mcr.db"); c.row_factory=sqlite3.Row; return c
+    c=sqlite3.connect(DB_PATH); c.row_factory=sqlite3.Row; return c
 def rows(rs): return [dict(r) for r in rs]
 def yen_to_int(s):
     s=str(s or '').strip().replace('（','').replace('）','').replace('(','').replace(')','').replace(',','').replace('¥','').replace('円','')
@@ -735,6 +743,114 @@ def api_delete_room_assignment(item_id):
 def api_delete_hotel_room(item_id):
     with conn() as c:
         c.execute('DELETE FROM hotel_rooms WHERE id=?', (item_id,))
+    return jsonify(ok=True)
+
+
+def normalize_tag_text(text):
+    """普通TAG统一为空格分隔；兼容旧分号输入。"""
+    return " ".join(re.sub(r"[;；]+", " ", str(text or "")).split())
+
+def normalize_gold_tag_text(text):
+    return " ".join(re.sub(r"[;；]+", " ", str(text or "")).split())
+
+def pure_shift_rows_for_date(c, date_str):
+    pure = []
+    for r in c.execute("SELECT * FROM pure_shifts WHERE shift_date=? ORDER BY sort_order ASC,id ASC", (date_str,)).fetchall():
+        pure.append({
+            'id': f"pure_{r['id']}", 'raw_id': r['id'], 'date': r['shift_date'], 'girl': r['girl_name'],
+            'start': r['start_time'], 'end': r['end_time'], 'tags': normalize_tag_text(r['tags']),
+            'goldTags': normalize_gold_tag_text(r['gold_tags']), 'source': 'manual', 'sort_order': r['sort_order'] or 0
+        })
+    schedules = []
+    for r in c.execute("SELECT * FROM girl_schedules WHERE schedule_date=? AND COALESCE(status,'出勤')='出勤' ORDER BY id ASC", (date_str,)).fetchall():
+        mem = c.execute("SELECT tags FROM girl_tag_memory WHERE girl_name=?", (r['girl_name'],)).fetchone()
+        g = c.execute("SELECT tags FROM girls WHERE name=?", (r['girl_name'],)).fetchone()
+        tag_text = normalize_tag_text((mem['tags'] if mem else '') or (g['tags'] if g else ''))
+        schedules.append({
+            'id': f"schedule_{r['id']}", 'raw_id': r['id'], 'date': r['schedule_date'], 'girl': r['girl_name'],
+            'start': r['start_time'] or '00:00', 'end': r['end_time'] or '04:00', 'tags': tag_text,
+            'goldTags': '房间' if '房间安排自动生成' in str(r['note'] or '') else '', 'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
+        })
+    return pure + schedules
+
+def copy_yesterday_pure_if_empty(c, date_str):
+    try:
+        d = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except Exception:
+        return 0
+    today_count = len(pure_shift_rows_for_date(c, date_str))
+    if today_count > 0:
+        return 0
+    yday = str(d - timedelta(days=1))
+    yrows = pure_shift_rows_for_date(c, yday)
+    for idx, r in enumerate(yrows, start=1):
+        c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source,note)
+                     VALUES(?,?,?,?,?,?,?,?,?)""", (date_str, r['girl'], r['start'], r['end'], normalize_tag_text(r.get('tags','')), normalize_gold_tag_text(r.get('goldTags','')), idx, 'manual', '从昨日纯出勤自动复制'))
+    return len(yrows)
+
+@app.route('/api/pure_shifts', methods=['GET'])
+def api_pure_shifts_get():
+    init_db()
+    date_str = request.args.get('date') or str(date.today())
+    autocopy = str(request.args.get('autocopy') or '') in ('1','true','yes')
+    with conn() as c:
+        copied = copy_yesterday_pure_if_empty(c, date_str) if autocopy else 0
+        shifts = pure_shift_rows_for_date(c, date_str)
+        tags = {r['girl_name']: normalize_tag_text(r['tags']) for r in c.execute('SELECT * FROM girl_tag_memory').fetchall()}
+        return jsonify(ok=True, shifts=shifts, girl_tags=tags, copied=copied)
+
+@app.route('/api/pure_shifts', methods=['POST'])
+def api_pure_shifts_save():
+    init_db()
+    d = request.json or {}
+    shift_date = d.get('date') or d.get('shift_date') or str(date.today())
+    girl = str(d.get('girl') or d.get('girl_name') or '').strip()
+    if not girl:
+        return jsonify(ok=False, error='女孩名不能为空'), 400
+    start = str(d.get('start') or d.get('start_time') or '19:00').strip()
+    end = str(d.get('end') or d.get('end_time') or '23:00').strip()
+    tags = normalize_tag_text(d.get('tags') if not isinstance(d.get('tags'), list) else ' '.join(d.get('tags')))
+    gold_tags = normalize_gold_tag_text(d.get('goldTags') if not isinstance(d.get('goldTags'), list) else ' '.join(d.get('goldTags')))
+    raw_id = str(d.get('id') or '')
+    with conn() as c:
+        c.execute("""INSERT INTO girl_tag_memory(girl_name,tags,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
+                     ON CONFLICT(girl_name) DO UPDATE SET tags=excluded.tags, updated_at=CURRENT_TIMESTAMP""", (girl, tags))
+        if raw_id.startswith('pure_'):
+            sid = int(raw_id.split('_',1)[1])
+            c.execute("""UPDATE pure_shifts SET shift_date=?,girl_name=?,start_time=?,end_time=?,tags=?,gold_tags=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, girl, start, end, tags, gold_tags, sid))
+            return jsonify(ok=True, id=f'pure_{sid}')
+        if raw_id.startswith('schedule_'):
+            sid = int(raw_id.split('_',1)[1])
+            g = c.execute('SELECT id FROM girls WHERE name=?', (girl,)).fetchone()
+            c.execute("""UPDATE girl_schedules SET schedule_date=?, girl_id=?, girl_name=?, start_time=?, end_time=?, price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, int(g['id']) if g else 0, girl, start, end, 0, sid))
+            return jsonify(ok=True, id=f'schedule_{sid}')
+        max_sort = c.execute('SELECT COALESCE(MAX(sort_order),0) AS m FROM pure_shifts WHERE shift_date=?', (shift_date,)).fetchone()['m']
+        cur = c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source)
+                           VALUES(?,?,?,?,?,?,?,?)""", (shift_date, girl, start, end, tags, gold_tags, int(max_sort or 0)+1, 'manual'))
+        return jsonify(ok=True, id=f"pure_{cur.lastrowid}")
+
+@app.route('/api/pure_shifts/delete', methods=['POST'])
+def api_pure_shifts_delete():
+    init_db()
+    d = request.json or {}
+    raw_id = str(d.get('id') or '')
+    with conn() as c:
+        if raw_id.startswith('pure_'):
+            c.execute('DELETE FROM pure_shifts WHERE id=?', (int(raw_id.split('_',1)[1]),))
+        elif raw_id.startswith('schedule_'):
+            c.execute('DELETE FROM girl_schedules WHERE id=?', (int(raw_id.split('_',1)[1]),))
+        else:
+            return jsonify(ok=False, error='id错误'), 400
+    return jsonify(ok=True)
+
+@app.route('/api/pure_shifts/clear', methods=['POST'])
+def api_pure_shifts_clear():
+    init_db()
+    d = request.json or {}
+    date_str = d.get('date') or str(date.today())
+    with conn() as c:
+        c.execute('DELETE FROM pure_shifts WHERE shift_date=?', (date_str,))
+        c.execute("DELETE FROM girl_schedules WHERE schedule_date=?", (date_str,))
     return jsonify(ok=True)
 
 def open_browser(): webbrowser.open('http://127.0.0.1:5057')
