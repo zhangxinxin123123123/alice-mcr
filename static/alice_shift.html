@@ -255,8 +255,8 @@ th{background:#fff0f7}
       <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小">
       <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放">
       <select id="priceSelect"></select>
-      <input id="tagInput" placeholder="普通TAG，分号分隔 例：女孩;新人;可预约" value="女孩">
-      <input id="goldTagInput" placeholder="金色TAG，分号分隔 例：TOP;回归;王牌">
+      <input id="tagInput" placeholder="普通TAG，空格分隔 例：新人 可预约 会喝酒" value="">
+      <input id="goldTagInput" placeholder="金色TAG，空格分隔 例：TOP 回归 王牌">
       <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
@@ -290,7 +290,7 @@ th{background:#fff0f7}
             <select id="editEndSelect"></select>
           </label>
           <label>普通TAG
-            <input id="editTagInput" placeholder="分号分隔 例：女孩;新人;可预约">
+            <input id="editTagInput" placeholder="空格分隔 例：新人 可预约 会喝酒">
           </label>
           <label>金色TAG
             <input id="editGoldTagInput" placeholder="例：TOP 回归 王牌">
@@ -364,7 +364,7 @@ th{background:#fff0f7}
   }
 
   function splitTags(text){
-    return String(text||"").split(/[;；]+/).map(x=>x.trim()).filter(Boolean);
+    return String(text||"").replace(/[;；]+/g," ").split(/\s+/).map(x=>x.trim()).filter(Boolean);
   }
 
   function getGirlByName(name){
@@ -393,70 +393,103 @@ th{background:#fff0f7}
     document.documentElement.style.setProperty("--poster-scale", String(scale));
     previewBox.style.backgroundSize = bg + "% auto";
   }
+  function apiHeaders(){
+    const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
+    return {"Content-Type":"application/json", ...(auth ? {"X-Alice-Role":auth.role} : {})};
+  }
+
+  async function loadPureShifts(autocopy=false){
+    const d = shiftDate.value || today;
+    const r = await fetch(`/api/pure_shifts?date=${encodeURIComponent(d)}&autocopy=${autocopy?1:0}&v=${Date.now()}`, {cache:"no-store", headers:apiHeaders()});
+    const data = await r.json();
+    if(!data.ok) throw new Error(data.error || "读取纯出勤失败");
+    shifts = (data.shifts || []).map(x => ({
+      id:x.id,
+      date:x.date,
+      girl:x.girl,
+      start:normalizeTime(x.start || "19:00"),
+      end:normalizeTime(x.end || "23:00"),
+      tags:splitTags(x.tags || ""),
+      goldTags:splitTags(x.goldTags || ""),
+      source:x.source || "manual"
+    }));
+    window.girlTagMemory = data.girl_tags || {};
+    render();
+  }
+
+  async function saveShiftToDb(shift){
+    const payload = {id:shift.id, date:shift.date, girl:shift.girl, start:shift.start, end:shift.end, tags:(shift.tags||[]).join(" "), goldTags:(shift.goldTags||[]).join(" ")};
+    const r = await fetch('/api/pure_shifts', {method:'POST', headers:apiHeaders(), body:JSON.stringify(payload)});
+    const data = await r.json();
+    if(!data.ok) throw new Error(data.error || "保存失败");
+    return data.id;
+  }
 
   window.loadGirls = async function(){
     try{
-      const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
-      const headers = auth ? {"X-Alice-Role":auth.role} : {};
-      const r = await fetch("/api/all?v=" + Date.now(), {cache:"no-store", headers});
+      const r = await fetch("/api/all?v=" + Date.now(), {cache:"no-store", headers:apiHeaders()});
       const data = await r.json();
       girls = data.girls || [];
-      const imported = (data.schedules||[])
-        .filter(x => String(x.status||"出勤") === "出勤")
-        .map(x => ({
-          id:"room_"+x.id,
-          date:x.schedule_date,
-          girl:x.girl_name,
-          start:normalizeTime(x.start_time || "24:00"),
-          end:normalizeTime(x.end_time || "28:00"),
-          tags:splitTags(x.tags || x.tag || "女孩"),
-          goldTags:String(x.note||"").includes("房间安排自动生成") ? ["房间"] : [],
-          source:"schedule"
-        }));
-      const manual = shifts.filter(x => x.source === "manual");
-      shifts = [...imported, ...manual];
       renderGirlSelect();
       refreshPriceBySelectedGirl();
-      render();
+      await loadPureShifts(false);
     }catch(e){
       console.error(e);
-      alert("读取女孩表/房间安排失败，请确认主系统后端正在运行，并已登录管理员账号。");
+      alert("读取女孩表/纯出勤失败，请确认后端正在运行，并已登录账号。");
     }
   };
 
   function renderGirlSelect(){ renderGirlSuggest(""); }
 
-  window.addShift = function(){
+  window.addShift = async function(){
     const girlName = selectedGirl || girlSearch.value.trim();
     if(!girlName){ alert("请先选择女孩"); return; }
-    shifts.push({
-      id:"manual_" + Date.now() + "_" + Math.random(),
+    const shift = {
+      id:"",
       source:"manual",
       date:shiftDate.value || today,
       girl:girlName,
       start:normalizeTime(startSelect.value),
       end:normalizeTime(endSelect.value),
-      tags:splitTags(tagInput.value || "女孩"),
+      tags:splitTags(tagInput.value || ""),
       goldTags:splitTags(goldTagInput.value)
-    });
-    goldTagInput.value = "";
-    tagInput.value = "女孩";
-    render();
-    scrollToPreview();
+    };
+    try{
+      shift.id = await saveShiftToDb(shift);
+      shifts.push(shift);
+      window.girlTagMemory = window.girlTagMemory || {};
+      window.girlTagMemory[girlName] = (shift.tags||[]).join(" ");
+      goldTagInput.value = "";
+      tagInput.value = "";
+      render();
+      scrollToPreview();
+    }catch(e){ console.error(e); alert(e.message || "保存失败"); }
   };
 
-  window.removeLast = function(){
+  window.removeLast = async function(){
     const d = shiftDate.value || today;
-    const idx = shifts.map((s,i)=>[s,i]).filter(([s])=>s.date===d).map(([,i])=>i).pop();
-    if(idx !== undefined) shifts.splice(idx,1);
-    render();
+    const last = shifts.filter(s => s.date===d).at(-1);
+    if(last) await deleteShift(last.id);
   };
-  window.deleteShift = function(id){ shifts = shifts.filter(s => String(s.id) !== String(id)); render(); };
-  window.clearAll = function(){
+  window.deleteShift = async function(id){
+    try{
+      const r = await fetch('/api/pure_shifts/delete', {method:'POST', headers:apiHeaders(), body:JSON.stringify({id})});
+      const data = await r.json();
+      if(!data.ok) throw new Error(data.error || "删除失败");
+      shifts = shifts.filter(s => String(s.id) !== String(id));
+      render();
+    }catch(e){ console.error(e); alert(e.message || "删除失败"); }
+  };
+  window.clearAll = async function(){
     const d = shiftDate.value || today;
     if(!confirm("确认清空当前日期的出勤表？")) return;
-    shifts = shifts.filter(s => s.date !== d);
-    render();
+    try{
+      const r = await fetch('/api/pure_shifts/clear', {method:'POST', headers:apiHeaders(), body:JSON.stringify({date:d})});
+      const data = await r.json();
+      if(!data.ok) throw new Error(data.error || "清空失败");
+      shifts = shifts.filter(s => s.date !== d);
+      render();
+    }catch(e){ console.error(e); alert(e.message || "清空失败"); }
   };
   window.scrollToPreview = function(){ previewBox.scrollIntoView({behavior:"smooth", block:"start"}); };
 
@@ -474,7 +507,7 @@ th{background:#fff0f7}
         <td>${escapeHtml(s.girl)}</td>
         <td>${escapeHtml(displayTimeRange(s.start,s.end))}</td>
         <td>${yen(getGirlPrice(s.girl))}</td>
-        <td>${escapeHtml((s.tags||[]).join("；"))}</td>
+        <td>${escapeHtml((s.tags||[]).join(" "))}</td>
         <td>${escapeHtml((s.goldTags||[]).join(" / "))}</td>
         <td>${s.source === "manual" ? "手动新增" : "房间安排"}</td>
         <td><button class="soft" onclick="openEditModal('${jsStr(s.id)}')">编辑</button> <button class="danger" onclick="deleteShift('${jsStr(s.id)}')">删除</button></td>
@@ -517,6 +550,7 @@ th{background:#fff0f7}
     girlSearch.value = name;
     girlSuggest.style.display = "none";
     refreshPriceBySelectedGirl();
+    tagInput.value = (window.girlTagMemory && window.girlTagMemory[name]) ? window.girlTagMemory[name] : "";
   };
 
   function girlSelectOptions(selected){
@@ -529,23 +563,28 @@ th{background:#fff0f7}
     editGirlSelect.innerHTML = girlSelectOptions(s.girl);
     editStartSelect.innerHTML = timeOptions(s.start);
     editEndSelect.innerHTML = timeOptions(s.end);
-    editTagInput.value = (s.tags||[]).join("；");
+    editTagInput.value = (s.tags||[]).join(" ");
     editGoldTagInput.value = (s.goldTags||[]).join(" ");
     syncEditPrice();
     editModalMask.style.display = "flex";
   };
   window.syncEditPrice = function(){ editPriceShow.textContent = yen(getGirlPrice(editGirlSelect.value)); };
   window.closeEditModal = function(){ editModalMask.style.display = "none"; editingShiftId = null; };
-  window.saveEditModal = function(){
+  window.saveEditModal = async function(){
     const s = shifts.find(x => String(x.id) === String(editingShiftId));
     if(!s) return closeEditModal();
     s.girl = editGirlSelect.value;
     s.start = normalizeTime(editStartSelect.value);
     s.end = normalizeTime(editEndSelect.value);
-    s.tags = splitTags(editTagInput.value || "女孩");
+    s.tags = splitTags(editTagInput.value || "");
     s.goldTags = splitTags(editGoldTagInput.value);
-    closeEditModal();
-    render();
+    try{
+      s.id = await saveShiftToDb(s);
+      window.girlTagMemory = window.girlTagMemory || {};
+      window.girlTagMemory[s.girl] = (s.tags||[]).join(" ");
+      closeEditModal();
+      render();
+    }catch(e){ console.error(e); alert(e.message || "保存失败"); }
   };
 
   window.setPresetBg = function(type){
@@ -601,8 +640,8 @@ th{background:#fff0f7}
   startSelect.innerHTML = timeOptions("19:00");
   endSelect.innerHTML = timeOptions("23:00");
   priceSelect.innerHTML = priceOptions(0);
-  tagInput.value = "女孩";
-  shiftDate.addEventListener("change", render);
+  tagInput.value = "";
+  shiftDate.addEventListener("change", ()=>loadPureShifts(true));
 
   window.addEventListener("DOMContentLoaded", async()=>{
     await loadGirls();
