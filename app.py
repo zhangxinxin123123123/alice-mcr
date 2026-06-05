@@ -46,15 +46,15 @@ def init_db():
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职',
-            take_home_per_hour INTEGER DEFAULT 0, take_home_per_order INTEGER DEFAULT 0, list_price INTEGER DEFAULT 0, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
+            take_home_per_hour INTEGER DEFAULT 0, list_price INTEGER DEFAULT 0, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS orders(
             id INTEGER PRIMARY KEY AUTOINCREMENT, order_date TEXT, service_time TEXT, hours REAL DEFAULT 1,
             girl_id INTEGER, girl_name TEXT, customer_id INTEGER, customer_no TEXT, customer_name TEXT,
             received_amount INTEGER DEFAULT 0, girl_take_home INTEGER DEFAULT 0, store_profit INTEGER DEFAULT 0, points INTEGER DEFAULT 0,
-            order_status TEXT DEFAULT '已结束', settlement_status TEXT DEFAULT '未结算', payment_method TEXT DEFAULT '',
+            order_status TEXT DEFAULT '已结束', settlement_status TEXT DEFAULT '未结算', payment_method TEXT DEFAULT '现金',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', raw_text TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-        c.execute("""CREATE TABLE IF NOT EXISTS recharge_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, amount INTEGER, payment_method TEXT DEFAULT '', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS recharge_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, amount INTEGER, payment_method TEXT DEFAULT '现金', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS points_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, change_points INTEGER, reason TEXT DEFAULT '', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS enum_values(id INTEGER PRIMARY KEY AUTOINCREMENT, enum_type TEXT NOT NULL, value TEXT NOT NULL, sort_order INTEGER DEFAULT 0, UNIQUE(enum_type,value))""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_schedules(id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_date TEXT, girl_id INTEGER, girl_name TEXT, start_time TEXT, end_time TEXT, price INTEGER DEFAULT 0, status TEXT DEFAULT '出勤', note TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -277,8 +277,9 @@ def ensure_girl(c,name):
     return c.execute('SELECT * FROM girls WHERE name=?',(name,)).fetchone()
 def take_home(g,hours):
     if not g: return 0
-    per=int(g['take_home_per_order'] or 0); hr=int(g['take_home_per_hour'] or 0)
-    return per if per>0 else int(round(hr*float(hours or 1)))
+    # 统一按“小时数 × 女生表中的每小时到手”计算女孩真实到手。
+    hr=int(g['take_home_per_hour'] or 0)
+    return int(round(hr*float(hours or 1)))
 def recalc_girl(c,gid):
     g=c.execute('SELECT * FROM girls WHERE id=?',(gid,)).fetchone()
     if not g: return
@@ -326,14 +327,14 @@ def create_or_update_order(c,d):
 
     if d.get('id'):
         c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),d.get('payment_method',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
         recalc_customer_points(c, cust['id'])
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),d.get('payment_method',''),d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
         recalc_customer_points(c, cust['id'])
 
 
@@ -345,7 +346,7 @@ def all_data():
     with conn() as c:
         auto_finish_reservations(c)
         return jsonify({
-            'customers':rows(c.execute('SELECT * FROM customers ORDER BY id DESC').fetchall()),
+            'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
             'orders':rows(c.execute('SELECT * FROM orders ORDER BY order_date DESC, id DESC').fetchall()),
             'recharges':rows(c.execute('SELECT * FROM recharge_records ORDER BY id DESC').fetchall()),
@@ -371,10 +372,10 @@ def girls():
     d=request.json or {}
     with conn() as c:
         if d.get('id'):
-            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,take_home_per_hour=?,take_home_per_order=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),int(d.get('take_home_per_hour') or 0),int(d.get('take_home_per_order') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),int(d.get('take_home_per_hour') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
             recalc_girl(c,int(d['id']))
         else:
-            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,take_home_per_order,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),int(d.get('take_home_per_hour') or 0),int(d.get('take_home_per_order') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
+            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),int(d.get('take_home_per_hour') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
             row=c.execute('SELECT id FROM girls WHERE name=?',(d.get('name'),)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
@@ -615,7 +616,7 @@ def api_chain_order():
             'remark': d.get('remark') or '',
             'order_status': d.get('order_status') or '预约中',
             'settlement_status': d.get('settlement_status') or '未结算',
-            'payment_method': d.get('payment_method') or '',
+            'payment_method': d.get('payment_method') or '现金',
             'raw_text': d.get('raw_text') or ''
         })
         auto_finish_reservations(c)
