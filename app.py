@@ -30,6 +30,9 @@ def parse_header(lines):
         m = re.search(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\s*([^\s/]+)?", s)
         if m:
             return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", (m.group(4) or '').strip()
+        # 紧凑日期（0524小樱）只用于接龙首行；包含 7.30到8.30 / 7.30-8.30 的预约行不能误判成 0830 日期。
+        if re.search(r"\d{1,2}(?:[:.]\d{1,2})?\s*(?:[-~ー～]|到|至)\s*\d{1,2}(?:[:.]\d{1,2})?", s):
+            continue
         m = re.search(r"(?<!\d)(\d{1,2})(\d{2})\s*([^\s/]+)?", s)
         if m:
             y = date.today().year
@@ -134,7 +137,7 @@ def calc_hours(t):
     text = str(t or "").strip()
     if "包夜" in text:
         return 3.0
-    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*[-~ー～]\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
     if not m:
         return 1.0
     a = parse_time_part(m.group(1), m.group(2))
@@ -154,7 +157,7 @@ def parse_service_end_datetime(order_date, service_time):
     except Exception:
         return None
     text = str(service_time or "")
-    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*[-~ー～]\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
     if not m:
         return None
     sh = int(m.group(1)); eh = int(m.group(3)); em = int(m.group(4) or 0)
@@ -417,17 +420,18 @@ def strip_chain_prefix(line):
 def normalize_chain_time_token(token):
     """
     接龙时间显示标准化。
-    - 23.30-0.30 会保存为 23.30-24.30
-    - 0.30-1.30 会保存为 24.30-25.30
-    这样凌晨 0 点以后不会被看成当天上午。
+    支持 7.30到8.30 / 7.30-8.30 / 23.30-0.30。
+    注意：7.30 表示 7点30分，不会被拼成 7.3030。
     """
     token = re.sub(r"\s+", "", str(token or ""))
-    m = re.match(r"^(\d{1,2})([:.](\d{1,2}))?([-~ー～])(\d{1,2})([:.](\d{1,2}))?$", token)
+    m = re.match(r"^(\d{1,2})(?:[:.](\d{1,2}))?(?:[-~ー～]|到|至)(\d{1,2})(?:[:.](\d{1,2}))?$", token)
     if not m:
         return token
 
-    sh, ssep, sm, dash, eh, esep, em = m.groups()
+    sh, sm, eh, em = m.groups()
     sh_i, eh_i = int(sh), int(eh)
+    sm = sm or ''
+    em = em or ''
 
     # 用户输入 0.30 时，夜场业务里按 24.30 处理。
     if sh_i == 0:
@@ -437,18 +441,16 @@ def normalize_chain_time_token(token):
     if eh_i < sh_i:
         eh_i += 24
 
-    ssep = ssep or ''
-    esep = esep or ''
-    sm = sm or ''
-    em = em or ''
-    return f"{sh_i}{ssep}{sm}-{eh_i}{esep}{em}"
+    start = f"{sh_i}.{sm}" if sm else str(sh_i)
+    end = f"{eh_i}.{em}" if em else str(eh_i)
+    return f"{start}-{end}"
 
 def parse_chain_service_time(line):
     body = strip_chain_prefix(line)
     if "包夜" in body:
         return "包夜 12.00-5.00", body
     # support 5.30-6.30, 10-12, 6.40-7.40, 8:45-9:45, 23.30-0.30
-    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?\s*[-~ー～]\s*\d{1,2}(?:[:.]\d{1,2})?)(.*)$", body)
+    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?\s*(?:[-~ー～]|到|至)\s*\d{1,2}(?:[:.]\d{1,2})?)(.*)$", body)
     if not m:
         return None, body
     return normalize_chain_time_token(m.group(1)), m.group(2)
