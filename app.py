@@ -84,7 +84,7 @@ def init_db():
             customer_account_id INTEGER DEFAULT 0, username TEXT DEFAULT '', line_name TEXT DEFAULT '', phone TEXT DEFAULT '',
             status TEXT DEFAULT '待确认', price INTEGER DEFAULT 0, note TEXT DEFAULT '', order_id INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
-        defaults=[('customer_type','新客',1),('customer_type','常客',2),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
+        defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','常客',5),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
         # v16.4: existing databases get the new girl list price column automatically
@@ -309,6 +309,33 @@ def recalc_customer_points(c, customer_id=None):
         pts = int(row["pts"] or 0)
         spent = int(row["spent"] or 0)
         c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, pts, spent, cid))
+        update_customer_type_by_history(c, cid)
+
+
+def update_customer_type_by_history(c, customer_id=None):
+    """按客户历史自动维护客户类型：充值过=VIP；3单起=老客；2单=回头客；1单=新客。"""
+    if customer_id:
+        ids = [customer_id]
+    else:
+        ids = [r["id"] for r in c.execute("SELECT id FROM customers").fetchall()]
+    for cid in ids:
+        cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
+        if not cust:
+            continue
+        order_count = c.execute("""SELECT COUNT(*) AS n FROM orders
+                                  WHERE customer_id=? AND COALESCE(order_status,'')!='取消'""", (cid,)).fetchone()["n"] or 0
+        recharge_sum = c.execute("SELECT COALESCE(SUM(amount),0) AS s FROM recharge_records WHERE customer_id=?", (cid,)).fetchone()["s"] or 0
+        total_recharge = int(cust["total_recharge"] or 0)
+        recharge_balance = int(cust["recharge_balance"] or 0)
+        if recharge_sum > 0 or total_recharge > 0 or recharge_balance > 0:
+            new_type = "VIP"
+        elif order_count >= 3:
+            new_type = "老客"
+        elif order_count == 2:
+            new_type = "回头客"
+        else:
+            new_type = "新客"
+        c.execute("UPDATE customers SET customer_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_type, cid))
 
 def create_or_update_order(c,d):
     old_customer_id = None
@@ -342,7 +369,9 @@ def create_or_update_order(c,d):
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
+            update_customer_type_by_history(c, old_customer_id)
         recalc_customer_points(c, cust['id'])
+        update_customer_type_by_history(c, cust['id'])
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -362,7 +391,9 @@ def all_data():
         return jsonify({
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
-            'orders':rows(c.execute('SELECT * FROM orders ORDER BY order_date DESC, id DESC').fetchall()),
+            'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type
+                                      FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
+                                      ORDER BY o.order_date DESC, o.id DESC''').fetchall()),
             'recharges':rows(c.execute('SELECT * FROM recharge_records ORDER BY id DESC').fetchall()),
             'points':rows(c.execute('SELECT * FROM points_records ORDER BY id DESC').fetchall()),
             'enums':rows(c.execute('SELECT * FROM enum_values ORDER BY enum_type,sort_order,id').fetchall()),
@@ -377,11 +408,13 @@ def customers():
     with conn() as c:
         no=d.get('customer_no') or next_customer_no(c)
         if str(no).isdigit(): no=f'{int(no):04d}'
-        vals=(no,d.get('name') or f'客户{no}',d.get('customer_type','普通'),d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''))
+        vals=(no,d.get('name') or f'客户{no}',d.get('customer_type','新客'),d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''))
         if d.get('id'):
             c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
+            update_customer_type_by_history(c, int(d.get('id')))
         else:
             c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
+            update_customer_type_by_history(c, c.execute('SELECT last_insert_rowid() AS id').fetchone()['id'])
     return jsonify(ok=True)
 @app.route('/api/girls',methods=['POST'])
 def girls():
