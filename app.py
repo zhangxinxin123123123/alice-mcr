@@ -568,6 +568,96 @@ def order_to_chain_line(o, idx, full=True):
             parts.append(remark)
     return f"{idx}.{ '/'.join([p for p in parts if p != '']) }"
 
+
+
+def _clock_to_minutes(v, default_end=False):
+    """夜场时间转分钟：19:00=1140，0:30=1470，包夜=1740。"""
+    raw = str(v or '').strip()
+    if not raw:
+        return None
+    if '包夜' in raw:
+        return 29 * 60
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?", raw)
+    if not m:
+        return None
+    h = int(m.group(1)); mi = int(m.group(2) or 0)
+    # 纯出勤表常用 19:00-23:00；接龙常用 7.30-9.30 表示晚上。
+    if h <= 5:
+        h += 24
+    elif h < 12:
+        h += 12
+    return h * 60 + mi
+
+def _parse_interval_text(text):
+    t = str(text or '').strip()
+    if not t:
+        return None
+    if '包夜' in t:
+        m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?", t)
+        if not m:
+            return None
+        return (_clock_to_minutes(m.group(0)), 29 * 60)
+    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~ー～]|到|至)\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
+    if not m:
+        return None
+    a, b = _clock_to_minutes(m.group(1)), _clock_to_minutes(m.group(2))
+    if a is None or b is None:
+        return None
+    if b <= a:
+        b += 24 * 60
+    return (a, b)
+
+def _fmt_free_minute(m, is_end=False):
+    if is_end and m >= 24 * 60:
+        return '包夜'
+    h = (m // 60) % 24
+    mi = m % 60
+    # 晚上 19-23 按用户习惯显示 7-11.30。
+    dh = h - 12 if 13 <= h <= 23 else h
+    return f"{dh}.{mi:02d}" if mi else str(dh)
+
+def _subtract_intervals(base, busy):
+    free = [base]
+    for bs, be in sorted(busy):
+        nxt = []
+        for fs, fe in free:
+            if be <= fs or bs >= fe:
+                nxt.append((fs, fe)); continue
+            if bs > fs:
+                nxt.append((fs, min(bs, fe)))
+            if be < fe:
+                nxt.append((max(be, fs), fe))
+        free = [(a,b) for a,b in nxt if b-a >= 1]
+    return free
+
+def build_chain_free_rows(c, date_str):
+    """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
+    result = []
+    for sft in pure_shift_rows_for_date(c, date_str):
+        girl = sft.get('girl') or ''
+        base = (_clock_to_minutes(sft.get('start')), _clock_to_minutes(sft.get('end'), True))
+        if base[0] is None or base[1] is None:
+            continue
+        if base[1] <= base[0]:
+            base = (base[0], base[1] + 24 * 60)
+        busy = []
+        for o in c.execute("""SELECT service_time FROM orders
+                            WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'""", (date_str, girl)).fetchall():
+            itv = _parse_interval_text(o['service_time'])
+            if itv:
+                busy.append(itv)
+        free = _subtract_intervals(base, busy)
+        if not free:
+            continue
+        segments = ''.join([f"{_fmt_free_minute(a)}-{_fmt_free_minute(b, True)}空" for a,b in free])
+        result.append({'girl': girl, 'segments': segments, 'text': f"{girl}{segments}"})
+    try:
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        header = f"{dt.month:02d}{dt.day:02d}出勤"
+    except Exception:
+        header = f"{date_str}出勤"
+    return {'header': header, 'lines': result, 'text': header + ('\n' + '\n'.join(x['text'] for x in result) if result else '') + '\n\nhttps://ailisi99.com/'}
+
 @app.route('/api/chain_page', methods=['POST'])
 def api_chain_page():
     init_db()
@@ -590,7 +680,8 @@ def api_chain_page():
         orders = rows(c.execute("""SELECT * FROM orders
             WHERE order_date=? AND girl_name=?
             ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
-        return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders)
+        free = build_chain_free_rows(c, date_str)
+        return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders, free=free)
 
 @app.route('/api/chain_order', methods=['POST'])
 def api_chain_order():
@@ -656,7 +747,8 @@ def api_chain_export():
             display_header = f"{date_str} {girl_name} 接龙"
         full_lines = [header] + [order_to_chain_line(o, i, True) for i, o in enumerate(orders, start=1)]
         basic_lines = [display_header] + [order_to_chain_line(o, i, False) for i, o in enumerate(orders, start=1)]
-        return jsonify(ok=True, full='\n'.join(full_lines), basic='\n'.join(basic_lines), count=len(orders))
+        free = build_chain_free_rows(c, date_str)
+        return jsonify(ok=True, full='\n'.join(full_lines), basic='\n'.join(basic_lines), count=len(orders), free=free)
 
 
 @app.route("/api/db_info")
