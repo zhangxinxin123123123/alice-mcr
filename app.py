@@ -14,7 +14,7 @@ USERS = {
     "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
-PUBLIC_PATHS = {"/", "/api/login", "/api/health", "/api/db_info"}
+PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
 
 def round_yen_1000_half_up(n):
     """店铺收益按 1000 円单位四舍五入：7500 -> 8000，末尾 500 自动进位。"""
@@ -75,6 +75,15 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
             girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_accounts(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, line_name TEXT NOT NULL, phone TEXT NOT NULL,
+            status TEXT DEFAULT '待审核', member_level TEXT DEFAULT 'svip', customer_id INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_reservations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, reserve_date TEXT NOT NULL, girl_name TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT NOT NULL,
+            customer_account_id INTEGER DEFAULT 0, username TEXT DEFAULT '', line_name TEXT DEFAULT '', phone TEXT DEFAULT '',
+            status TEXT DEFAULT '待确认', price INTEGER DEFAULT 0, note TEXT DEFAULT '', order_id INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         defaults=[('customer_type','新客',1),('customer_type','常客',2),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
@@ -343,6 +352,8 @@ def create_or_update_order(c,d):
 
 @app.route('/')
 def index(): return send_from_directory(APP_DIR/'static','index.html')
+@app.route('/reserve')
+def reserve_page(): return send_from_directory(APP_DIR/'static','reserve.html')
 @app.route('/api/all')
 def all_data():
     init_db()
@@ -357,7 +368,9 @@ def all_data():
             'enums':rows(c.execute('SELECT * FROM enum_values ORDER BY enum_type,sort_order,id').fetchall()),
             'schedules':rows(c.execute('SELECT * FROM girl_schedules ORDER BY schedule_date DESC,id DESC').fetchall()),
             'hotel_rooms':rows(c.execute('SELECT * FROM hotel_rooms ORDER BY hotel_name, room_no').fetchall()),
-            'room_assignments':rows(c.execute('SELECT * FROM room_assignments ORDER BY assignment_date DESC, hotel_name, room_no').fetchall())})
+            'room_assignments':rows(c.execute('SELECT * FROM room_assignments ORDER BY assignment_date DESC, hotel_name, room_no').fetchall()),
+            'customer_accounts':rows(c.execute('SELECT * FROM customer_accounts ORDER BY id DESC').fetchall()),
+            'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall())})
 @app.route('/api/customers',methods=['POST'])
 def customers():
     d=request.json or {}
@@ -1068,6 +1081,166 @@ def api_pure_shifts_clear():
     with conn() as c:
         c.execute('DELETE FROM pure_shifts WHERE shift_date=?', (date_str,))
         c.execute("DELETE FROM girl_schedules WHERE schedule_date=?", (date_str,))
+    return jsonify(ok=True)
+
+
+# ===== 客人提前预约 / 后台审核 =====
+def time_to_min(t):
+    m = re.match(r"^(\d{1,2})(?::|\.)(\d{2})$", str(t or '').strip()) or re.match(r"^(\d{1,2})$", str(t or '').strip())
+    if not m: return None
+    h = int(m.group(1)); mi = int(m.group(2) or 0) if len(m.groups()) > 1 else 0
+    if h < 6: h += 24
+    return h * 60 + mi
+
+def min_to_time(m):
+    h = (int(m) // 60) % 24
+    mi = int(m) % 60
+    return f"{h:02d}:{mi:02d}"
+
+def service_range_minutes(text):
+    if '包夜' in str(text or ''):
+        return 24*60, 29*60
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", str(text or ''))
+    if not m: return None
+    a = int(m.group(1))*60 + int(m.group(2) or 0)
+    b = int(m.group(3))*60 + int(m.group(4) or 0)
+    if int(m.group(1)) < 6: a += 24*60
+    if int(m.group(3)) < 6: b += 24*60
+    if b <= a: b += 24*60
+    return a,b
+
+def ranges_overlap(a,b,c,d):
+    return max(a,c) < min(b,d)
+
+def customer_by_phone_or_username(c, phone, username):
+    return c.execute("SELECT * FROM customer_accounts WHERE phone=? OR username=? ORDER BY id DESC LIMIT 1", (phone, username)).fetchone()
+
+@app.route('/api/customer_register', methods=['POST'])
+def api_customer_register():
+    init_db()
+    d=request.json or {}
+    username=str(d.get('username') or '').strip()
+    line_name=str(d.get('line_name') or '').strip()
+    phone=str(d.get('phone') or '').strip()
+    if not username or not line_name or not phone:
+        return jsonify(ok=False,error='用户名、LINE名、手机号都要填写'),400
+    with conn() as c:
+        old=customer_by_phone_or_username(c, phone, username)
+        if old:
+            return jsonify(ok=True, status=old['status'], account=dict(old), message='已经注册过，请等待审核或直接登录')
+        c.execute("INSERT INTO customer_accounts(username,line_name,phone,status,member_level) VALUES(?,?,?,?,?)", (username,line_name,phone,'待审核','svip'))
+        return jsonify(ok=True,status='待审核',message='注册成功，等待管理员审核')
+
+@app.route('/api/customer_login', methods=['POST'])
+def api_customer_login():
+    init_db()
+    d=request.json or {}
+    username=str(d.get('username') or '').strip()
+    phone=str(d.get('phone') or '').strip()
+    with conn() as c:
+        row=customer_by_phone_or_username(c, phone, username)
+        if not row: return jsonify(ok=False,error='没有找到注册信息，请先注册'),404
+        return jsonify(ok=True, account=dict(row), approved=(row['status']=='已通过'))
+
+@app.route('/api/customer_available', methods=['POST'])
+def api_customer_available():
+    init_db()
+    d=request.json or {}
+    day=d.get('date') or str(date.today())
+    girl_filter=str(d.get('girl_name') or '').strip()
+    with conn() as c:
+        shifts=pure_shift_rows_for_date(c, day)
+        out=[]
+        for sft in shifts:
+            girl=sft['girl']
+            if girl_filter and girl != girl_filter: continue
+            st=time_to_min(sft.get('start') or sft.get('start_time'))
+            en=time_to_min(sft.get('end') or sft.get('end_time'))
+            if st is None or en is None: continue
+            if en <= st: en += 24*60
+            busy=[]
+            for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
+                r=service_range_minutes(o['service_time'])
+                if r: busy.append(r)
+            for rsv in c.execute("SELECT start_time,end_time FROM customer_reservations WHERE reserve_date=? AND girl_name=? AND status IN ('待确认','已确认')", (day,girl)).fetchall():
+                a=time_to_min(rsv['start_time']); b=time_to_min(rsv['end_time'])
+                if a is not None and b is not None:
+                    if b <= a: b += 24*60
+                    busy.append((a,b))
+            slots=[]
+            x=st
+            while x+30 <= en:
+                if not any(ranges_overlap(x,x+30,a,b) for a,b in busy):
+                    slots.append({'start':min_to_time(x),'end':min_to_time(x+30),'label':f"{min_to_time(x)}-{min_to_time(x+30)}"})
+                x += 30
+            out.append({'girl':girl,'start':min_to_time(st),'end':min_to_time(en),'price':sft.get('price') or 0,'slots':slots})
+        return jsonify(ok=True,date=day,girls=out)
+
+@app.route('/api/customer_reserve', methods=['POST'])
+def api_customer_reserve():
+    init_db()
+    d=request.json or {}
+    acc_id=int(d.get('account_id') or 0)
+    day=d.get('date') or str(date.today())
+    girl=str(d.get('girl_name') or '').strip()
+    start=str(d.get('start_time') or '').strip()
+    end=str(d.get('end_time') or '').strip()
+    note=str(d.get('note') or '').strip()
+    if not acc_id or not girl or not start or not end: return jsonify(ok=False,error='预约信息不完整'),400
+    with conn() as c:
+        acc=c.execute('SELECT * FROM customer_accounts WHERE id=?',(acc_id,)).fetchone()
+        if not acc: return jsonify(ok=False,error='请先注册'),404
+        if acc['status']!='已通过': return jsonify(ok=False,error='管理员审核通过后才可以预约'),403
+        # 再检查一次空档，避免重复预约
+        avail=api_customer_available().json if False else None
+        a=time_to_min(start); b=time_to_min(end)
+        if a is None or b is None: return jsonify(ok=False,error='时间格式错误'),400
+        if b <= a: b += 24*60
+        for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
+            r=service_range_minutes(o['service_time'])
+            if r and ranges_overlap(a,b,r[0],r[1]): return jsonify(ok=False,error='这个时间已经被预约'),409
+        for rsv in c.execute("SELECT start_time,end_time FROM customer_reservations WHERE reserve_date=? AND girl_name=? AND status IN ('待确认','已确认')", (day,girl)).fetchall():
+            c1=time_to_min(rsv['start_time']); d1=time_to_min(rsv['end_time'])
+            if c1 is not None and d1 is not None:
+                if d1 <= c1: d1 += 24*60
+                if ranges_overlap(a,b,c1,d1): return jsonify(ok=False,error='这个时间已经被预约'),409
+        price_row=c.execute('SELECT list_price FROM girls WHERE name=?',(girl,)).fetchone()
+        price=int(price_row['list_price'] or 0) if price_row else 0
+        c.execute("""INSERT INTO customer_reservations(reserve_date,girl_name,start_time,end_time,customer_account_id,username,line_name,phone,status,price,note)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (day,girl,start,end,acc_id,acc['username'],acc['line_name'],acc['phone'],'待确认',price,note))
+        return jsonify(ok=True,message='预约已提交，等待管理员确认')
+
+@app.route('/api/customer_accounts/status', methods=['POST'])
+def api_customer_account_status():
+    init_db()
+    d=request.json or {}
+    acc_id=int(d.get('id') or 0); status=d.get('status') or '已通过'
+    with conn() as c:
+        acc=c.execute('SELECT * FROM customer_accounts WHERE id=?',(acc_id,)).fetchone()
+        if not acc: return jsonify(ok=False,error='账号不存在'),404
+        customer_id=int(acc['customer_id'] or 0)
+        if status=='已通过' and not customer_id:
+            cust=ensure_customer(c, acc['username'], f"LINE:{acc['line_name']} 手机:{acc['phone']}")
+            customer_id=cust['id']
+        c.execute("UPDATE customer_accounts SET status=?, member_level='svip', customer_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status,customer_id,acc_id))
+    return jsonify(ok=True)
+
+@app.route('/api/customer_reservations/status', methods=['POST'])
+def api_customer_reservation_status():
+    init_db()
+    d=request.json or {}
+    rid=int(d.get('id') or 0); status=d.get('status') or '已确认'
+    with conn() as c:
+        r=c.execute('SELECT * FROM customer_reservations WHERE id=?',(rid,)).fetchone()
+        if not r: return jsonify(ok=False,error='预约不存在'),404
+        order_id=int(r['order_id'] or 0)
+        if status=='已确认' and not order_id:
+            acc=c.execute('SELECT * FROM customer_accounts WHERE id=?',(r['customer_account_id'],)).fetchone()
+            customer_raw = acc['username'] if acc else r['username']
+            g=c.execute('SELECT id FROM girls WHERE name=?',(r['girl_name'],)).fetchone()
+            create_or_update_order(c, {'order_date':r['reserve_date'], 'girl_id': int(g['id']) if g else 0, 'girl_name':r['girl_name'], 'service_time':f"{r['start_time']}-{r['end_time']}", 'received_amount':int(r['price'] or 0), 'customer_raw':customer_raw, 'remark': '客人网站提前预约 '+(r['note'] or ''), 'order_status':'预约中', 'settlement_status':'未结算'})
+            order_id=c.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
+        c.execute("UPDATE customer_reservations SET status=?, order_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status,order_id,rid))
     return jsonify(ok=True)
 
 def open_browser(): webbrowser.open('http://127.0.0.1:5057')
