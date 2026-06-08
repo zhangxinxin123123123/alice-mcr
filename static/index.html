@@ -113,6 +113,7 @@ body.role-user .stat-chart-only{display:none!important}
  </div>
  <div class="card"><h2>微信格式输出</h2>
   <div class="split"><div><h3>完整版（内部用：含客户ID和名字）</h3><textarea id="chainFullOut" readonly></textarea></div><div><h3>普通版（给女孩/群里看）</h3><textarea id="chainBasicOut" readonly></textarea></div></div>
+  <h3 style="margin-top:14px">全部女孩空闲时间</h3><textarea id="chainFreeOut" readonly></textarea><div style="margin-top:8px"><button class="soft" onclick="copyChainFreeText()">复制空闲时间</button></div>
  </div></section>
 
 
@@ -176,7 +177,7 @@ body.role-user .stat-chart-only{display:none!important}
 
  
  <section id="stats" class="panel">
-  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas></div></div><div class="split stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas></div></div><div class="split stat-chart-only"><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas></div></div>
+  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas><div id="netDayChartTable"></div></div></div><div class="split stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas></div></div><div class="split stat-chart-only"><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas><div id="netMonthChartTable"></div></div></div>
   <div class="card"><h2>日收益表</h2><div id="dailyTable"></div></div>
  </section>
 
@@ -329,6 +330,7 @@ async function loadChainPage(){
   if(!coId.value) coPrice.value=chainState.price||'';
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
   chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
+  if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
   await refreshChainExports();
   renderChainOrders(j.orders||[]);
 }
@@ -363,11 +365,18 @@ async function refreshChainExports(){
   const j=await api('/api/chain_export',{date:cDate.value||todayStr,girl_name:cGirl.value});
   chainFullOut.value=j.full||'';
   chainBasicOut.value=j.basic||'';
+  if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
 }
 async function copyChainText(type){
   await refreshChainExports();
   const txt=type==='basic'?chainBasicOut.value:chainFullOut.value;
   if(!txt){alert('没有可复制的接龙内容');return;}
+  await navigator.clipboard.writeText(txt).catch(()=>{});
+}
+async function copyChainFreeText(){
+  await refreshChainExports();
+  const txt=chainFreeOut.value;
+  if(!txt){alert('没有空闲时间内容');return;}
   await navigator.clipboard.writeText(txt).catch(()=>{});
 }
 
@@ -477,6 +486,20 @@ function renderRevenueTable(el,map,meta={}){
   rows.forEach(r=>{h+=`<tr><td>${r.name}</td><td>${revenueBreakdownText(r.name,r.amount,meta,!!r.isTotal)}</td></tr>`});
   target.innerHTML=h+'</tbody></table></div>';
 }
+
+function renderCostNetTable(el, costMap, filter){
+  const target=document.getElementById(el); if(!target)return;
+  const profitMap=group(filter);
+  const names=[...new Set([...Object.keys(profitMap),...Object.keys(costMap)])].sort((a,b)=>String(a).localeCompare(String(b),'zh-Hans-CN'));
+  const rows=names.map(name=>({name,profit:Number(profitMap[name]||0),cost:Number(costMap[name]||0)})).map(r=>({...r,net:r.profit-r.cost}));
+  const total={name:'合计',profit:rows.reduce((s,r)=>s+r.profit,0),cost:rows.reduce((s,r)=>s+r.cost,0)};
+  total.net=total.profit-total.cost;
+  rows.sort((a,b)=>b.cost-a.cost).push(total);
+  let h='<div class="table" style="margin-top:12px"><table><thead><tr><th>女孩/房间</th><th>店铺收益</th><th>成本</th><th>净利润</th></tr></thead><tbody>';
+  rows.forEach(r=>{h+=`<tr><td>${r.name}</td><td>${yen(r.profit)}</td><td>${yen(r.cost)}</td><td><b>${yen(r.net)}</b></td></tr>`});
+  target.innerHTML=h+'</tbody></table></div>';
+}
+
 const barValuePlugin={id:'barValuePlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar")return;const {ctx}=chart;ctx.save();ctx.font='bold 12px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';chart.data.datasets.forEach((ds,di)=>{const meta=chart.getDatasetMeta(di);meta.data.forEach((bar,i)=>{const v=ds.data[i]||0;ctx.fillText(yen(v),bar.x,bar.y-4);});});ctx.restore();}};
 if(window.Chart && !Chart.registry.plugins.get('barValuePlugin')) Chart.register(barValuePlugin);
 function chart(id,map,meta={}){
@@ -743,8 +766,8 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  const dayMap=group(o=>o.order_date===sd); const dayMeta=chartMeta(o=>o.order_date===sd,dayMap); chart("dayChart",dayMap,dayMeta); renderRevenueTable("dayChartTable",dayMap,dayMeta);
  if(!isUser){
    const monthMap=group(o=>String(o.order_date).startsWith(sm)); chart("monthChart",monthMap,chartMeta(o=>String(o.order_date).startsWith(sm),monthMap));
-   const netDayMap=groupCost(o=>o.order_date===sd); chart("netDayChart",netDayMap,costMeta(o=>o.order_date===sd,netDayMap));
-   const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); barChart("monthDateChart",monthDateMap,{mainLabel:"店铺收益"});
+   const netDayMap=groupCost(o=>o.order_date===sd); chart("netDayChart",netDayMap,costMeta(o=>o.order_date===sd,netDayMap)); renderCostNetTable("netDayChartTable",netDayMap,o=>o.order_date===sd);
+   const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); barChart("monthDateChart",monthDateMap,{mainLabel:"店铺收益"});
  }
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder")}
 document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});

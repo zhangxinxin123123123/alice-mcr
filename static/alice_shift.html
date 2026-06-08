@@ -252,8 +252,13 @@ th{background:#fff0f7}
 </div>
       <select id="startSelect"></select>
       <select id="endSelect"></select>
-      <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小">
-      <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放">
+      <label style="font-size:12px;font-weight:900">字体大小 <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小"></label>
+      <label style="font-size:12px;font-weight:900">字体颜色 <input id="fontColorInput" type="color" value="#00d9ff" title="字体颜色"></label>
+      <button class="soft" onclick="setPresetTextColor('cyan')">青色字</button>
+      <button class="soft" onclick="setPresetTextColor('pink')">粉色字</button>
+      <button class="soft" onclick="setPresetTextColor('white')">白色字</button>
+      <button class="soft" onclick="setPresetTextColor('gold')">金色字</button>
+      <label style="font-size:12px;font-weight:900">背景缩放 <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放"></label>
       <select id="priceSelect"></select>
       <input id="tagInput" placeholder="普通TAG，空格分隔 例：新人 可预约 会喝酒" value="">
       <input id="goldTagInput" placeholder="金色TAG，空格分隔 例：TOP 回归 王牌">
@@ -390,7 +395,9 @@ th{background:#fff0f7}
   function applyPreviewStyle(){
     const scale = Number(fontSizeRange?.value || 20) / 20;
     const bg = Number(bgSizeRange?.value || 100);
+    const textColor = fontColorInput?.value || "#00d9ff";
     document.documentElement.style.setProperty("--poster-scale", String(scale));
+    document.documentElement.style.setProperty("--poster-text", textColor);
     previewBox.style.backgroundSize = bg + "% auto";
   }
   function apiHeaders(){
@@ -587,6 +594,12 @@ th{background:#fff0f7}
     }catch(e){ console.error(e); alert(e.message || "保存失败"); }
   };
 
+  window.setPresetTextColor = function(type){
+    const colors = {cyan:"#00d9ff", pink:"#ff5ca8", white:"#ffffff", gold:"#ffe17a"};
+    if(fontColorInput && colors[type]) fontColorInput.value = colors[type];
+    applyPreviewStyle();
+  };
+
   window.setPresetBg = function(type){
     const bgs = {
       pink:"linear-gradient(135deg,rgba(255,210,235,.72),rgba(235,220,255,.72)), radial-gradient(circle at 50% 35%,#ffffff55 0 18%,transparent 19%), linear-gradient(160deg,#ff9ccc,#d9c8ff)",
@@ -655,6 +668,7 @@ th{background:#fff0f7}
       reader.readAsDataURL(file);
     });
     fontSizeRange.addEventListener("input", render);
+    fontColorInput.addEventListener("input", render);
     bgSizeRange.addEventListener("input", applyPreviewStyle);
     document.addEventListener("click", e=>{
       if(!e.target.closest("#girlSuggest") && e.target.id !== "girlSearch") girlSuggest.style.display="none";
