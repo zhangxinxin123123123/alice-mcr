@@ -52,6 +52,7 @@ body.role-user .stat-chart-only{display:none!important}
   <button class="admin-only" onclick="show('customers',this)">🐰 客户表</button>
   <button class="admin-only" onclick="show('girls',this)">🎀 女孩表</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
+  <button class="admin-only" onclick="show('advanceReserve',this)">📅 提前预约表</button>
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
   <button class="admin-only" onclick="show('schedule',this)">🌸 女孩排班</button>
   <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
@@ -100,6 +101,15 @@ body.role-user .stat-chart-only{display:none!important}
   <button class="primary" onclick="importChain()">导入接龙</button>
   <div id="importCheck" class="note" style="margin-top:14px"></div>
  </div></section>
+
+
+ <section id="advanceReserve" class="panel"><div class="card"><h2>提前预约表 / 客人审核</h2>
+  <p class="note">客人从 <b>/reserve</b> 注册，填写用户名、LINE名、手机号。后台审核通过后自动成为 SVIP，才能在客人预约界面选择女孩空档。</p>
+  <div class="form"><input id="arDate" type="date" onchange="renderAdvanceReserve()"><button class="soft" onclick="arDate.value=todayStr;renderAdvanceReserve()">今天</button><button class="soft" onclick="window.open('/reserve','_blank')">打开客人预约界面</button><button class="soft" onclick="loadAll()">刷新后台数据</button></div>
+ </div>
+ <div class="card"><h2>客户注册审核</h2><div id="customerAccountTable"></div></div>
+ <div class="card"><h2>客人预约管理</h2><div id="customerReservationTable"></div></div>
+ </section>
 
  <section id="chainReserve" class="panel"><div class="card"><h2>接龙预约（二期）</h2>
   <p class="note">从“纯出勤表”读取当天出勤女孩；选择女孩后，下面按微信接龙格式录入预约。保存后会直接写入原来的订单/预约表，旧功能和旧数据表不变。</p>
@@ -188,7 +198,7 @@ body.role-user .stat-chart-only{display:none!important}
 <div class="modal" id="editModal"><div class="box"><h2 id="editTitle">编辑</h2><div id="editFields" class="form"></div><button class="primary" onclick="saveModalEdit()">保存修改</button> <button class="soft" onclick="closeModal()">取消</button></div></div>
 
 <script>
-let data={customers:[],girls:[],orders:[],enums:[],schedules:[]}, charts={}, currentEdit=null;
+let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[]}, charts={}, currentEdit=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
 function authHeaders(){return auth?{"X-Alice-Role":auth.role}:{};}
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
@@ -224,7 +234,7 @@ async function doLogin(){
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
-function show(id,btn){document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);}}
+function show(id,btn){document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);}}
 async function loadAll(){
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
@@ -237,7 +247,7 @@ async function loadAll(){
   }
   data=JSON.parse(text);
   let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
-  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
+  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>v17 接龙预约</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
  }catch(e){
@@ -295,6 +305,21 @@ function table(el,rows,cols,delTable,editFn){
 }
 
 async function del(table,id){if(!confirm("确认删除？"))return;await api(`/api/delete/${table}/${id}`,{});await loadAll()}
+function renderAdvanceReserve(){
+  if(!window.customerAccountTable)return;
+  if(!arDate.value) arDate.value=todayStr;
+  const accRows=(data.customer_accounts||[]).map(a=>({...a,action:`<button class="soft" onclick="setCustomerAccountStatus(${a.id},'已通过')">通过/SVIP</button> <button class="danger" onclick="setCustomerAccountStatus(${a.id},'拒绝')">拒绝</button>`}));
+  let h='<div class="table"><table><thead><tr><th>ID</th><th>用户名</th><th>LINE名</th><th>手机号</th><th>状态</th><th>会员</th><th>注册时间</th><th>操作</th></tr></thead><tbody>';
+  accRows.forEach(a=>{h+=`<tr><td>${a.id}</td><td>${a.username||''}</td><td>${a.line_name||''}</td><td>${a.phone||''}</td><td>${a.status||''}</td><td>${a.member_level||'svip'}</td><td>${a.created_at||''}</td><td>${a.action}</td></tr>`});
+  customerAccountTable.innerHTML=h+'</tbody></table></div>';
+  const rows=(data.customer_reservations||[]).filter(r=>!arDate.value||r.reserve_date===arDate.value);
+  let rhtml='<div class="table"><table><thead><tr><th>日期</th><th>女孩</th><th>时间</th><th>用户名</th><th>LINE</th><th>手机</th><th>状态</th><th>价格</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  rows.forEach(r=>{rhtml+=`<tr><td>${r.reserve_date}</td><td>${r.girl_name}</td><td>${r.start_time}-${r.end_time}</td><td>${r.username||''}</td><td>${r.line_name||''}</td><td>${r.phone||''}</td><td>${r.status||''}</td><td>${yen(r.price||0)}</td><td>${r.note||''}</td><td><button class="soft" onclick="setCustomerReservationStatus(${r.id},'已确认')">确认并转订单</button> <button class="danger" onclick="setCustomerReservationStatus(${r.id},'取消')">取消</button></td></tr>`});
+  customerReservationTable.innerHTML=rhtml+'</tbody></table></div>';
+}
+async function setCustomerAccountStatus(id,status){await api('/api/customer_accounts/status',{id,status});await loadAll();renderAdvanceReserve();}
+async function setCustomerReservationStatus(id,status){await api('/api/customer_reservations/status',{id,status});await loadAll();renderAdvanceReserve();}
+
 function field(label,html){return `<label class="small">${label}<br>${html}</label>`}
 function enumSelect(id,type,selected){return `<select id="${id}">${opts(type,selected)}</select>`}
 function paymentSelect(id,selected="现金"){const vals=["现金","人民币","paypay"];return `<select id="${id}">`+vals.map(v=>`<option value="${v}" ${v===(selected||"现金")?"selected":""}>${v}</option>`).join("")+`</select>`}
@@ -769,7 +794,7 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
    const netDayMap=groupCost(o=>o.order_date===sd); chart("netDayChart",netDayMap,costMeta(o=>o.order_date===sd,netDayMap)); renderCostNetTable("netDayChartTable",netDayMap,o=>o.order_date===sd);
    const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); barChart("monthDateChart",monthDateMap,{mainLabel:"店铺收益"});
  }
- let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder")}
+ let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
 document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});
 
 window.addEventListener("DOMContentLoaded",()=>{applyRole(); if(auth) loadAll();});
