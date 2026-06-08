@@ -30,6 +30,12 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 body.role-user .user-hide{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
+
+.type-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:800;font-size:12px;white-space:nowrap}
+.type-new{background:#e8fff3;color:#088044;border:1px solid #9be3bd}
+.type-return{background:#fff8db;color:#9a6a00;border:1px solid #f0d46a}
+.type-old{background:#eaf2ff;color:#1d5fbf;border:1px solid #9cc3ff}
+.type-vip{background:#f4e8ff;color:#7a2ab8;border:1px solid #d8a8ff}
 </style>
 </head>
 <body>
@@ -265,6 +271,11 @@ function refreshSelects(){
  refreshChainGirlSelect();
 }
 function safe(v){return String(v??"").toLowerCase()} function match(v,q){q=safe(q);return !q||safe(v).includes(q)}
+function customerTypeBadge(v){
+  v=v||'新客';
+  const cls=v==='VIP'?'type-vip':(v==='老客'?'type-old':(v==='回头客'?'type-return':'type-new'));
+  return `<span class="type-badge ${cls}">${v}</span>`;
+}
 function filteredOrders(){return data.orders.filter(o=>(!qOrderDate.value||o.order_date===qOrderDate.value)&&match(o.girl_name,qOrderGirl.value)&&(match(o.customer_no,qOrderCustomer.value)||match(o.customer_name,qOrderCustomer.value))&&match((o.remark||"")+" "+(o.remark2||""),qOrderRemark.value)&&(!qOrderSettle.value||o.settlement_status===qOrderSettle.value))}
 function filteredCustomers(){return data.customers.filter(c=>match(c.customer_no,qCustomerNo.value)&&match(c.name,qCustomerName.value)&&(!qCustomerType.value||c.customer_type===qCustomerType.value)&&match((c.source||"")+" "+(c.contact||"")+" "+(c.remark||"")+" "+(c.remark2||""),qCustomerRemark.value))}
 function filteredGirls(){return data.girls.filter(g=>match(g.name,qGirlName.value)&&(!qGirlType.value||g.girl_type===qGirlType.value)&&match((g.contact||"")+" "+(g.tags||"")+" "+(g.remark||"")+" "+(g.remark2||""),qGirlRemark.value))}
@@ -780,7 +791,7 @@ function groupCost(filter){let m={};(data.room_assignments||[]).filter(r=>filter
 function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).reduce((s,r)=>s+Number(r.daily_cost||0),0);return {mainLabel:'成本',orderCount:(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).length,gross:roomCost};}
 
 function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=auth&&auth.role==="user";kCustomers.textContent=isUser?"—":data.customers.length;kOrders.textContent=isUser?"—":data.orders.length;let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
- table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"received_amount",t:"客人支付",f:yen},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
+ table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"received_amount",t:"客人支付",f:yen},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数"},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
  table("girlsTable",filteredGirls(),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
