@@ -57,11 +57,12 @@ body.role-user .stat-chart-only{display:none!important}
   <button class="admin-only" onclick="show('orders',this)">🧾 订单/预约</button>
   <button class="admin-only" onclick="show('customers',this)">🐰 客户表</button>
   <button class="admin-only" onclick="show('girls',this)">🎀 女孩表</button>
+  <button class="admin-only" onclick="show('settlement',this)">💴 金额结算</button>
+  <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
   <button class="admin-only" onclick="show('advanceReserve',this)">📅 提前预约表</button>
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
-  <button class="admin-only" onclick="show('schedule',this)">🌸 女孩排班</button>
-  <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
+    <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
   <button class="admin-only" onclick="show('enums',this)">⚙️ 枚举类型</button>
   <button class="admin-only" onclick="window.open('/static/alice_shift.html','_blank')">📋 纯出勤表</button>
   <button onclick="show('stats',this)">🥧 收益图表</button>
@@ -95,6 +96,18 @@ body.role-user .stat-chart-only{display:none!important}
  <section id="girls" class="panel"><div class="card"><h2>女孩表</h2><p class="note">女孩名作为业务主键，可以修改，但不能和已有女孩重名。改名成功会同步更新关联订单。</p>
   <div class="form"><input id="qGirlName" placeholder="女孩名"><select id="qGirlType"><option value="">女孩类型全部</option></select><input id="qGirlRemark" placeholder="备注/标签/联系方式"><button class="soft" onclick="clearGirlQuery()">清空筛选</button></div>
   <div id="girlsTable"></div></div>
+ </section>
+
+ <section id="settlement" class="panel"><div class="card"><h2>金额结算</h2>
+  <p class="note">按女孩汇总所有未结算订单。主行显示多日未结算合计；点“展开”可查看不同日期的未结算明细，并可勾选后批量改为已结算或未结算。</p>
+  <div class="form"><input id="settleGirlQ" placeholder="筛选女孩"><button class="soft" onclick="clearSettlementPick()">清空勾选</button><button class="primary" onclick="bulkSettleSettlement('已结算')">勾选改已结算</button><button class="soft" onclick="bulkSettleSettlement('未结算')">勾选改未结算</button></div>
+  <div id="settlementTable"></div></div>
+ </section>
+
+ <section id="quickLinks" class="panel"><div class="card"><h2>链接跳转</h2>
+  <p class="note">保存常用文字或链接。内容如果是 http/https 链接，点击“打开”会跳转；否则会复制内容。</p>
+  <div class="form"><input id="qlId" type="hidden"><select id="qlGroup"><option>排班表</option><option>固定短语</option></select><input id="qlTitle" placeholder="名字"><input id="qlContent" placeholder="内容或链接"><input id="qlSort" placeholder="排序"><button class="primary" onclick="saveQuickLink()">保存</button><button class="soft" onclick="clearQuickLinkForm()">清空</button></div>
+  <div id="quickLinksTable"></div></div>
  </section>
 
  <section id="importer" class="panel"><div class="card"><h2>微信 / LINE 接龙导入</h2>
@@ -204,7 +217,7 @@ body.role-user .stat-chart-only{display:none!important}
 <div class="modal" id="editModal"><div class="box"><h2 id="editTitle">编辑</h2><div id="editFields" class="form"></div><button class="primary" onclick="saveModalEdit()">保存修改</button> <button class="soft" onclick="closeModal()">取消</button></div></div>
 
 <script>
-let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[]}, charts={}, currentEdit=null;
+let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[]}, charts={}, currentEdit=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
 function authHeaders(){return auth?{"X-Alice-Role":auth.role}:{};}
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
@@ -240,7 +253,7 @@ async function doLogin(){
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
-function show(id,btn){document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);}}
+function show(id,btn){document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
@@ -253,7 +266,7 @@ async function loadAll(){
   }
   data=JSON.parse(text);
   let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
-  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
+  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>v17 接龙预约</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
  }catch(e){
@@ -449,7 +462,7 @@ async function saveSchedule(){
 
 function editSchedule(s){
   schId.value=s.id; schDate.value=s.schedule_date; schGirl.value=s.girl_id; schStart.value=s.start_time||""; schEnd.value=s.end_time||""; schPrice.value=s.price||0; schStatus.value=s.status||"出勤"; schNote.value=s.note||"";
-  show("schedule", [...document.querySelectorAll(".nav button")].find(b=>b.textContent.includes("女孩排班")) || document.querySelector(".nav button"));
+  show("dashboard", document.querySelector(".nav button"));
 }
 function renderCuteSchedule(){
   if(!window.cuteSchedule)return;
@@ -777,6 +790,64 @@ function refreshRoomControls(){
   roomPick.innerHTML=(data.hotel_rooms||[]).map(r=>`<option value="${r.hotel_name}|||${r.room_no}">${r.hotel_name} / ${r.room_no} / ${yen(r.daily_cost)}</option>`).join('');
   roomGirl.innerHTML='<option value="">不安排女孩</option>'+(data.girls||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
 }
+
+let settlementOpen={}, settlementSelected=new Set();
+function settlementGroups(){
+  const q=safe(window.settleGirlQ?settleGirlQ.value:"");
+  const unpaid=(data.orders||[]).filter(o=>(o.settlement_status||'未结算')!=='已结算' && (!q || safe(o.girl_name).includes(q)));
+  const gmap={};
+  unpaid.forEach(o=>{
+    const g=o.girl_name||'未填写女孩'; const d=o.order_date||'';
+    gmap[g]=gmap[g]||{girl:g,total:0,count:0,dates:{},ids:[]};
+    gmap[g].total+=Number(o.store_profit||0); gmap[g].count++; gmap[g].ids.push(Number(o.id));
+    gmap[g].dates[d]=gmap[g].dates[d]||{date:d,total:0,count:0,ids:[]};
+    gmap[g].dates[d].total+=Number(o.store_profit||0); gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
+  });
+  return Object.values(gmap).sort((a,b)=>b.total-a.total);
+}
+function renderSettlement(){
+  if(!window.settlementTable)return;
+  const groups=settlementGroups();
+  let html='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算天数</th><th>未结算单数</th><th>合计</th><th>选择</th></tr></thead><tbody>';
+  groups.forEach(g=>{
+    const gid=encodeURIComponent(g.girl); const allChecked=g.ids.length&&g.ids.every(id=>settlementSelected.has(id));
+    html+=`<tr><td><button class="soft" onclick="settlementOpen['${gid}']=!settlementOpen['${gid}'];renderSettlement()">${settlementOpen[gid]?'收起':'展开'}</button></td><td>${g.girl}</td><td>${Object.keys(g.dates).length}</td><td>${g.count}</td><td><b>${yen(g.total)}</b></td><td><input type="checkbox" ${allChecked?'checked':''} onchange="toggleSettlementIds([${g.ids.join(',')}],this.checked)"> 全选该女孩</td></tr>`;
+    if(settlementOpen[gid]){
+      Object.values(g.dates).sort((a,b)=>String(b.date).localeCompare(a.date)).forEach(d=>{
+        const ck=d.ids.length&&d.ids.every(id=>settlementSelected.has(id));
+        html+=`<tr><td></td><td style="padding-left:28px">${g.girl}</td><td>${d.date}</td><td>${d.count}</td><td>${yen(d.total)}</td><td><input type="checkbox" ${ck?'checked':''} onchange="toggleSettlementIds([${d.ids.join(',')}],this.checked)"> 选择这一天</td></tr>`;
+      });
+    }
+  });
+  if(!groups.length) html+='<tr><td colspan="6">暂无未结算金额</td></tr>';
+  settlementTable.innerHTML=html+'</tbody></table></div>';
+}
+function toggleSettlementIds(ids,checked){ids.forEach(id=>checked?settlementSelected.add(Number(id)):settlementSelected.delete(Number(id)));renderSettlement();}
+function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
+async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要修改的日期或女孩');return;} await api('/api/orders/bulk_settle',{ids,settlement_status:status}); settlementSelected.clear(); await loadAll();}
+
+function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function isUrl(v){return /^https?:\/\//i.test(String(v||'').trim());}
+function renderQuickLinks(){
+  if(!window.quickLinksTable)return;
+  const rows=(data.quick_links||[]);
+  let html='<div class="split"><div class="card"><h3>排班表</h3>'+quickLinkGroupHtml('排班表',rows)+'</div><div class="card"><h3>固定短语</h3>'+quickLinkGroupHtml('固定短语',rows)+'</div></div>';
+  quickLinksTable.innerHTML=html;
+}
+function quickLinkGroupHtml(group,rows){
+  let html='<div class="table"><table><thead><tr><th>名字</th><th>内容</th><th>排序</th><th>操作</th></tr></thead><tbody>';
+  rows.filter(r=>r.group_name===group).forEach(r=>{
+    const c=escHtml(r.content||'');
+    const act=isUrl(r.content)?`<button class="primary" onclick="window.open('${c}','_blank')">打开</button>`:`<button class="soft" onclick="copyQuickLink(${r.id})">复制</button>`;
+    html+=`<tr><td>${escHtml(r.title)}</td><td style="max-width:420px;word-break:break-all">${c}</td><td>${r.sort_order||0}</td><td>${act} <button class="soft" onclick='editQuickLink(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="deleteQuickLink(${r.id})">删除</button></td></tr>`;
+  });
+  return html+'</tbody></table></div>';
+}
+function editQuickLink(r){qlId.value=r.id;qlGroup.value=r.group_name||'固定短语';qlTitle.value=r.title||'';qlContent.value=r.content||'';qlSort.value=r.sort_order||0;}
+function clearQuickLinkForm(){qlId.value='';qlGroup.value='排班表';qlTitle.value='';qlContent.value='';qlSort.value='';}
+async function saveQuickLink(){await api('/api/quick_links',{id:qlId.value||null,group_name:qlGroup.value,title:qlTitle.value,content:qlContent.value,sort_order:Number(qlSort.value||0)}); clearQuickLinkForm(); await loadAll();}
+async function deleteQuickLink(id){if(!confirm('确认删除？'))return; await api('/api/quick_links',{delete_id:id}); await loadAll();}
+async function copyQuickLink(id){const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id)); if(!r)return; await navigator.clipboard.writeText(r.content||'').catch(()=>{}); alert('已复制');}
 function renderRooms(){
   if(!window.roomCalendar)return; refreshRoomControls();
   table('hotelRoomsTable',data.hotel_rooms||[],[{k:'hotel_name',t:'酒店名'},{k:'room_no',t:'房间号'},{k:'daily_cost',t:'每日成本',f:yen},{k:'remark',t:'备注'}],'hotel_rooms','editHotelRoomDummy');
@@ -795,7 +866,7 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数"},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
  table("girlsTable",filteredGirls(),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
- renderImportCheck();renderEnums();renderRooms();
+ renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();
  if(isUser){sDay.value=todayStr; sDay.disabled=true;}else{sDay.disabled=false;} let sd=sDay.value,sm=sMonth.value;
  const homeDayMap=group(o=>o.order_date===todayStr); const homeDayMeta=chartMeta(o=>o.order_date===todayStr,homeDayMap); chart("homeDay",homeDayMap,homeDayMeta); renderRevenueTable("homeDayTable",homeDayMap,homeDayMeta);
  if(!isUser){const homeMonthMap=group(o=>String(o.order_date).startsWith(month)); chart("homeMonth",homeMonthMap,chartMeta(o=>String(o.order_date).startsWith(month),homeMonthMap));}
@@ -806,7 +877,7 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
    const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); barChart("monthDateChart",monthDateMap,{mainLabel:"店铺收益"});
  }
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
-document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});
+document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ")renderSettlement()});
 
 window.addEventListener("DOMContentLoaded",()=>{applyRole(); if(auth) loadAll();});
 
