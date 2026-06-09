@@ -84,6 +84,12 @@ def init_db():
             customer_account_id INTEGER DEFAULT 0, username TEXT DEFAULT '', line_name TEXT DEFAULT '', phone TEXT DEFAULT '',
             status TEXT DEFAULT '待确认', price INTEGER DEFAULT 0, note TEXT DEFAULT '', order_id INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS quick_links(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
+            sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_quick_links_group ON quick_links(group_name, sort_order, id)")
+        for qg, qt, qc, so in [('排班表','排班表','',1),('固定短语','固定短语','',2)]:
+            c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
         defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','常客',5),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
@@ -401,7 +407,8 @@ def all_data():
             'hotel_rooms':rows(c.execute('SELECT * FROM hotel_rooms ORDER BY hotel_name, room_no').fetchall()),
             'room_assignments':rows(c.execute('SELECT * FROM room_assignments ORDER BY assignment_date DESC, hotel_name, room_no').fetchall()),
             'customer_accounts':rows(c.execute('SELECT * FROM customer_accounts ORDER BY id DESC').fetchall()),
-            'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall())})
+            'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall()),
+            'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall())})
 @app.route('/api/customers',methods=['POST'])
 def customers():
     d=request.json or {}
@@ -894,6 +901,25 @@ def api_orders_bulk_settle():
     return jsonify(ok=True, updated=len(ids), settlement_status=status)
 
 
+
+@app.route('/api/quick_links', methods=['POST'])
+def api_quick_links():
+    d = request.json or {}
+    with conn() as c:
+        if d.get('delete_id'):
+            c.execute('DELETE FROM quick_links WHERE id=?', (int(d['delete_id']),))
+            return jsonify(ok=True)
+        group_name = str(d.get('group_name') or '固定短语').strip()
+        title = str(d.get('title') or '').strip()
+        content = str(d.get('content') or '').strip()
+        sort_order = int(d.get('sort_order') or 0)
+        if not group_name or not title:
+            return jsonify(ok=False, error='分组和名字不能为空'), 400
+        if d.get('id'):
+            c.execute('UPDATE quick_links SET group_name=?, title=?, content=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', (group_name, title, content, sort_order, int(d['id'])))
+        else:
+            c.execute('INSERT INTO quick_links(group_name,title,content,sort_order) VALUES(?,?,?,?)', (group_name, title, content, sort_order))
+    return jsonify(ok=True)
 
 @app.route('/api/customers/recalc_points', methods=['POST'])
 def api_customers_recalc_points():
