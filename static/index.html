@@ -28,6 +28,7 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .login-box h2{margin:0 0 8px;color:#e75ca2}.login-box input{width:100%;margin:8px 0}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
 body.role-user .user-hide{display:none!important}
+body.role-user .admin-only{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 
@@ -147,27 +148,6 @@ body.role-user .stat-chart-only{display:none!important}
 
 
  
- <section id="schedule" class="panel"><div class="card"><h2>女孩排班表</h2>
-  <p class="note">选择女孩，填写出勤时间、价格和备注，就能生成可爱的女孩出勤表。预览适合截图发群。</p>
-  <div class="form">
-    <input id="schId" type="hidden">
-    <input id="schDate" type="date">
-    <select id="schGirl"></select>
-    <input id="schStart" placeholder="开始 例：19:00">
-    <input id="schEnd" placeholder="结束 例：23:00">
-    <input id="schPrice" placeholder="价格 例：14000">
-    <select id="schStatus"></select>
-    <input id="schNote" placeholder="备注">
-    <button class="primary" onclick="saveSchedule()">保存排班</button>
-    <button class="soft" onclick="clearScheduleForm()">清空</button>
-  </div>
-  <div id="scheduleTable"></div>
- </div>
- <div class="card"><h2>可爱出勤表预览</h2>
-  <div class="form"><input id="previewDate" type="date" onchange="render()"><button class="soft" onclick="previewDate.value=todayStr;render()">今天</button></div>
-  <div id="cuteSchedule"></div>
- </div></section>
-
 
  <section id="rooms" class="panel"><div class="card"><h2>房间安排</h2>
   <p class="note">酒店名 + 房间号 是唯一主键。每天安排房间会计入房间成本；即使没有安排女孩，房间成本也会扣。安排女孩后，会自动同步到女孩排班/纯出勤表，默认 00:00-04:00。</p>
@@ -253,7 +233,7 @@ async function doLogin(){
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
-function show(id,btn){document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));document.getElementById(id).classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function show(id,btn){const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
@@ -462,7 +442,7 @@ async function saveSchedule(){
 
 function editSchedule(s){
   schId.value=s.id; schDate.value=s.schedule_date; schGirl.value=s.girl_id; schStart.value=s.start_time||""; schEnd.value=s.end_time||""; schPrice.value=s.price||0; schStatus.value=s.status||"出勤"; schNote.value=s.note||"";
-  show("dashboard", document.querySelector(".nav button"));
+  const btn=[...document.querySelectorAll(".nav button")].find(b=>b.textContent.includes("房间安排")); if(btn)show("rooms", btn);
 }
 function renderCuteSchedule(){
   if(!window.cuteSchedule)return;
@@ -827,7 +807,15 @@ function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
 async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要修改的日期或女孩');return;} await api('/api/orders/bulk_settle',{ids,settlement_status:status}); settlementSelected.clear(); await loadAll();}
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function jsArg(v){return JSON.stringify(String(v??''));}
 function isUrl(v){return /^https?:\/\//i.test(String(v||'').trim());}
+function openQuickLink(id){
+  const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id));
+  if(!r)return;
+  const url=String(r.content||'').trim();
+  if(!isUrl(url)){copyQuickLink(id);return;}
+  window.open(url,'_blank','noopener');
+}
 function renderQuickLinks(){
   if(!window.quickLinksTable)return;
   const rows=(data.quick_links||[]);
@@ -838,8 +826,8 @@ function quickLinkGroupHtml(group,rows){
   let html='<div class="table"><table><thead><tr><th>名字</th><th>内容</th><th>排序</th><th>操作</th></tr></thead><tbody>';
   rows.filter(r=>r.group_name===group).forEach(r=>{
     const c=escHtml(r.content||'');
-    const act=isUrl(r.content)?`<button class="primary" onclick="window.open('${c}','_blank')">打开</button>`:`<button class="soft" onclick="copyQuickLink(${r.id})">复制</button>`;
-    html+=`<tr><td>${escHtml(r.title)}</td><td style="max-width:420px;word-break:break-all">${c}</td><td>${r.sort_order||0}</td><td>${act} <button class="soft" onclick='editQuickLink(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="deleteQuickLink(${r.id})">删除</button></td></tr>`;
+    const act=isUrl(r.content)?`<button class="primary" onclick="openQuickLink(${Number(r.id)})">打开</button>`:`<button class="soft" onclick="copyQuickLink(${Number(r.id)})">复制</button>`;
+    html+=`<tr><td>${escHtml(r.title)}</td><td style="max-width:420px;word-break:break-all">${c}</td><td>${Number(r.sort_order||0)}</td><td>${act} <button class="soft" onclick='editQuickLink(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="deleteQuickLink(${Number(r.id)})">删除</button></td></tr>`;
   });
   return html+'</tbody></table></div>';
 }
@@ -847,7 +835,7 @@ function editQuickLink(r){qlId.value=r.id;qlGroup.value=r.group_name||'固定短
 function clearQuickLinkForm(){qlId.value='';qlGroup.value='排班表';qlTitle.value='';qlContent.value='';qlSort.value='';}
 async function saveQuickLink(){await api('/api/quick_links',{id:qlId.value||null,group_name:qlGroup.value,title:qlTitle.value,content:qlContent.value,sort_order:Number(qlSort.value||0)}); clearQuickLinkForm(); await loadAll();}
 async function deleteQuickLink(id){if(!confirm('确认删除？'))return; await api('/api/quick_links',{delete_id:id}); await loadAll();}
-async function copyQuickLink(id){const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id)); if(!r)return; await navigator.clipboard.writeText(r.content||'').catch(()=>{}); alert('已复制');}
+async function copyQuickLink(id){const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id)); if(!r)return; const text=r.content||''; try{await navigator.clipboard.writeText(text); alert('已复制');}catch(e){prompt('复制失败，请手动复制：', text);}}
 function renderRooms(){
   if(!window.roomCalendar)return; refreshRoomControls();
   table('hotelRoomsTable',data.hotel_rooms||[],[{k:'hotel_name',t:'酒店名'},{k:'room_no',t:'房间号'},{k:'daily_cost',t:'每日成本',f:yen},{k:'remark',t:'备注'}],'hotel_rooms','editHotelRoomDummy');
