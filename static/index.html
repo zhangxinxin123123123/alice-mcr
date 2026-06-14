@@ -18,7 +18,7 @@
 .chart-head b{color:#e75ca2}.form{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:12px 0}
 input,select,textarea{border:2px solid var(--line);border-radius:14px;padding:10px;background:white;color:var(--ink);outline:none}textarea{width:100%;min-height:150px}
 button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;border:0;font-weight:900;cursor:pointer}button.primary{background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}button.soft{background:white;border:2px solid var(--line);color:var(--ink)}button.danger{background:var(--danger);color:white}
-.table{overflow:auto;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
+.table{overflow:auto;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}
 .modal{position:fixed;inset:0;background:#0006;display:none;align-items:center;justify-content:center;z-index:99}.modal.on{display:flex}.modal .box{background:white;border:3px solid var(--line);border-radius:24px;padding:20px;max-width:760px;width:92%;max-height:86vh;overflow:auto}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}}
@@ -28,8 +28,8 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .login-box h2{margin:0 0 8px;color:#e75ca2}.login-box input{width:100%;margin:8px 0}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
 body.role-user .user-hide{display:none!important}
-body.role-user .admin-only{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
+body.role-user #stats{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 
 .type-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:800;font-size:12px;white-space:nowrap}
@@ -66,7 +66,7 @@ body.role-user .stat-chart-only{display:none!important}
     <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
   <button class="admin-only" onclick="show('enums',this)">⚙️ 枚举类型</button>
   <button class="admin-only" onclick="window.open('/static/alice_shift.html','_blank')">📋 纯出勤表</button>
-  <button onclick="show('stats',this)">🥧 收益图表</button>
+  <button class="user-hide" onclick="show('stats',this)">🥧 收益图表</button>
   <button class="admin-only" onclick="show('debug',this)">🩺 数据诊断</button>
  </div>
  <p class="note">数据库：alice_academy_mcr.db<br>页面打开会自动读取全部数据。</p>
@@ -107,7 +107,7 @@ body.role-user .stat-chart-only{display:none!important}
 
  <section id="quickLinks" class="panel"><div class="card"><h2>链接跳转</h2>
   <p class="note">保存常用文字或链接。内容如果是 http/https 链接，点击“打开”会跳转；否则会复制内容。</p>
-  <div class="form"><input id="qlId" type="hidden"><select id="qlGroup"><option>排班表</option><option>固定短语</option></select><input id="qlTitle" placeholder="名字"><input id="qlContent" placeholder="内容或链接"><input id="qlSort" placeholder="排序"><button class="primary" onclick="saveQuickLink()">保存</button><button class="soft" onclick="clearQuickLinkForm()">清空</button></div>
+  <div class="form"><input id="qlId" type="hidden"><select id="qlGroup"><option>网址</option><option>常用短语</option></select><input id="qlTitle" placeholder="名字"><input id="qlContent" placeholder="内容或链接"><input id="qlSort" placeholder="排序"><button class="primary" onclick="saveQuickLink()">保存</button><button class="soft" onclick="clearQuickLinkForm()">清空</button></div>
   <div id="quickLinksTable"></div></div>
  </section>
 
@@ -217,7 +217,7 @@ function applyRole(){
   roleBadge.textContent = auth.role==='admin' ? '管理员模式' : '普通用户模式';
   if(auth.role==='user'){
     const current=document.querySelector('.panel.on');
-    if(current && current.id==='home'){
+    if(current && (current.id==='home' || current.id==='stats')){
       const ordersBtn=[...document.querySelectorAll('.nav button')].find(b=>b.textContent.includes('订单'));
       show('orders', ordersBtn || document.querySelector('.nav button:not(.user-hide)'));
     }
@@ -233,7 +233,7 @@ async function doLogin(){
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
-function show(id,btn){const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
@@ -330,7 +330,7 @@ function paymentSelect(id,selected="现金"){const vals=["现金","人民币","p
 function girlSelect(id,selected){return `<select id="${id}">`+data.girls.map(g=>`<option value="${g.id}" ${String(g.id)===String(selected)?"selected":""}>${g.name}</option>`).join("")+`</select>`}
 function editOrder(o){currentEdit={table:"orders",id:o.id};editTitle.textContent="编辑订单";editFields.innerHTML=field("日期",`<input id="m_order_date" type="date" value="${o.order_date||""}">`)+field("时间",`<input id="m_service_time" value="${o.service_time||""}">`)+field("女孩",girlSelect("m_girl_id",o.girl_id))+field("客人总付",`<input id="m_received_amount" value="${o.received_amount||0}">`)+field("女孩到手（只改本订单）",`<input id="m_girl_take_home" value="${o.girl_take_home||0}">`)+field("客户ID",`<input id="m_customer_raw" value="${o.customer_no||""}">`)+field("订单状态",enumSelect("m_order_status","order_status",o.order_status))+field("结算",enumSelect("m_settlement_status","settlement_status",o.settlement_status))+field("支付方式",paymentSelect("m_payment_method",o.payment_method||"现金"))+field("备注",`<input id="m_remark" value="${o.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${o.remark2||""}">`);editModal.classList.add("on")}
 function editCustomer(c){currentEdit={table:"customers",id:c.id};editTitle.textContent="编辑客户";editFields.innerHTML=field("客户ID",`<input id="m_customer_no" value="${c.customer_no||""}">`)+field("昵称",`<input id="m_name" value="${c.name||""}">`)+field("类型",enumSelect("m_customer_type","customer_type",c.customer_type))+field("充值余额",`<input id="m_recharge_balance" value="${c.recharge_balance||0}">`)+field("积分",`<input id="m_points" value="${c.points||0}">`)+field("来源",`<input id="m_source" value="${c.source||""}">`)+field("联系方式",`<input id="m_contact" value="${c.contact||""}">`)+field("备注",`<input id="m_remark" value="${c.remark||""}">`)+field("偏好TAG（多个用逗号/空格）",`<input id="m_remark2" value="${c.remark2||""}" placeholder="例：酒量好 喜欢聊天">`);editModal.classList.add("on")}
-function editGirl(g){currentEdit={table:"girls",id:g.id};editTitle.textContent="编辑女孩";editFields.innerHTML=field("女孩名",`<input id="m_name" value="${g.name||""}">`)+field("马甲",`<input id="m_girl_alias" value="${g.girl_alias||""}" placeholder="内部备注，不影响订单/出勤显示">`)+field("类型",enumSelect("m_girl_type","girl_type",g.girl_type))+field("状态",enumSelect("m_girl_status","girl_status",g.girl_status))+field("每小时到手",`<input id="m_take_home_per_hour" value="${g.take_home_per_hour||0}">`)+field("定价/出勤价格",`<input id="m_list_price" value="${g.list_price||0}" placeholder="纯出勤表显示价格，可空">`)+field("联系方式",`<input id="m_contact" value="${g.contact||""}">`)+field("标签",`<input id="m_tags" value="${g.tags||""}">`)+field("备注",`<input id="m_remark" value="${g.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${g.remark2||""}">`);editModal.classList.add("on")}
+function editGirl(g){currentEdit={table:"girls",id:g.id};editTitle.textContent="编辑女孩";editFields.innerHTML=field("女孩名",`<input id="m_name" value="${g.name||""}">`)+field("马甲",`<input id="m_girl_alias" value="${g.girl_alias||""}" placeholder="内部备注，不影响订单/出勤显示">`)+field("类型",enumSelect("m_girl_type","girl_type",g.girl_type))+field("状态",enumSelect("m_girl_status","girl_status",g.girl_status))+field("每小时到手",`<input id="m_take_home_per_hour" value="${g.take_home_per_hour||10000}">`)+field("定价/出勤价格",`<input id="m_list_price" value="${g.list_price||15000}" placeholder="纯出勤表显示价格，可空">`)+field("联系方式",`<input id="m_contact" value="${g.contact||""}">`)+field("标签",`<input id="m_tags" value="${g.tags||""}">`)+field("备注",`<input id="m_remark" value="${g.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${g.remark2||""}">`);editModal.classList.add("on")}
 function closeModal(){editModal.classList.remove("on");currentEdit=null}
 async function saveModalEdit(){if(!currentEdit)return;if(currentEdit.table==="orders"){await api("/api/orders",{id:currentEdit.id,order_date:m_order_date.value,service_time:m_service_time.value,girl_id:m_girl_id.value,received_amount:moneyInput(m_received_amount.value),girl_take_home:moneyInput(m_girl_take_home.value),customer_raw:m_customer_raw.value,order_status:m_order_status.value,settlement_status:m_settlement_status.value,payment_method:m_payment_method.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="customers"){await api("/api/customers",{id:currentEdit.id,customer_no:m_customer_no.value,name:m_name.value,customer_type:m_customer_type.value,recharge_balance:moneyInput(m_recharge_balance.value),points:Number(m_points.value||0),source:m_source.value,contact:m_contact.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="girls"){await api("/api/girls",{id:currentEdit.id,name:m_name.value,girl_alias:m_girl_alias.value,girl_type:m_girl_type.value,girl_status:m_girl_status.value,take_home_per_hour:moneyInput(m_take_home_per_hour.value),list_price:moneyInput(m_list_price.value),contact:m_contact.value,tags:m_tags.value,remark:m_remark.value,remark2:m_remark2.value})}closeModal();await loadAll()}
 async function importChain(){let r=await api("/api/import_chain",{order_date:iDate.value,girl_id:iGirl.value,settlement_status:iSettle.value,text:chain.value});alert(r.ok?`录入成功：${r.count} 单｜女孩：${r.girl_name}`:(r.error||"导入失败"));await loadAll()}
@@ -342,7 +342,7 @@ function refreshChainGirlSelect(){
   const old=cGirl.value;
   const d=(window.cDate&&cDate.value)||todayStr;
   // 先用女孩表兜底；读取接龙页后会换成纯出勤当天女孩。
-  if(!cGirl.innerHTML){cGirl.innerHTML=(data.girls||[]).map(g=>`<option value="${g.name}" data-id="${g.id}" data-price="${g.list_price||0}">${g.name}</option>`).join("");}
+  if(!cGirl.innerHTML){cGirl.innerHTML=(data.girls||[]).map(g=>`<option value="${g.name}" data-id="${g.id}" data-price="${g.list_price||15000}">${g.name}</option>`).join("");}
   if(old) cGirl.value=old;
 }
 async function loadChainPage(){
@@ -355,7 +355,7 @@ async function loadChainPage(){
   const opt=cGirl.selectedOptions[0];
   chainState.girl_name=cGirl.value||j.girl_name||'';
   chainState.girl_id=opt?opt.dataset.id:'';
-  chainState.price=Number(opt?opt.dataset.price:0)||0;
+  chainState.price=Number(opt?opt.dataset.price:15000)||15000;
   if(!coId.value) coPrice.value=chainState.price||'';
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
   chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
@@ -819,20 +819,20 @@ function openQuickLink(id){
 function renderQuickLinks(){
   if(!window.quickLinksTable)return;
   const rows=(data.quick_links||[]);
-  let html='<div class="split"><div class="card"><h3>排班表</h3>'+quickLinkGroupHtml('排班表',rows)+'</div><div class="card"><h3>固定短语</h3>'+quickLinkGroupHtml('固定短语',rows)+'</div></div>';
+  let html='<div class="split"><div class="card"><h3>网址</h3>'+quickLinkGroupHtml('网址',rows)+'</div><div class="card"><h3>常用短语</h3>'+quickLinkGroupHtml('常用短语',rows)+'</div></div>';
   quickLinksTable.innerHTML=html;
 }
 function quickLinkGroupHtml(group,rows){
-  let html='<div class="table"><table><thead><tr><th>名字</th><th>内容</th><th>排序</th><th>操作</th></tr></thead><tbody>';
+  let html='<div class="table quick-table"><table><thead><tr><th style="width:18%">名字</th><th>内容</th><th style="width:70px">排序</th><th style="width:180px">操作</th></tr></thead><tbody>';
   rows.filter(r=>r.group_name===group).forEach(r=>{
     const c=escHtml(r.content||'');
     const act=isUrl(r.content)?`<button class="primary" onclick="openQuickLink(${Number(r.id)})">打开</button>`:`<button class="soft" onclick="copyQuickLink(${Number(r.id)})">复制</button>`;
-    html+=`<tr><td>${escHtml(r.title)}</td><td style="max-width:420px;word-break:break-all">${c}</td><td>${Number(r.sort_order||0)}</td><td>${act} <button class="soft" onclick='editQuickLink(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="deleteQuickLink(${Number(r.id)})">删除</button></td></tr>`;
+    html+=`<tr><td>${escHtml(r.title)}</td><td class="quick-content">${c}</td><td>${Number(r.sort_order||0)}</td><td>${act} <button class="soft" onclick='editQuickLink(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="deleteQuickLink(${Number(r.id)})">删除</button></td></tr>`;
   });
   return html+'</tbody></table></div>';
 }
-function editQuickLink(r){qlId.value=r.id;qlGroup.value=r.group_name||'固定短语';qlTitle.value=r.title||'';qlContent.value=r.content||'';qlSort.value=r.sort_order||0;}
-function clearQuickLinkForm(){qlId.value='';qlGroup.value='排班表';qlTitle.value='';qlContent.value='';qlSort.value='';}
+function editQuickLink(r){qlId.value=r.id;qlGroup.value=r.group_name||'常用短语';qlTitle.value=r.title||'';qlContent.value=r.content||'';qlSort.value=r.sort_order||0;}
+function clearQuickLinkForm(){qlId.value='';qlGroup.value='网址';qlTitle.value='';qlContent.value='';qlSort.value='';}
 async function saveQuickLink(){await api('/api/quick_links',{id:qlId.value||null,group_name:qlGroup.value,title:qlTitle.value,content:qlContent.value,sort_order:Number(qlSort.value||0)}); clearQuickLinkForm(); await loadAll();}
 async function deleteQuickLink(id){if(!confirm('确认删除？'))return; await api('/api/quick_links',{delete_id:id}); await loadAll();}
 async function copyQuickLink(id){const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id)); if(!r)return; const text=r.content||''; try{await navigator.clipboard.writeText(text); alert('已复制');}catch(e){prompt('复制失败，请手动复制：', text);}}
@@ -884,7 +884,7 @@ function makeAttTimeOptions(selected="19:00"){
 }
 function getAttGirlPrices(g){
   const arr=[];
-  const listPrice=Number(g?.list_price||0);
+  const listPrice=Number(g?.list_price||15000);
   if(listPrice>0) arr.push(listPrice);
   if(!arr.length) arr.push(0);
   return arr;
