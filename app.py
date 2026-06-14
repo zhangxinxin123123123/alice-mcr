@@ -145,6 +145,57 @@ def parse_time_part(h, m=None):
         minute = 59
     return hour + minute / 60
 
+def _time_label(hour, minute):
+    return f"{hour}.{minute:02d}" if minute else str(hour)
+
+def _parse_time_groups(m):
+    sh = int(m.group(1)); sm = int(m.group(2) or 0)
+    eh = int(m.group(3)); em = int(m.group(4) or 0)
+    if sm >= 60: sm = 59
+    if em >= 60: em = 59
+    return sh, sm, eh, em
+
+def _chain_interval_minutes(sh, sm, eh, em):
+    """
+    接龙时间时长判断。
+    - 12.30-1.30 视为 12.30-13.30，不再变成 25.30。
+    - 8.30-1.30 这类夜场简写视为 20.30-次日1.30。
+    - 23.30-0.30 仍按跨凌晨 1 小时计算，但显示不写成 24.30。
+    """
+    start = sh * 60 + sm
+    end = eh * 60 + em
+
+    if end < start:
+        # 中午/下午时间：12.30-1.30 应该是 12.30-13.30。
+        if sh >= 12 and eh < 12:
+            same_day_pm_end = (eh + 12) * 60 + em
+            if same_day_pm_end > start:
+                end = same_day_pm_end
+            else:
+                end += 24 * 60
+        # 夜场简写：8.30-1.30 表示 20.30-次日1.30。
+        elif sh < 12 and eh < sh:
+            start += 12 * 60
+            end += 24 * 60
+        else:
+            end += 24 * 60
+
+    return end - start
+
+def service_duration_minutes(t):
+    text = str(t or "").strip()
+    if not text or "包夜" in text:
+        return None
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
+    if not m:
+        return None
+    return _chain_interval_minutes(*_parse_time_groups(m))
+
+def validate_service_time(t):
+    minutes = service_duration_minutes(t)
+    if minutes is not None and minutes > 7 * 60:
+        raise ValueError(f'预约时长超过7小时，请检查时间：{t}')
+
 def billable_hours_from_minutes(minutes):
     if minutes <= 0:
         return 1.0
@@ -156,14 +207,9 @@ def calc_hours(t):
     text = str(t or "").strip()
     if "包夜" in text:
         return 3.0
-    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
-    if not m:
+    minutes = service_duration_minutes(text)
+    if minutes is None:
         return 1.0
-    a = parse_time_part(m.group(1), m.group(2))
-    b = parse_time_part(m.group(3), m.group(4))
-    if b < a:
-        b += 24
-    minutes = int(round((b - a) * 60))
     return billable_hours_from_minutes(minutes)
 
 
@@ -341,6 +387,7 @@ def create_or_update_order(c,d):
     if not g:
         raise ValueError('缺少女孩')
 
+    validate_service_time(d.get('service_time',''))
     h = float(d.get('hours') or calc_hours(d.get('service_time','')))
     rec = int(d.get('received_amount') or 0)
     # 订单编辑时允许单独修改“女孩到手”，不反写女孩表。
@@ -379,8 +426,11 @@ def all_data():
         return jsonify({
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
-            'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type
-                                      FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
+            'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type,
+                                             COALESCE(oc.customer_total_orders,0) AS customer_total_orders
+                                      FROM orders o
+                                      LEFT JOIN customers c ON c.id=o.customer_id
+                                      LEFT JOIN (SELECT customer_id, COUNT(*) AS customer_total_orders FROM orders GROUP BY customer_id) oc ON oc.customer_id=o.customer_id
                                       ORDER BY o.order_date DESC, o.id DESC''').fetchall()),
             'recharges':rows(c.execute('SELECT * FROM recharge_records ORDER BY id DESC').fetchall()),
             'points':rows(c.execute('SELECT * FROM points_records ORDER BY id DESC').fetchall()),
@@ -461,21 +511,17 @@ def normalize_chain_time_token(token):
     if not m:
         return token
 
-    sh, sm, eh, em = m.groups()
-    sh_i, eh_i = int(sh), int(eh)
-    sm = sm or ''
-    em = em or ''
+    sh, sm, eh, em = _parse_time_groups(m)
 
-    # 用户输入 0.30 时，夜场业务里按 24.30 处理。
-    if sh_i == 0:
-        sh_i += 24
-    if eh_i == 0:
-        eh_i += 24
-    if eh_i < sh_i:
-        eh_i += 24
+    # 12.30-1.30 是同日 12.30-13.30，不允许被标准化成 25.30。
+    display_eh = eh
+    if eh * 60 + em < sh * 60 + sm and sh >= 12 and eh < 12:
+        same_day_pm_end = (eh + 12) * 60 + em
+        if same_day_pm_end > sh * 60 + sm:
+            display_eh = eh + 12
 
-    start = f"{sh_i}.{sm}" if sm else str(sh_i)
-    end = f"{eh_i}.{em}" if em else str(eh_i)
+    start = _time_label(sh, sm)
+    end = _time_label(display_eh, em)
     return f"{start}-{end}"
 
 def parse_chain_service_time(line):
