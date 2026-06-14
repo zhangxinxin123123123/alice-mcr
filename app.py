@@ -49,7 +49,7 @@ def init_db():
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职',
-            take_home_per_hour INTEGER DEFAULT 0, list_price INTEGER DEFAULT 0, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
+            take_home_per_hour INTEGER DEFAULT 10000, list_price INTEGER DEFAULT 15000, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS orders(
             id INTEGER PRIMARY KEY AUTOINCREMENT, order_date TEXT, service_time TEXT, hours REAL DEFAULT 1,
@@ -88,17 +88,21 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
             sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_quick_links_group ON quick_links(group_name, sort_order, id)")
-        for qg, qt, qc, so in [('排班表','排班表','',1),('固定短语','固定短语','',2)]:
+        for qg, qt, qc, so in [('网址','网址','',1),('常用短语','常用短语','',2)]:
             c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
         defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','常客',5),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
-        # v16.4: existing databases get the new girl list price column automatically
+        # v17.1: 默认新增女孩定价 15000，到手 10000；旧库自动补列和迁移快捷分组名称。
         girl_cols = [r[1] for r in c.execute('PRAGMA table_info(girls)').fetchall()]
         if 'list_price' not in girl_cols:
-            c.execute('ALTER TABLE girls ADD COLUMN list_price INTEGER DEFAULT 0')
+            c.execute('ALTER TABLE girls ADD COLUMN list_price INTEGER DEFAULT 15000')
         if 'girl_alias' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN girl_alias TEXT DEFAULT ''")
+        c.execute("UPDATE quick_links SET group_name='网址' WHERE group_name='排班表'")
+        c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
+        c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
+        c.execute("UPDATE quick_links SET title='常用短语' WHERE title='固定短语'")
 
 def current_role():
     return request.headers.get('X-Alice-Role') or request.args.get('role') or ''
@@ -291,7 +295,7 @@ def ensure_girl(c,name):
     if not name: return None
     row=c.execute('SELECT * FROM girls WHERE name=?',(name,)).fetchone()
     if row: return row
-    c.execute('INSERT INTO girls(name,remark) VALUES(?,?)',(name,'接龙/订单自动生成'))
+    c.execute('INSERT INTO girls(name,take_home_per_hour,list_price,remark) VALUES(?,?,?,?)',(name,10000,15000,'接龙/订单自动生成'))
     return c.execute('SELECT * FROM girls WHERE name=?',(name,)).fetchone()
 def take_home(g,hours):
     if not g: return 0
@@ -319,29 +323,8 @@ def recalc_customer_points(c, customer_id=None):
 
 
 def update_customer_type_by_history(c, customer_id=None):
-    """按客户历史自动维护客户类型：充值过=VIP；3单起=老客；2单=回头客；1单=新客。"""
-    if customer_id:
-        ids = [customer_id]
-    else:
-        ids = [r["id"] for r in c.execute("SELECT id FROM customers").fetchall()]
-    for cid in ids:
-        cust = c.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
-        if not cust:
-            continue
-        order_count = c.execute("""SELECT COUNT(*) AS n FROM orders
-                                  WHERE customer_id=? AND COALESCE(order_status,'')!='取消'""", (cid,)).fetchone()["n"] or 0
-        recharge_sum = c.execute("SELECT COALESCE(SUM(amount),0) AS s FROM recharge_records WHERE customer_id=?", (cid,)).fetchone()["s"] or 0
-        total_recharge = int(cust["total_recharge"] or 0)
-        recharge_balance = int(cust["recharge_balance"] or 0)
-        if recharge_sum > 0 or total_recharge > 0 or recharge_balance > 0:
-            new_type = "VIP"
-        elif order_count >= 3:
-            new_type = "老客"
-        elif order_count == 2:
-            new_type = "回头客"
-        else:
-            new_type = "新客"
-        c.execute("UPDATE customers SET customer_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_type, cid))
+    """客户类型以客户表手动编辑值为准，不再被单子数量/充值逻辑自动覆盖。"""
+    return
 
 def create_or_update_order(c,d):
     old_customer_id = None
@@ -375,9 +358,8 @@ def create_or_update_order(c,d):
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
-            update_customer_type_by_history(c, old_customer_id)
+            # 客户类型手动优先，不按单量自动覆盖
         recalc_customer_points(c, cust['id'])
-        update_customer_type_by_history(c, cust['id'])
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -418,20 +400,18 @@ def customers():
         vals=(no,d.get('name') or f'客户{no}',d.get('customer_type','新客'),d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''))
         if d.get('id'):
             c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
-            update_customer_type_by_history(c, int(d.get('id')))
         else:
             c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
-            update_customer_type_by_history(c, c.execute('SELECT last_insert_rowid() AS id').fetchone()['id'])
     return jsonify(ok=True)
 @app.route('/api/girls',methods=['POST'])
 def girls():
     d=request.json or {}
     with conn() as c:
         if d.get('id'):
-            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),int(d.get('take_home_per_hour') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
             recalc_girl(c,int(d['id']))
         else:
-            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),int(d.get('take_home_per_hour') or 0),int(d.get('list_price') or 0),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
+            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
             row=c.execute('SELECT id FROM girls WHERE name=?',(d.get('name'),)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
@@ -726,7 +706,7 @@ def api_chain_page():
             g = c.execute('SELECT * FROM girls WHERE name=?', (sft.get('girl') or '',)).fetchone()
             row = dict(sft)
             row['girl_id'] = g['id'] if g else 0
-            row['price'] = int((g['list_price'] if g else 0) or 0)
+            row['price'] = int((g['list_price'] if g else 15000) or 15000)
             out_shifts.append(row)
         if not girl_name and out_shifts:
             girl_name = out_shifts[0]['girl']
@@ -751,7 +731,7 @@ def api_chain_order():
             g = ensure_girl(c, girl_name)
         if not g:
             return jsonify(ok=False, error='缺少女孩'), 400
-        amount = int(d.get('received_amount') or (g['list_price'] or 0) or 0)
+        amount = int(d.get('received_amount') or (g['list_price'] or 15000) or 15000)
         create_or_update_order(c, {
             'id': d.get('id') or None,
             'order_date': date_str,
@@ -909,7 +889,7 @@ def api_quick_links():
         if d.get('delete_id'):
             c.execute('DELETE FROM quick_links WHERE id=?', (int(d['delete_id']),))
             return jsonify(ok=True)
-        group_name = str(d.get('group_name') or '固定短语').strip()
+        group_name = str(d.get('group_name') or '常用短语').strip()
         title = str(d.get('title') or '').strip()
         content = str(d.get('content') or '').strip()
         sort_order = int(d.get('sort_order') or 0)
@@ -937,7 +917,7 @@ def sync_room_assignment_to_schedule(c, assignment_date, girl_id, hotel_name, ro
         return
     note = f"房间安排自动生成：{hotel_name}-{room_no}"
     old = c.execute("SELECT id FROM girl_schedules WHERE schedule_date=? AND girl_id=? AND note=?", (assignment_date, int(girl_id), note)).fetchone()
-    price = int(girl['list_price'] or 0)
+    price = int(girl['list_price'] or 15000)
     if old:
         c.execute("""UPDATE girl_schedules SET girl_name=?, start_time='00:00', end_time='04:00', price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (girl['name'], price, old['id']))
     else:
@@ -1264,7 +1244,7 @@ def api_customer_reserve():
                 if d1 <= c1: d1 += 24*60
                 if ranges_overlap(a,b,c1,d1): return jsonify(ok=False,error='这个时间已经被预约'),409
         price_row=c.execute('SELECT list_price FROM girls WHERE name=?',(girl,)).fetchone()
-        price=int(price_row['list_price'] or 0) if price_row else 0
+        price=int(price_row['list_price'] or 15000) if price_row else 15000
         c.execute("""INSERT INTO customer_reservations(reserve_date,girl_name,start_time,end_time,customer_account_id,username,line_name,phone,status,price,note)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (day,girl,start,end,acc_id,acc['username'],acc['line_name'],acc['phone'],'待确认',price,note))
         return jsonify(ok=True,message='预约已提交，等待管理员确认')
