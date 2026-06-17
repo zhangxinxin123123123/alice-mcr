@@ -891,8 +891,11 @@ function settlementGroups(){
   const gmap={};
   unpaid.forEach(o=>{
     const g=o.girl_name||'未填写女孩'; const d=o.order_date||'';
-    gmap[g]=gmap[g]||{girl:g,total:0,count:0,dates:{},ids:[]};
-    gmap[g].total+=Number(o.store_profit||0); gmap[g].count++; gmap[g].ids.push(Number(o.id));
+    gmap[g]=gmap[g]||{girl:g,total:0,nonCash:0,count:0,dates:{},ids:[]};
+    const amt=Number(o.store_profit||0);
+    gmap[g].total+=amt;
+    const pm=String(o.payment_method||'现金');
+    if(pm && pm!=='现金'){gmap[g].nonCash=(gmap[g].nonCash||0)+amt;} gmap[g].count++; gmap[g].ids.push(Number(o.id));
     gmap[g].dates[d]=gmap[g].dates[d]||{date:d,total:0,count:0,ids:[]};
     gmap[g].dates[d].total+=Number(o.store_profit||0); gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
   });
@@ -901,10 +904,10 @@ function settlementGroups(){
 function renderSettlement(){
   if(!window.settlementTable)return;
   const groups=settlementGroups();
-  let html='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算天数</th><th>未结算单数</th><th>合计</th><th>选择</th></tr></thead><tbody>';
+  let html='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算天数</th><th>未结算单数</th><th>结算公式</th><th>选择</th></tr></thead><tbody>';
   groups.forEach(g=>{
     const gid=encodeURIComponent(g.girl); const allChecked=g.ids.length&&g.ids.every(id=>settlementSelected.has(id));
-    html+=`<tr><td><button class="soft" onclick="settlementOpen['${gid}']=!settlementOpen['${gid}'];renderSettlement()">${settlementOpen[gid]?'收起':'展开'}</button></td><td>${g.girl}</td><td>${Object.keys(g.dates).length}</td><td>${g.count}</td><td><b>${yen(g.total)}</b></td><td><input type="checkbox" ${allChecked?'checked':''} onchange="toggleSettlementIds([${g.ids.join(',')}],this.checked)"> 全选该女孩</td></tr>`;
+    html+=`<tr><td><button class="soft" onclick="settlementOpen['${gid}']=!settlementOpen['${gid}'];renderSettlement()">${settlementOpen[gid]?'收起':'展开'}</button></td><td>${g.girl}</td><td>${Object.keys(g.dates).length}</td><td>${g.count}</td><td><b>${yen(g.total)}</b><br><small>${yen(g.total)} - ${yen(g.nonCash||0)} = <b>${yen(g.total-(g.nonCash||0))}</b></small></td><td><input type="checkbox" ${allChecked?'checked':''} onchange="toggleSettlementIds([${g.ids.join(',')}],this.checked)"> 全选该女孩</td></tr>`;
     if(settlementOpen[gid]){
       Object.values(g.dates).sort((a,b)=>String(b.date).localeCompare(a.date)).forEach(d=>{
         const ck=d.ids.length&&d.ids.every(id=>settlementSelected.has(id));
