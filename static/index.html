@@ -21,6 +21,11 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .table{overflow:auto;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}
 .modal{position:fixed;inset:0;background:#0006;display:none;align-items:center;justify-content:center;z-index:99}.modal.on{display:flex}.modal .box{background:white;border:3px solid var(--line);border-radius:24px;padding:20px;max-width:760px;width:92%;max-height:86vh;overflow:auto}
+
+.chain-image-drop{margin-top:12px;border:3px dashed var(--line);border-radius:22px;background:#fffafd;padding:18px;text-align:center;cursor:pointer;transition:.15s}
+.chain-image-drop.drag{background:#fff0f7;outline:3px solid var(--pink)}
+.chain-image-drop b{color:#e75ca2}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
+.chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}}
 
 .login-mask{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff);display:flex;align-items:center;justify-content:center;padding:20px}
@@ -140,6 +145,12 @@ body.role-user #stats{display:none!important}
   <p class="note">格式等同导入：时间/价格/客人/备注。第一次预约：客人写用户名；第二次以后写客户ID；如果用户名本身是纯数字，写成 //123。</p>
   <div class="form"><input id="coId" type="hidden"><input id="coTime" placeholder="时间 例：20-21 / 23.30-0.30"><input id="coPrice" placeholder="价格 自动带女孩定价"><input id="coCustomer" placeholder="客户ID或新客用户名"><input id="coRemark" placeholder="备注"><select id="coStatus"><option>预约中</option><option>已结束</option><option>取消</option></select><button class="primary" onclick="saveChainOrder()">保存接龙预约</button><button class="soft" onclick="clearChainForm()">清空</button></div>
   <div id="chainOrdersTable"></div>
+ </div>
+
+ <div class="card"><h2>员工图片加名字</h2>
+  <p class="note">选择上面的员工后，把剪贴板图片直接粘贴到本页，或把图片拖到下面区域。系统会自动把员工名字加到图片底部，并生成可复制、可下载的图片。</p>
+  <div id="chainImageDrop" class="chain-image-drop" tabindex="0"><b>拖拽图片到这里</b><br><span class="note">也可以点击这里后 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
+  <div id="chainImageList" class="chain-image-list"></div>
  </div>
  <div class="card"><h2>微信格式输出</h2>
   <div class="split"><div><h3>完整版（内部用：含客户ID和名字）</h3><textarea id="chainFullOut" readonly></textarea></div><div><h3>普通版（给女孩/群里看）</h3><textarea id="chainBasicOut" readonly></textarea></div></div>
@@ -362,6 +373,8 @@ async function loadChainPage(){
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
   await refreshChainExports();
   renderChainOrders(j.orders||[]);
+  setupChainImageTools();
+  renderChainNamedImages();
 }
 function renderChainOrders(rows){
   chainState.orders=rows||[];
@@ -408,6 +421,75 @@ async function copyChainFreeText(){
   if(!txt){alert('没有空闲时间内容');return;}
   await navigator.clipboard.writeText(txt).catch(()=>{});
 }
+
+
+let chainNamedImages=[];
+function currentChainEmployeeName(){return (window.cGirl&&cGirl.value)||chainState.girl_name||'员工';}
+function setupChainImageTools(){
+  const drop=document.getElementById('chainImageDrop');
+  if(!drop || drop.dataset.ready)return;
+  drop.dataset.ready='1';
+  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',e=>handleChainImageFiles(e.dataTransfer&&e.dataTransfer.files));
+  drop.addEventListener('click',()=>drop.focus());
+  document.addEventListener('paste',e=>{
+    if(!document.getElementById('chainReserve')?.classList.contains('on'))return;
+    const items=[...(e.clipboardData?.items||[])];
+    const files=items.filter(i=>i.type&&i.type.startsWith('image/')).map(i=>i.getAsFile()).filter(Boolean);
+    if(files.length){e.preventDefault();handleChainImageFiles(files);}
+  });
+}
+function handleChainImageFiles(files){
+  files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
+  if(!files.length){alert('请拖入或粘贴图片文件');return;}
+  files.forEach(file=>makeNamedImage(file,currentChainEmployeeName()));
+}
+function makeNamedImage(file,name){
+  const img=new Image();
+  img.onload=()=>{
+    const canvas=document.createElement('canvas');
+    canvas.width=img.naturalWidth||img.width; canvas.height=img.naturalHeight||img.height;
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const fontSize=Math.max(28,Math.round(canvas.width*0.075));
+    const pad=Math.round(fontSize*0.45);
+    const text=String(name||'员工');
+    ctx.font=`900 ${fontSize}px Microsoft YaHei, Yu Gothic UI, sans-serif`;
+    ctx.textAlign='center'; ctx.textBaseline='bottom';
+    const textW=ctx.measureText(text).width;
+    const boxW=Math.min(canvas.width-pad*2,textW+pad*3);
+    const boxH=fontSize+pad*1.3;
+    const x=(canvas.width-boxW)/2, y=canvas.height-pad-boxH;
+    ctx.fillStyle='rgba(0,0,0,.58)';
+    roundRect(ctx,x,y,boxW,boxH,Math.round(boxH/2)); ctx.fill();
+    ctx.lineWidth=Math.max(2,Math.round(fontSize*.08)); ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.strokeText(text,canvas.width,canvas.height-pad*1.35);
+    ctx.fillStyle='white'; ctx.fillText(text,canvas.width/2,canvas.height-pad*1.35);
+    const dataUrl=canvas.toDataURL('image/png');
+    chainNamedImages.unshift({name,dataUrl,filename:`${safeFileName(name)}_named.png`});
+    renderChainNamedImages();
+  };
+  img.onerror=()=>alert('图片读取失败');
+  img.src=URL.createObjectURL(file);
+}
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function safeFileName(s){return String(s||'employee').replace(/[\/:*?"<>|\s]+/g,'_').slice(0,40)||'employee';}
+function renderChainNamedImages(){
+  const box=document.getElementById('chainImageList'); if(!box)return;
+  box.innerHTML=chainNamedImages.map((it,i)=>`<div class="chain-image-card"><img src="${it.dataUrl}" title="点击复制图片" onclick="copyChainNamedImage(${i})"><div class="hint">${it.name}｜点击图片复制</div><div class="acts"><button class="primary" onclick="copyChainNamedImage(${i})">复制图片</button><button class="soft" onclick="downloadChainNamedImage(${i})">下载</button><button class="danger" onclick="deleteChainNamedImage(${i})">删除</button></div></div>`).join('') || '<p class="note">还没有生成图片。</p>';
+}
+async function copyChainNamedImage(i){
+  const it=chainNamedImages[i]; if(!it)return;
+  try{
+    const blob=await (await fetch(it.dataUrl)).blob();
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    alert('已复制图片');
+  }catch(e){
+    alert('当前浏览器不支持直接复制图片，请使用下载按钮。');
+  }
+}
+function downloadChainNamedImage(i){const it=chainNamedImages[i]; if(!it)return; const a=document.createElement('a'); a.href=it.dataUrl; a.download=it.filename; a.click();}
+function deleteChainNamedImage(i){chainNamedImages.splice(i,1);renderChainNamedImages();}
 
 function renderImportCheck(){if(!window.importCheck)return;const d=iDate.value||todayStr;const ym=d.slice(0,7);const days=new Date(Number(ym.slice(0,4)),Number(ym.slice(5,7)),0).getDate();const has=new Set((data.orders||[]).filter(o=>String(o.order_date||"").startsWith(ym)).map(o=>o.order_date));let html=`<b>${ym} 接龙录入检查：</b><br>`;for(let i=1;i<=days;i++){const day=`${ym}-${String(i).padStart(2,"0")}`;html+=`<span class="${has.has(day)?"done-day":"missing-day"}">${i}${has.has(day)?"✓":"未录"}</span>`;}importCheck.innerHTML=html;}
 
