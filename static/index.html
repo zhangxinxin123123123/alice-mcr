@@ -19,14 +19,14 @@
 input,select,textarea{border:2px solid var(--line);border-radius:14px;padding:10px;background:white;color:var(--ink);outline:none}textarea{width:100%;min-height:150px}
 button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;border:0;font-weight:900;cursor:pointer}button.primary{background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}button.soft{background:white;border:2px solid var(--line);color:var(--ink)}button.danger{background:var(--danger);color:white}
 .table{overflow:auto;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
-.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.split.vertical{grid-template-columns:1fr}.month-date-card canvas{max-height:420px}.month-date-rows{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}.month-date-row{display:grid;grid-template-columns:86px 70px 1fr 1fr 1fr;gap:8px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:16px;background:#fffafd;font-size:13px;font-weight:800}.month-date-row .date{color:#e75ca2;font-size:15px}.month-date-row .week{opacity:.82}.month-date-row .rev{color:#2563eb}.month-date-row .cost{color:#ef4444}.month-date-row .diff{color:var(--ink);font-weight:900}.month-date-row.negative .diff{color:#d6003d}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}
 .modal{position:fixed;inset:0;background:#0006;display:none;align-items:center;justify-content:center;z-index:99}.modal.on{display:flex}.modal .box{background:white;border:3px solid var(--line);border-radius:24px;padding:20px;max-width:760px;width:92%;max-height:86vh;overflow:auto}
 
 .chain-image-drop{margin-top:12px;border:3px dashed var(--line);border-radius:22px;background:#fffafd;padding:18px;text-align:center;cursor:pointer;transition:.15s}
 .chain-image-drop.drag{background:#fff0f7;outline:3px solid var(--pink)}
 .chain-image-drop b{color:#e75ca2}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
-@media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}}
+@media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
 
 .login-mask{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff);display:flex;align-items:center;justify-content:center;padding:20px}
 .login-box{width:min(420px,94vw);background:white;border:3px solid var(--line);border-radius:28px;padding:24px;box-shadow:0 18px 40px #b68bac33}
@@ -197,7 +197,7 @@ body.role-user #stats{display:none!important}
 
  
  <section id="stats" class="panel">
-  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas><div id="netDayChartTable"></div></div></div><div class="split stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas></div></div><div class="split stat-chart-only"><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas><div id="netMonthChartTable"></div></div></div>
+  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas><div id="netDayChartTable"></div></div></div><div class="split vertical stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card month-date-card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas><div id="monthDateRows" class="month-date-rows"></div></div><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas><div id="netMonthChartTable"></div></div></div>
   <div class="card"><h2>日收益表</h2><div id="dailyTable"></div></div>
  </section>
 
@@ -337,7 +337,7 @@ async function setCustomerReservationStatus(id,status){await api('/api/customer_
 
 function field(label,html){return `<label class="small">${label}<br>${html}</label>`}
 function enumSelect(id,type,selected){return `<select id="${id}">${opts(type,selected)}</select>`}
-function paymentSelect(id,selected="现金"){const vals=["现金","人民币","paypay"];return `<select id="${id}">`+vals.map(v=>`<option value="${v}" ${v===(selected||"现金")?"selected":""}>${v}</option>`).join("")+`</select>`}
+function paymentSelect(id,selected="现金"){const vals=["现金","人民币","PayPay","微信支付","支付宝","楽天Pay","LINE Pay","d払い"];const current=(selected==="paypay"?"PayPay":(selected||"现金"));return `<select id="${id}">`+vals.map(v=>`<option value="${v}" ${v===current?"selected":""}>${v}</option>`).join("")+`</select>`}
 function girlSelect(id,selected){return `<select id="${id}">`+data.girls.map(g=>`<option value="${g.id}" ${String(g.id)===String(selected)?"selected":""}>${g.name}</option>`).join("")+`</select>`}
 function editOrder(o){currentEdit={table:"orders",id:o.id};editTitle.textContent="编辑订单";editFields.innerHTML=field("日期",`<input id="m_order_date" type="date" value="${o.order_date||""}">`)+field("时间",`<input id="m_service_time" value="${o.service_time||""}">`)+field("女孩",girlSelect("m_girl_id",o.girl_id))+field("客人总付",`<input id="m_received_amount" value="${o.received_amount||0}">`)+field("女孩到手（只改本订单）",`<input id="m_girl_take_home" value="${o.girl_take_home||0}">`)+field("客户ID",`<input id="m_customer_raw" value="${o.customer_no||""}">`)+field("订单状态",enumSelect("m_order_status","order_status",o.order_status))+field("结算",enumSelect("m_settlement_status","settlement_status",o.settlement_status))+field("支付方式",paymentSelect("m_payment_method",o.payment_method||"现金"))+field("备注",`<input id="m_remark" value="${o.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${o.remark2||""}">`);editModal.classList.add("on")}
 function editCustomer(c){currentEdit={table:"customers",id:c.id};editTitle.textContent="编辑客户";editFields.innerHTML=field("客户ID",`<input id="m_customer_no" value="${c.customer_no||""}">`)+field("昵称",`<input id="m_name" value="${c.name||""}">`)+field("类型",enumSelect("m_customer_type","customer_type",c.customer_type))+field("充值余额",`<input id="m_recharge_balance" value="${c.recharge_balance||0}">`)+field("积分",`<input id="m_points" value="${c.points||0}">`)+field("来源",`<input id="m_source" value="${c.source||""}">`)+field("联系方式",`<input id="m_contact" value="${c.contact||""}">`)+field("备注",`<input id="m_remark" value="${c.remark||""}">`)+field("偏好TAG（多个用逗号/空格）",`<input id="m_remark2" value="${c.remark2||""}" placeholder="例：酒量好 喜欢聊天">`);editModal.classList.add("on")}
@@ -612,7 +612,10 @@ function renderCostNetTable(el, costMap, filter){
 }
 
 const barValuePlugin={id:'barValuePlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar" || (opts&&opts.display===false))return;const {ctx}=chart;ctx.save();ctx.font='bold 12px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';chart.data.datasets.forEach((ds,di)=>{const meta=chart.getDatasetMeta(di);meta.data.forEach((bar,i)=>{const v=ds.data[i]||0;ctx.fillText(yen(v),bar.x,bar.y-4);});});ctx.restore();}};
-const monthDateDiffPlugin={id:'monthDateDiffPlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar" || !opts || opts.display!==true)return;const revenue=chart.data.datasets[0]?.data||[], cost=chart.data.datasets[1]?.data||[], labels=chart.data.labels||[];const revMeta=chart.getDatasetMeta(0), costMeta=chart.getDatasetMeta(1);const {ctx}=chart;ctx.save();ctx.font='bold 11px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';labels.forEach((label,i)=>{const r=Number(revenue[i]||0), c=Number(cost[i]||0), diff=r-c;const br=revMeta.data[i], bc=costMeta.data[i];if(!br&&!bc)return;const x=br&&bc?(br.x+bc.x)/2:(br||bc).x;const y=Math.min(br?br.y:9999,bc?bc.y:9999)-6;ctx.fillText(`${String(label).slice(5)} 差额:${yen(diff)}`,x,y);});ctx.restore();}};
+const weekNames=['日','一','二','三','四','五','六'];
+function weekLabel(dateStr){const d=new Date(String(dateStr||'')+'T00:00:00');return isNaN(d)?'':`周${weekNames[d.getDay()]}`;}
+function mdLabel(dateStr){const p=String(dateStr||'').split('-');return p.length===3?`${Number(p[1])}/${Number(p[2])}`:String(dateStr||'');}
+const monthDateDiffPlugin={id:'monthDateDiffPlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar" || !opts || opts.display!==true)return;const revenue=chart.data.datasets[0]?.data||[], cost=chart.data.datasets[1]?.data||[], dates=opts.dates||[];const revMeta=chart.getDatasetMeta(0), costMeta=chart.getDatasetMeta(1);const {ctx}=chart;ctx.save();ctx.textAlign='center';dates.forEach((date,i)=>{const r=Number(revenue[i]||0), c=Number(cost[i]||0), diff=r-c;const br=revMeta.data[i], bc=costMeta.data[i];if(!br&&!bc)return;const x=br&&bc?(br.x+bc.x)/2:(br||bc).x;const top=Math.min(br?br.y:9999,bc?bc.y:9999);ctx.font='bold 11px sans-serif';ctx.fillStyle='#5d4566';ctx.textBaseline='bottom';ctx.fillText(weekLabel(date),x,top-24);ctx.font='bold 12px sans-serif';ctx.fillStyle=diff<0?'#d6003d':'#5d4566';ctx.fillText(`差额 ${yen(diff)}`,x,top-7);});ctx.restore();}};
 if(window.Chart && !Chart.registry.plugins.get('barValuePlugin')) Chart.register(barValuePlugin);
 if(window.Chart && !Chart.registry.plugins.get('monthDateDiffPlugin')) Chart.register(monthDateDiffPlugin);
 function chart(id,map,meta={}){
@@ -645,6 +648,10 @@ function barChart(id,map,meta={}){
 }
 
 function groupCostByDate(filter){let m={};(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).forEach(r=>{m[r.assignment_date]=(m[r.assignment_date]||0)+Number(r.daily_cost||0)});return m;}
+function renderMonthDateRows(dates,revenue,cost){
+  const el=document.getElementById('monthDateRows'); if(!el)return;
+  el.innerHTML=dates.map((d,i)=>{const r=Number(revenue[i]||0), c=Number(cost[i]||0), diff=r-c;return `<div class="month-date-row ${diff<0?'negative':''}"><div class="date">${mdLabel(d)}</div><div class="week">${weekLabel(d)}</div><div class="rev">收益 ${yen(r)}</div><div class="cost">成本 ${yen(c)}</div><div class="diff">差额 ${yen(diff)}</div></div>`;}).join('');
+}
 function monthDateRevenueCostChart(id,revenueMap,costMap){
   let ctx=document.getElementById(id); if(!ctx)return; if(charts[id])charts[id].destroy();
   const names=[...new Set([...Object.keys(revenueMap||{}),...Object.keys(costMap||{})])].sort();
@@ -652,8 +659,12 @@ function monthDateRevenueCostChart(id,revenueMap,costMap){
   const cost=names.map(k=>Number(costMap[k]||0));
   const revenueTotal=revenue.reduce((a,b)=>a+b,0), costTotal=cost.reduce((a,b)=>a+b,0), diffTotal=revenueTotal-costTotal;
   const head=document.getElementById(id+"Head");
-  if(head) head.innerHTML=`<b>月店铺收益：${yen(revenueTotal)}</b> ｜ 成本：${yen(costTotal)} ｜ 差额：${yen(diffTotal)} ｜ 日期：${names.length}天`;
-  charts[id]=new Chart(ctx,{type:"bar",data:{labels:names,datasets:[{label:"店铺收益",data:revenue,backgroundColor:"#3b82f6"},{label:"成本",data:cost,backgroundColor:"#ef4444"}]},options:{plugins:{legend:{display:true},barValuePlugin:{display:false},monthDateDiffPlugin:{display:true},tooltip:{callbacks:{afterBody(items){const i=items[0]?.dataIndex||0;return `差额：${yen((revenue[i]||0)-(cost[i]||0))}`;}}}},scales:{y:{beginAtZero:true}}}});
+  if(head) head.innerHTML=`<b>月店铺收益：${yen(revenueTotal)}</b><br>成本：${yen(costTotal)} ｜ 差额：${yen(diffTotal)} ｜ 日期：${names.length}天`;
+  renderMonthDateRows(names,revenue,cost);
+  charts[id]=new Chart(ctx,{type:"bar",data:{labels:names.map(weekLabel),datasets:[
+    {label:"店铺收益",data:revenue,backgroundColor:"rgba(59,130,246,.72)",borderColor:"#3b82f6",borderWidth:2,grouped:false,barPercentage:.72,categoryPercentage:.82,order:1},
+    {label:"成本",data:cost,backgroundColor:"rgba(239,68,68,.72)",borderColor:"#ef4444",borderWidth:2,grouped:false,barPercentage:.46,categoryPercentage:.82,order:0}
+  ]},options:{maintainAspectRatio:false,plugins:{legend:{display:true},barValuePlugin:{display:false},monthDateDiffPlugin:{display:true,dates:names},tooltip:{callbacks:{title(items){const i=items[0]?.dataIndex||0;return `${mdLabel(names[i])} ${weekLabel(names[i])}`;},afterBody(items){const i=items[0]?.dataIndex||0;return `差额：${yen((revenue[i]||0)-(cost[i]||0))}`;}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:0,minRotation:0}},y:{beginAtZero:true}}}});
 }
 function chartMeta(filter,map,mode="normal"){
   const orders=data.orders.filter(filter);
