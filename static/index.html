@@ -611,8 +611,10 @@ function renderCostNetTable(el, costMap, filter){
   target.innerHTML=h+'</tbody></table></div>';
 }
 
-const barValuePlugin={id:'barValuePlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar")return;const {ctx}=chart;ctx.save();ctx.font='bold 12px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';chart.data.datasets.forEach((ds,di)=>{const meta=chart.getDatasetMeta(di);meta.data.forEach((bar,i)=>{const v=ds.data[i]||0;ctx.fillText(yen(v),bar.x,bar.y-4);});});ctx.restore();}};
+const barValuePlugin={id:'barValuePlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar" || (opts&&opts.display===false))return;const {ctx}=chart;ctx.save();ctx.font='bold 12px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';chart.data.datasets.forEach((ds,di)=>{const meta=chart.getDatasetMeta(di);meta.data.forEach((bar,i)=>{const v=ds.data[i]||0;ctx.fillText(yen(v),bar.x,bar.y-4);});});ctx.restore();}};
+const monthDateDiffPlugin={id:'monthDateDiffPlugin',afterDatasetsDraw(chart,args,opts){if(chart.config.type!=="bar" || !opts || opts.display!==true)return;const revenue=chart.data.datasets[0]?.data||[], cost=chart.data.datasets[1]?.data||[], labels=chart.data.labels||[];const revMeta=chart.getDatasetMeta(0), costMeta=chart.getDatasetMeta(1);const {ctx}=chart;ctx.save();ctx.font='bold 11px sans-serif';ctx.fillStyle='#5d4566';ctx.textAlign='center';ctx.textBaseline='bottom';labels.forEach((label,i)=>{const r=Number(revenue[i]||0), c=Number(cost[i]||0), diff=r-c;const br=revMeta.data[i], bc=costMeta.data[i];if(!br&&!bc)return;const x=br&&bc?(br.x+bc.x)/2:(br||bc).x;const y=Math.min(br?br.y:9999,bc?bc.y:9999)-6;ctx.fillText(`${String(label).slice(5)} 差额:${yen(diff)}`,x,y);});ctx.restore();}};
 if(window.Chart && !Chart.registry.plugins.get('barValuePlugin')) Chart.register(barValuePlugin);
+if(window.Chart && !Chart.registry.plugins.get('monthDateDiffPlugin')) Chart.register(monthDateDiffPlugin);
 function chart(id,map,meta={}){
   let ctx=document.getElementById(id);
   if(!ctx)return;
@@ -640,6 +642,18 @@ function barChart(id,map,meta={}){
   const names=Object.keys(map).sort(); const values=names.map(k=>Number(map[k]||0)); const total=values.reduce((a,b)=>a+b,0);
   const head=document.getElementById(id+"Head"); if(head) head.innerHTML=`<b>月店铺收益：${yen(total)}</b> ｜ 日期：${names.length}天`;
   charts[id]=new Chart(ctx,{type:"bar",data:{labels:names,datasets:[{label:meta.mainLabel||"店铺收益",data:values}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${meta.mainLabel||"店铺收益"}：${yen(c.parsed.y||0)}`}}},scales:{y:{beginAtZero:true}}}});
+}
+
+function groupCostByDate(filter){let m={};(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).forEach(r=>{m[r.assignment_date]=(m[r.assignment_date]||0)+Number(r.daily_cost||0)});return m;}
+function monthDateRevenueCostChart(id,revenueMap,costMap){
+  let ctx=document.getElementById(id); if(!ctx)return; if(charts[id])charts[id].destroy();
+  const names=[...new Set([...Object.keys(revenueMap||{}),...Object.keys(costMap||{})])].sort();
+  const revenue=names.map(k=>Number(revenueMap[k]||0));
+  const cost=names.map(k=>Number(costMap[k]||0));
+  const revenueTotal=revenue.reduce((a,b)=>a+b,0), costTotal=cost.reduce((a,b)=>a+b,0), diffTotal=revenueTotal-costTotal;
+  const head=document.getElementById(id+"Head");
+  if(head) head.innerHTML=`<b>月店铺收益：${yen(revenueTotal)}</b> ｜ 成本：${yen(costTotal)} ｜ 差额：${yen(diffTotal)} ｜ 日期：${names.length}天`;
+  charts[id]=new Chart(ctx,{type:"bar",data:{labels:names,datasets:[{label:"店铺收益",data:revenue,backgroundColor:"#3b82f6"},{label:"成本",data:cost,backgroundColor:"#ef4444"}]},options:{plugins:{legend:{display:true},barValuePlugin:{display:false},monthDateDiffPlugin:{display:true},tooltip:{callbacks:{afterBody(items){const i=items[0]?.dataIndex||0;return `差额：${yen((revenue[i]||0)-(cost[i]||0))}`;}}}},scales:{y:{beginAtZero:true}}}});
 }
 function chartMeta(filter,map,mode="normal"){
   const orders=data.orders.filter(filter);
@@ -950,7 +964,7 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  if(!isUser){
    const monthMap=group(o=>String(o.order_date).startsWith(sm)); chart("monthChart",monthMap,chartMeta(o=>String(o.order_date).startsWith(sm),monthMap));
    const netDayMap=groupCost(o=>o.order_date===sd); chart("netDayChart",netDayMap,costMeta(o=>o.order_date===sd,netDayMap)); renderCostNetTable("netDayChartTable",netDayMap,o=>o.order_date===sd);
-   const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); barChart("monthDateChart",monthDateMap,{mainLabel:"店铺收益"});
+   const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); const monthDateCostMap=groupCostByDate(o=>String(o.order_date).startsWith(sm)); monthDateRevenueCostChart("monthDateChart",monthDateMap,monthDateCostMap);
  }
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
 document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ")renderSettlement()});
