@@ -290,6 +290,44 @@ def next_no(c):
                 pass
     return f"{max_no + 1:04d}"
 
+
+def normalize_customer_name_for_duplicate(name):
+    """客户名重复判断：忽略首尾/中间空格并做大小写统一。"""
+    return re.sub(r"\s+", "", str(name or '')).lower()
+
+def customer_name_duplicate_row(c, raw='', current_order_id=None):
+    """接龙录入时使用：如果输入的是客户名且客户库已存在同名客户，返回该客户。
+    数字客户ID仍按老逻辑使用，不作为重复客户名拦截。
+    """
+    raw = str(raw or '').strip()
+    force_name = False
+    if raw.startswith('__NAME__:'):
+        force_name = True
+        raw = raw[len('__NAME__:'):].strip()
+    if not raw:
+        return None
+    if raw.isdigit() and not force_name:
+        return None
+    target = normalize_customer_name_for_duplicate(raw)
+    if not target:
+        return None
+    allowed_customer_id = None
+    if current_order_id:
+        old = c.execute('SELECT customer_id FROM orders WHERE id=?', (int(current_order_id),)).fetchone()
+        if old:
+            allowed_customer_id = old['customer_id']
+    for row in c.execute("SELECT * FROM customers WHERE COALESCE(name,'')!=''").fetchall():
+        if allowed_customer_id and int(row['id']) == int(allowed_customer_id):
+            continue
+        if normalize_customer_name_for_duplicate(row['name']) == target:
+            return row
+    return None
+
+def assert_no_duplicate_customer_name_for_chain(c, raw='', current_order_id=None):
+    dup = customer_name_duplicate_row(c, raw, current_order_id)
+    if dup:
+        raise ValueError(f"客户名重复：{dup['name']} 已存在（客户ID {dup['customer_no']}）。请修改客户名后再导入。")
+
 def ensure_customer(c, raw='', remark=''):
     raw = str(raw or '').strip()
     force_name = False
@@ -635,6 +673,7 @@ def import_chain():
                     raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
                 cust_token, force_name = parts.pop(0)
                 cust = ('__NAME__:' + cust_token) if force_name else cust_token
+                assert_no_duplicate_customer_name_for_chain(c, cust)
                 remark_parts = [p[0] for p in parts]
 
                 create_or_update_order(c, {
@@ -802,6 +841,7 @@ def api_chain_order():
         if not g:
             return jsonify(ok=False, error='缺少女孩'), 400
         amount = int(d.get('received_amount') or (g['list_price'] or 15000) or 15000)
+        assert_no_duplicate_customer_name_for_chain(c, d.get('customer_raw') or '', d.get('id') or None)
         create_or_update_order(c, {
             'id': d.get('id') or None,
             'order_date': date_str,
