@@ -372,6 +372,28 @@ def update_customer_type_by_history(c, customer_id=None):
     """客户类型以客户表手动编辑值为准，不再被单子数量/充值逻辑自动覆盖。"""
     return
 
+
+
+def detect_payment_method_from_note(*texts):
+    """根据备注关键词自动识别支付方式。命中后覆盖传入的默认支付方式。"""
+    text = ' '.join(str(t or '') for t in texts).lower().replace(' ', '')
+    if not text:
+        return None
+    rules = [
+        ('PayPay', ['paypay', 'ペイペイ', 'pay pay']),
+        ('微信支付', ['微信', 'wechat', 'weixin', 'wx']),
+        ('支付宝', ['支付宝', 'alipay', 'ali pay']),
+        ('楽天Pay', ['楽天pay', '楽天ペイ', 'rakutenpay']),
+        ('LINE Pay', ['linepay', 'lineペイ']),
+        ('d払い', ['d払い', 'dbarai']),
+        ('现金', ['现金', '現金', 'cash']),
+        ('人民币', ['人民币', 'rmb', '人民元']),
+    ]
+    for method, keys in rules:
+        if any(k.lower().replace(' ', '') in text for k in keys):
+            return method
+    return None
+
 def create_or_update_order(c,d):
     old_customer_id = None
     if d.get('id'):
@@ -399,10 +421,12 @@ def create_or_update_order(c,d):
     prof = round_yen_1000_half_up(rec - th)
     cust = ensure_customer(c,d.get('customer_raw',''),d.get('remark',''))
     pts = math.floor(rec/20)
+    auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
+    payment_method = auto_payment or (d.get('payment_method') or '现金')
 
     if d.get('id'):
         c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('id')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
             # 客户类型手动优先，不按单量自动覆盖
@@ -410,7 +434,7 @@ def create_or_update_order(c,d):
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),(d.get('payment_method') or '现金'),d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
         recalc_customer_points(c, cust['id'])
 
 
