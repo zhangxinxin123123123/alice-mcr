@@ -123,6 +123,37 @@ button{cursor:pointer;font-weight:900}
   box-shadow:none;
   position:relative;
 }
+.shift-card-inner{
+  display:flex;
+  gap:8px;
+  align-items:flex-start;
+}
+.shift-avatar{
+  flex:0 0 calc(44px * var(--poster-scale));
+  width:calc(44px * var(--poster-scale));
+  height:calc(44px * var(--poster-scale));
+  border-radius:50%;
+  overflow:hidden;
+  border:2px solid rgba(255,255,255,.9);
+  box-shadow:0 2px 8px #004b6066;
+  background:rgba(255,255,255,.85);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.shift-avatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:block;
+}
+.shift-avatar-fallback{
+  color:#e75ca2;
+  font-size:calc(13px * var(--poster-scale));
+  font-weight:900;
+  text-shadow:none;
+}
+.shift-copy{min-width:0;flex:1}
 .shift-name{
   font-size:calc(13px * var(--poster-scale));
   line-height:1.25;
@@ -208,6 +239,7 @@ th{background:#fff0f7}
 .form-grid label{font-size:13px;font-weight:900;color:var(--ink)}
 .form-grid input,.form-grid select{width:100%;margin-top:5px}
 .price-pill{display:inline-block;padding:10px 12px;border:2px solid var(--line);border-radius:15px;background:#fff8fb;font-weight:900;color:#e75ca2}
+.avatar-status{font-size:13px;font-weight:900;color:#e75ca2}
 @media(max-width:640px){.form-grid{grid-template-columns:1fr}}
 
 @media(max-width:980px){
@@ -266,6 +298,8 @@ th{background:#fff0f7}
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
     <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
+      <span class="avatar-status" id="avatarStatus"></span>
       <span class="count">出勤人数：<span id="shiftCount">0</span></span>
       <button class="soft" onclick="clearAll()">清空全部</button>
       <button class="soft" onclick="scrollToPreview()">定位截图区</button>
@@ -321,6 +355,7 @@ th{background:#fff0f7}
   const today = new Date().toISOString().slice(0,10);
   let girls = [];
   let shifts = [];
+  let girlAvatars = {};
   let selectedGirl = "";
   let editingShiftId = null;
 
@@ -405,6 +440,71 @@ th{background:#fff0f7}
     return {"Content-Type":"application/json", ...(auth ? {"X-Alice-Role":auth.role} : {})};
   }
 
+  function currentShiftNames(){
+    const names = [];
+    const seen = new Set();
+    rowsForDate().forEach(s => {
+      const n = String(s.girl || "").trim();
+      if(n && !seen.has(n)){ seen.add(n); names.push(n); }
+    });
+    if(!names.length){
+      girls.forEach(g => {
+        const n = String(g.name || "").trim();
+        if(n && !seen.has(n)){ seen.add(n); names.push(n); }
+      });
+    }
+    return names;
+  }
+
+  async function loadGirlAvatars(){
+    const names = currentShiftNames();
+    const qs = names.length ? "?names=" + encodeURIComponent(names.join(",")) : "";
+    const r = await fetch("/api/girl_avatars" + qs + (qs ? "&" : "?") + "v=" + Date.now(), {cache:"no-store", headers:apiHeaders()});
+    const data = await r.json();
+    if(data.ok) girlAvatars = data.avatars || {};
+  }
+
+  function avatarFor(name){
+    const row = girlAvatars[String(name || "").trim()];
+    return row && row.avatar_url ? row.avatar_url + "?v=" + encodeURIComponent(row.updated_at || "") : "";
+  }
+
+  function avatarInitial(name){
+    const clean = String(name || "").replace(/\s+/g,"").replace(/[（(].*$/, "");
+    return escapeHtml(clean.slice(0, 2) || "?");
+  }
+
+  function renderAvatar(name){
+    const url = avatarFor(name);
+    if(url) return `<div class="shift-avatar"><img src="${escapeHtml(url)}" alt=""></div>`;
+    return `<div class="shift-avatar"><span class="shift-avatar-fallback">${avatarInitial(name)}</span></div>`;
+  }
+
+  window.syncNekoAvatars = async function(){
+    const names = currentShiftNames();
+    if(!names.length){ alert("当前没有可更新头像的女孩"); return; }
+    avatarStatus.textContent = "正在更新头像...";
+    try{
+      const r = await fetch('/api/neko_avatars/sync', {
+        method:'POST',
+        headers:apiHeaders(),
+        body:JSON.stringify({date:shiftDate.value || today, names})
+      });
+      const data = await r.json();
+      if(!data.ok) throw new Error(data.error || "更新失败");
+      Object.assign(girlAvatars, data.avatars || {});
+      render();
+      const ok = (data.results || []).length;
+      const miss = (data.missing || []).length;
+      const err = (data.errors || []).length;
+      avatarStatus.textContent = `已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
+    }catch(e){
+      console.error(e);
+      avatarStatus.textContent = "头像更新失败";
+      alert(e.message || "头像更新失败");
+    }
+  };
+
   async function loadPureShifts(autocopy=false){
     const d = shiftDate.value || today;
     const r = await fetch(`/api/pure_shifts?date=${encodeURIComponent(d)}&autocopy=${autocopy?1:0}&v=${Date.now()}`, {cache:"no-store", headers:apiHeaders()});
@@ -421,6 +521,7 @@ th{background:#fff0f7}
       source:x.source || "manual"
     }));
     window.girlTagMemory = data.girl_tags || {};
+    await loadGirlAvatars().catch(e => console.warn("load avatars failed", e));
     render();
   }
 
@@ -540,7 +641,7 @@ th{background:#fff0f7}
     shiftList.innerHTML = rows.map(s=>{
       const p = getGirlPrice(s.girl);
       const priceText = p > 0 ? `<span>${yen(p)} /h</span>` : `<span>¥0</span>`;
-      return `<div class="shift-card"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div>`;
+      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
     }).join("");
   }
 

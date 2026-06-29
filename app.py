@@ -1,10 +1,17 @@
 
-import re, math, sqlite3, webbrowser, threading, os
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib
 from datetime import date, datetime, timedelta
+from email.mime.text import MIMEText
+from email.utils import formataddr
 from pathlib import Path
+from urllib.parse import quote, urljoin, urlparse
+from urllib.request import Request, urlopen
 from flask import Flask, request, jsonify, send_from_directory
 APP_DIR=Path(__file__).resolve().parent
 DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db' if Path('/var/data').exists() else str(APP_DIR/'alice_academy_mcr.db')))
+BOSS_EMAIL=os.environ.get('ALICE_BOSS_EMAIL','xinxinzhang330@gmail.com')
+NEKO_BASE_URL=os.environ.get('ALICE_NEKO_BASE_URL','https://neko-miaomiao.com').rstrip('/')
+AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
@@ -57,6 +64,13 @@ def init_db():
             received_amount INTEGER DEFAULT 0, girl_take_home INTEGER DEFAULT 0, store_profit INTEGER DEFAULT 0, points INTEGER DEFAULT 0,
             order_status TEXT DEFAULT '已结束', settlement_status TEXT DEFAULT '未结算', payment_method TEXT DEFAULT '现金',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', raw_text TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS settlement_reports(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, report_date TEXT NOT NULL, girl_name TEXT NOT NULL,
+            theoretical_amount INTEGER DEFAULT 0, actual_settlement INTEGER DEFAULT 0, formula_text TEXT DEFAULT '',
+            order_ids TEXT DEFAULT '', boss_email TEXT DEFAULT '', girl_email TEXT DEFAULT '',
+            sent_to_boss_at TEXT DEFAULT '', sent_to_girl_at TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(report_date, girl_name))""")
         c.execute("""CREATE TABLE IF NOT EXISTS recharge_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, amount INTEGER, payment_method TEXT DEFAULT '现金', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS points_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, change_points INTEGER, reason TEXT DEFAULT '', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS enum_values(id INTEGER PRIMARY KEY AUTOINCREMENT, enum_type TEXT NOT NULL, value TEXT NOT NULL, sort_order INTEGER DEFAULT 0, UNIQUE(enum_type,value))""")
@@ -75,6 +89,9 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
             girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS girl_avatar_cache(
+            girl_name TEXT PRIMARY KEY, neko_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '',
+            source_url TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, line_name TEXT NOT NULL, phone TEXT NOT NULL,
             status TEXT DEFAULT '待审核', member_level TEXT DEFAULT 'svip', customer_id INTEGER DEFAULT 0,
@@ -99,6 +116,8 @@ def init_db():
             c.execute('ALTER TABLE girls ADD COLUMN list_price INTEGER DEFAULT 15000')
         if 'girl_alias' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN girl_alias TEXT DEFAULT ''")
+        if 'email' not in girl_cols:
+            c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
         c.execute("UPDATE quick_links SET group_name='网址' WHERE group_name='排班表'")
         c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
         c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
@@ -130,6 +149,130 @@ def api_login():
 def conn():
     c=sqlite3.connect(DB_PATH); c.row_factory=sqlite3.Row; return c
 def rows(rs): return [dict(r) for r in rs]
+
+NEKO_SEED_GIRLS = [
+    {"name":"新人女孩 夏織（かおり）性感日妹","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2026/04/20260423_WechatIMG14-1.thumb.jpg"},
+    {"name":"七海莉莉（童颜巨乳萝莉）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2026/03/20260325_%E5%9B%BE%E7%89%87_20260325183102.thumb.jpg"},
+    {"name":"紅莉（べにり）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2026/01/20260129_%E5%9B%BE%E7%89%87_20260129142059_646_58.thumb.jpg"},
+    {"name":"綾瀬（傲娇地雷系）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/12/20251220_line_oa_chat_251220_142928.thumb.jpg"},
+    {"name":"新人女孩淼淼（模特瘦身美女）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/10/20251024_IMG_1200.thumb.jpg"},
+    {"name":"绚（04年长腿巨瘦嫩妹妹）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/10/20251004_%E5%9B%BE%E7%89%87_20251004142526_271_58.thumb.jpg"},
+    {"name":"芙莲（模特双马尾妹妹）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/09/20250929_photo_2025-09-29_12-38-49.thumb.jpg"},
+    {"name":"琴烟（三点粉纯欲校花）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/08/20250813_GUrU-ZNbEAA0aQd-1.thumb.jpg"},
+]
+
+def http_text(url, timeout=18):
+    req = Request(url, headers={
+        'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+        'Accept':'application/json,text/html,*/*',
+        'Referer':NEKO_BASE_URL + '/',
+    })
+    with urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+        enc = r.headers.get_content_charset() or 'utf-8'
+        return raw.decode(enc, 'replace'), r.headers.get_content_type()
+
+def http_bytes(url, timeout=25):
+    req = Request(url, headers={
+        'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+        'Accept':'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        'Referer':NEKO_BASE_URL + '/',
+    })
+    with urlopen(req, timeout=timeout) as r:
+        return r.read(), r.headers.get_content_type() or ''
+
+def normalize_avatar_name(s):
+    s = str(s or '').strip().lower()
+    table = str.maketrans({'織':'织','紅':'红','綾':'绫','蓮':'莲','煙':'烟'})
+    s = s.translate(table)
+    s = re.sub(r'（[^）]*）|\([^)]*\)', '', s)
+    s = re.sub(r'新人女孩|性感日妹|童颜|巨乳|萝莉|模特|美女|妹妹|校花|傲娇|地雷系|长腿|纯欲|三点粉|双马尾|ss级|ss|s级|a级|伴游|top', '', s, flags=re.I)
+    s = re.sub(r'[\s·・,，。/\\|:：;；!！?？~～\-—_]+', '', s)
+    return s
+
+def first_neko_image(item):
+    pics = item.get('model_pics') or item.get('pics') or []
+    if isinstance(pics, list) and pics:
+        first = pics[0]
+        if isinstance(first, dict):
+            for k in ('url','src','full','thumbnail','thumb'):
+                if first.get(k): return str(first.get(k))
+        elif first:
+            return str(first)
+    return str(item.get('thumbnail') or item.get('thumb') or '')
+
+def fetch_neko_girls():
+    urls = [
+        NEKO_BASE_URL + '/simple-api/girls?_cb=' + str(int(datetime.now().timestamp())),
+        NEKO_BASE_URL + '/simple-api/girls',
+    ]
+    for url in urls:
+        try:
+            text, ctype = http_text(url)
+            if 'json' not in ctype and not text.lstrip().startswith(('[','{')):
+                continue
+            data = json.loads(text)
+            if isinstance(data, list):
+                return data, 'simple-api'
+        except Exception:
+            continue
+    return NEKO_SEED_GIRLS, 'seed'
+
+def match_neko_girl(girl_name, alias, neko_items):
+    wants = [normalize_avatar_name(girl_name), normalize_avatar_name(alias)]
+    wants = [w for w in wants if w]
+    best = None
+    best_score = 0
+    for item in neko_items:
+        neko_name = item.get('post_title') or item.get('name') or item.get('model_name') or ''
+        n = normalize_avatar_name(neko_name)
+        if not n:
+            continue
+        score = 0
+        for w in wants:
+            if w == n:
+                score = max(score, 100)
+            elif len(w) >= 2 and (w in n or n in w):
+                score = max(score, 80 + min(len(w), len(n)))
+        if score > best_score:
+            best, best_score = item, score
+    return best if best_score >= 80 else None
+
+def avatar_file_for(girl_name, src_url, content_type=''):
+    ext = '.jpg'
+    parsed_ext = Path(urlparse(src_url).path).suffix.lower()
+    if parsed_ext in ('.jpg','.jpeg','.png','.webp','.gif'):
+        ext = parsed_ext
+    elif 'png' in content_type:
+        ext = '.png'
+    elif 'webp' in content_type:
+        ext = '.webp'
+    key = hashlib.sha1((girl_name + '|' + src_url).encode('utf-8')).hexdigest()[:16]
+    return AVATAR_DIR / (key + ext)
+
+def cache_avatar(girl_name, neko_name, src_url):
+    if not src_url:
+        return ''
+    if src_url.startswith('//'):
+        src_url = 'https:' + src_url
+    elif src_url.startswith('/'):
+        src_url = urljoin(NEKO_BASE_URL + '/', src_url.lstrip('/'))
+    data, content_type = http_bytes(src_url)
+    if not data or len(data) < 500:
+        raise ValueError('image is empty')
+    AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+    path = avatar_file_for(girl_name, src_url, content_type)
+    path.write_bytes(data)
+    rel = '/static/girl_avatars/' + path.name
+    with conn() as c:
+        c.execute("""INSERT INTO girl_avatar_cache(girl_name,neko_name,avatar_url,source_url,updated_at)
+                     VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+                     ON CONFLICT(girl_name) DO UPDATE SET
+                     neko_name=excluded.neko_name, avatar_url=excluded.avatar_url,
+                     source_url=excluded.source_url, updated_at=CURRENT_TIMESTAMP""",
+                  (girl_name, neko_name, rel, src_url))
+    return rel
+
 def yen_to_int(s):
     s=str(s or '').strip().replace('（','').replace('）','').replace('(','').replace(')','').replace(',','').replace('¥','').replace('円','')
     if not s: return 0
@@ -992,6 +1135,148 @@ def api_orders_bulk_settle():
 
 
 
+
+
+def settlement_source_rows(c, report_date):
+    rows = c.execute("""SELECT * FROM orders
+                         WHERE order_date=? AND COALESCE(settlement_status,'')<>'已结算'
+                         ORDER BY girl_name, id""", (report_date,)).fetchall()
+    grouped = {}
+    for o in rows:
+        girl = o['girl_name'] or '未填写女孩'
+        grouped.setdefault(girl, {'girl_name': girl, 'theoretical_amount': 0, 'non_cash': 0, 'order_ids': []})
+        amount = int(o['store_profit'] or 0)
+        grouped[girl]['theoretical_amount'] += amount
+        if str(o['payment_method'] or '现金') != '现金':
+            grouped[girl]['non_cash'] += amount
+        grouped[girl]['order_ids'].append(str(o['id']))
+    return list(grouped.values())
+
+def settlement_formula_text(theoretical, non_cash):
+    return f"{int(theoretical or 0)} - {int(non_cash or 0)} = {int(theoretical or 0) - int(non_cash or 0)}"
+
+def saved_settlement_map(c, report_date):
+    return {r['girl_name']: dict(r) for r in c.execute('SELECT * FROM settlement_reports WHERE report_date=?', (report_date,)).fetchall()}
+
+@app.route('/api/settlements', methods=['GET'])
+def api_settlements_get():
+    init_db()
+    report_date = request.args.get('date') or ''
+    with conn() as c:
+        if report_date:
+            reports = rows(c.execute('SELECT * FROM settlement_reports WHERE report_date=? ORDER BY girl_name', (report_date,)).fetchall())
+        else:
+            reports = rows(c.execute('SELECT * FROM settlement_reports ORDER BY report_date DESC, girl_name').fetchall())
+    return jsonify(ok=True, settlements=reports, boss_email=BOSS_EMAIL)
+
+@app.route('/api/settlements/save', methods=['POST'])
+def api_settlements_save():
+    init_db()
+    d = request.json or {}
+    report_date = str(d.get('date') or date.today()).strip()
+    items = d.get('items') or []
+    if not report_date:
+        return jsonify(ok=False, error='缺少结算日期'), 400
+    with conn() as c:
+        saved = 0
+        for item in items:
+            girl_name = str(item.get('girl_name') or '').strip()
+            if not girl_name:
+                continue
+            g = c.execute('SELECT email FROM girls WHERE name=?', (girl_name,)).fetchone()
+            girl_email = str(item.get('girl_email') or (g['email'] if g and 'email' in g.keys() else '') or '').strip()
+            theoretical = int(item.get('theoretical_amount') or 0)
+            actual = int(item.get('actual_settlement') if item.get('actual_settlement') is not None else theoretical)
+            formula = str(item.get('formula_text') or '').strip()
+            order_ids = ','.join(str(x) for x in (item.get('order_ids') or []))
+            c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,boss_email,girl_email,updated_at)
+                         VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(report_date,girl_name) DO UPDATE SET
+                           theoretical_amount=excluded.theoretical_amount,
+                           actual_settlement=excluded.actual_settlement,
+                           formula_text=excluded.formula_text,
+                           order_ids=excluded.order_ids,
+                           boss_email=excluded.boss_email,
+                           girl_email=excluded.girl_email,
+                           updated_at=CURRENT_TIMESTAMP""",
+                      (report_date, girl_name, theoretical, actual, formula, order_ids, BOSS_EMAIL, girl_email))
+            saved += 1
+    return jsonify(ok=True, saved=saved)
+
+def send_plain_email(to_addrs, subject, body, display_name='Alice MCR'):
+    to_addrs = [x for x in to_addrs if x]
+    if not to_addrs:
+        return {'sent': False, 'reason': 'no recipients'}
+    host = os.environ.get('SMTP_HOST') or os.environ.get('ALICE_SMTP_HOST')
+    user = os.environ.get('SMTP_USER') or os.environ.get('ALICE_SMTP_USER')
+    password = os.environ.get('SMTP_PASSWORD') or os.environ.get('ALICE_SMTP_PASSWORD')
+    sender = os.environ.get('SMTP_FROM') or os.environ.get('ALICE_SMTP_FROM') or user
+    port = int(os.environ.get('SMTP_PORT') or os.environ.get('ALICE_SMTP_PORT') or 587)
+    if not host or not sender or not password:
+        return {'sent': False, 'reason': 'SMTP not configured', 'to': to_addrs, 'subject': subject, 'body': body}
+    msg = MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = subject
+    msg['From'] = formataddr((display_name, sender))
+    msg['To'] = ', '.join(to_addrs)
+    with smtplib.SMTP(host, port, timeout=20) as smtp:
+        smtp.starttls()
+        if user:
+            smtp.login(user, password)
+        smtp.sendmail(sender, to_addrs, msg.as_string())
+    return {'sent': True, 'to': to_addrs}
+
+@app.route('/api/settlements/notify', methods=['POST'])
+def api_settlements_notify():
+    init_db()
+    d = request.json or {}
+    report_date = str(d.get('date') or date.today()).strip()
+    with conn() as c:
+        source = settlement_source_rows(c, report_date)
+        saved = saved_settlement_map(c, report_date)
+        for row in source:
+            if row['girl_name'] not in saved:
+                formula = settlement_formula_text(row['theoretical_amount'], row['non_cash'])
+                actual = row['theoretical_amount'] - row['non_cash']
+                g = c.execute('SELECT email FROM girls WHERE name=?', (row['girl_name'],)).fetchone()
+                c.execute("""INSERT OR IGNORE INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,boss_email,girl_email)
+                             VALUES(?,?,?,?,?,?,?,?)""",
+                          (report_date, row['girl_name'], row['theoretical_amount'], actual, formula, ','.join(row['order_ids']), BOSS_EMAIL, (g['email'] if g and 'email' in g.keys() else '') or ''))
+        reports = rows(c.execute('SELECT * FROM settlement_reports WHERE report_date=? ORDER BY girl_name', (report_date,)).fetchall())
+        if not reports:
+            return jsonify(ok=False, error='当天没有可通报的结算记录'), 400
+        boss_lines = [f"当日结算通报 {report_date}", ""]
+        for r in reports:
+            boss_lines.append(f"{r['girl_name']}：今日理论 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。公式：{r['formula_text'] or ''}")
+        boss_result = send_plain_email([BOSS_EMAIL], f"当日结算通报 {report_date}", "\n".join(boss_lines))
+        girl_results = []
+        now = datetime.now().isoformat(timespec='seconds')
+        if boss_result.get('sent'):
+            c.execute('UPDATE settlement_reports SET sent_to_boss_at=? WHERE report_date=?', (now, report_date))
+        for r in reports:
+            girl_email = str(r.get('girl_email') or '').strip()
+            if not girl_email:
+                girl_results.append({'girl_name': r['girl_name'], 'sent': False, 'reason': 'no email'})
+                continue
+            body = f"{r['girl_name']}，今日家教费：理论 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。"
+            result = send_plain_email([girl_email], f"家教费结算 {report_date}", body, '家教费结算')
+            result['girl_name'] = r['girl_name']
+            girl_results.append(result)
+            if result.get('sent'):
+                c.execute('UPDATE settlement_reports SET sent_to_girl_at=? WHERE report_date=? AND girl_name=?', (now, report_date, r['girl_name']))
+    return jsonify(ok=True, boss=boss_result, girls=girl_results, reports=reports)
+
+@app.route('/api/girls/email', methods=['POST'])
+def api_girl_email_save():
+    init_db()
+    d = request.json or {}
+    girl_id = int(d.get('id') or 0)
+    email = str(d.get('email') or '').strip()
+    if not girl_id:
+        return jsonify(ok=False, error='缺少女孩ID'), 400
+    with conn() as c:
+        c.execute('UPDATE girls SET email=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', (email, girl_id))
+    return jsonify(ok=True)
+
 @app.route('/api/quick_links', methods=['POST'])
 def api_quick_links():
     d = request.json or {}
@@ -1234,6 +1519,58 @@ def api_pure_shifts_clear():
 
 
 # ===== 客人提前预约 / 后台审核 =====
+@app.route('/api/girl_avatars', methods=['GET'])
+def api_girl_avatars():
+    init_db()
+    raw = request.args.get('names') or ''
+    names = [x.strip() for x in raw.split(',') if x.strip()]
+    with conn() as c:
+        if names:
+            placeholders = ','.join('?' for _ in names)
+            data = rows(c.execute(f"SELECT * FROM girl_avatar_cache WHERE girl_name IN ({placeholders})", names).fetchall())
+        else:
+            data = rows(c.execute("SELECT * FROM girl_avatar_cache ORDER BY updated_at DESC").fetchall())
+    return jsonify(ok=True, avatars={r['girl_name']:r for r in data}, rows=data)
+
+@app.route('/api/neko_avatars/sync', methods=['POST'])
+def api_neko_avatars_sync():
+    init_db()
+    d = request.json or {}
+    names = [str(x or '').strip() for x in (d.get('names') or []) if str(x or '').strip()]
+    date_str = d.get('date') or str(date.today())
+    with conn() as c:
+        if not names:
+            names = []
+            seen = set()
+            for r in pure_shift_rows_for_date(c, date_str):
+                n = str(r.get('girl') or '').strip()
+                if n and n not in seen:
+                    seen.add(n); names.append(n)
+        if not names:
+            names = [r['name'] for r in c.execute("SELECT name FROM girls ORDER BY id DESC").fetchall()]
+        alias_map = {r['name']:(r['girl_alias'] if 'girl_alias' in r.keys() else '') for r in c.execute("SELECT name,girl_alias FROM girls").fetchall()}
+    try:
+        neko_items, source = fetch_neko_girls()
+    except Exception as e:
+        return jsonify(ok=False, error=str(e), results=[], missing=names), 502
+    results, missing, errors = [], [], []
+    for name in names:
+        try:
+            item = match_neko_girl(name, alias_map.get(name,''), neko_items)
+            if not item:
+                missing.append(name); continue
+            neko_name = item.get('post_title') or item.get('name') or item.get('model_name') or ''
+            img = first_neko_image(item)
+            if not img:
+                missing.append(name); continue
+            avatar_url = cache_avatar(name, neko_name, img)
+            results.append({'girl_name':name, 'neko_name':neko_name, 'avatar_url':avatar_url, 'source_url':img})
+        except Exception as e:
+            errors.append({'girl_name':name, 'error':str(e)})
+    return jsonify(ok=True, source=source, source_count=len(neko_items), results=results,
+                   missing=missing, errors=errors,
+                   avatars={r['girl_name']:r for r in results})
+
 def time_to_min(t):
     m = re.match(r"^(\d{1,2})(?::|\.)(\d{2})$", str(t or '').strip()) or re.match(r"^(\d{1,2})$", str(t or '').strip())
     if not m: return None
