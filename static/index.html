@@ -349,6 +349,41 @@ async function importChain(){let r=await api("/api/import_chain",{order_date:iDa
 
 
 let chainState={date:"",girl_name:"",girl_id:"",price:0,orders:[],shifts:[]};
+let chainPriceTouched=false;
+function chainIntervalMinutes(text){
+  text=String(text||"").trim();
+  if(!text || text.includes("包夜"))return null;
+  const m=text.match(/(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?/);
+  if(!m)return null;
+  let sh=Number(m[1]), sm=Number(m[2]||0), eh=Number(m[3]), em=Number(m[4]||0);
+  if(sm>=60)sm=59; if(em>=60)em=59;
+  let start=sh*60+sm, end=eh*60+em;
+  if(end<start){
+    if(sh>=12 && eh<12){
+      const pmEnd=(eh+12)*60+em;
+      end=pmEnd>start?pmEnd:end+24*60;
+    }else if(sh<12 && eh<sh){
+      start+=12*60; end+=24*60;
+    }else{
+      end+=24*60;
+    }
+  }
+  return end-start;
+}
+function chainBillableHours(text){
+  if(String(text||"").includes("包夜"))return 3;
+  const minutes=chainIntervalMinutes(text);
+  if(minutes===null || minutes<=60)return 1;
+  return Math.ceil(minutes/30)*0.5;
+}
+function chainAutoPrice(){
+  const base=Number(chainState.price||15000)||15000;
+  return Math.round(base*chainBillableHours(coTime.value));
+}
+function refreshChainAutoPrice(force=false){
+  if(!window.coPrice || !window.coTime)return;
+  if(force || !chainPriceTouched) coPrice.value=chainAutoPrice();
+}
 function refreshChainGirlSelect(){
   if(!window.cGirl)return;
   const old=cGirl.value;
@@ -368,7 +403,7 @@ async function loadChainPage(){
   chainState.girl_name=cGirl.value||j.girl_name||'';
   chainState.girl_id=opt?opt.dataset.id:'';
   chainState.price=Number(opt?opt.dataset.price:15000)||15000;
-  if(!coId.value) coPrice.value=chainState.price||'';
+  if(!coId.value) refreshChainAutoPrice(true);
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
   chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
@@ -385,14 +420,14 @@ function renderChainOrders(rows){
   });
   chainOrdersTable.innerHTML=h+'</tbody></table></div>';
 }
-function clearChainForm(){coId.value='';coTime.value='';coPrice.value=chainState.price||'';coCustomer.value='';coRemark.value='';coStatus.value='预约中';}
-function editChainOrder(o){coId.value=o.id;coTime.value=o.service_time||'';coPrice.value=o.received_amount||chainState.price||'';coCustomer.value=o.customer_no||'';coRemark.value=o.remark||'';coStatus.value=o.order_status||'预约中';}
+function clearChainForm(){coId.value='';coTime.value='';chainPriceTouched=false;refreshChainAutoPrice(true);coCustomer.value='';coRemark.value='';coStatus.value='预约中';}
+function editChainOrder(o){coId.value=o.id;coTime.value=o.service_time||'';coPrice.value=o.received_amount||chainState.price||'';chainPriceTouched=true;coCustomer.value=o.customer_no||'';coRemark.value=o.remark||'';coStatus.value=o.order_status||'预约中';}
 async function saveChainOrder(){
   if(!cDate.value){alert('请选择日期');return;}
   if(!cGirl.value){alert('请选择女孩');return;}
   if(!coTime.value){alert('请填写时间');return;}
   if(!coCustomer.value){alert('请填写客户ID或新客用户名');return;}
-  await api('/api/chain_order',{id:coId.value||null,order_date:cDate.value,girl_id:chainState.girl_id,girl_name:cGirl.value,service_time:coTime.value,received_amount:moneyInput(coPrice.value||chainState.price),customer_raw:coCustomer.value,remark:coRemark.value,order_status:coStatus.value,settlement_status:'未结算'});
+  await api('/api/chain_order',{id:coId.value||null,order_date:cDate.value,girl_id:chainState.girl_id,girl_name:cGirl.value,service_time:coTime.value,received_amount:moneyInput(coPrice.value||chainAutoPrice()),customer_raw:coCustomer.value,remark:coRemark.value,order_status:coStatus.value,settlement_status:'未结算'});
   clearChainForm();
   await loadAll();
   await loadChainPage();
@@ -983,6 +1018,8 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  }
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
 document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ")renderSettlement()});
+document.addEventListener("input",e=>{if(e.target.id==="coTime")refreshChainAutoPrice(); if(e.target.id==="coPrice")chainPriceTouched=true;});
+document.addEventListener("change",e=>{if(e.target.id==="coTime")refreshChainAutoPrice();});
 
 window.addEventListener("DOMContentLoaded",()=>{applyRole(); if(auth) loadAll();});
 

@@ -1040,12 +1040,15 @@ def api_chain_order():
             g = ensure_girl(c, girl_name)
         if not g:
             return jsonify(ok=False, error='缺少女孩'), 400
-        amount = int(d.get('received_amount') or (g['list_price'] or 15000) or 15000)
+        service_time = normalize_chain_time_token(d.get('service_time') or '')
+        base_price = int((g['list_price'] or 15000) or 15000)
+        raw_amount = d.get('received_amount')
+        amount = int(raw_amount) if str(raw_amount or '').strip() else int(round(base_price * calc_hours(service_time)))
         assert_no_duplicate_customer_name_for_chain(c, d.get('customer_raw') or '', d.get('id') or None)
         create_or_update_order(c, {
             'id': d.get('id') or None,
             'order_date': date_str,
-            'service_time': normalize_chain_time_token(d.get('service_time') or ''),
+            'service_time': service_time,
             'girl_id': g['id'],
             'received_amount': amount,
             'customer_raw': d.get('customer_raw') or '',
