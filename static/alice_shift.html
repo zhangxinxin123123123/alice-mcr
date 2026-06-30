@@ -3,21 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DONA DONA 人材 LIST | Alice Shift</title>
+<title>爱丽丝学院 · 纯出勤表</title>
 <style>
 :root{
-  --bg:#080712;
-  --panel:#150b22;
-  --panel2:#21102d;
-  --ink:#f9efff;
-  --muted:#b8a7c9;
-  --pink:#ff2f9a;
-  --pink2:#ff78bf;
-  --cyan:#21f7ff;
-  --yellow:#ffd447;
-  --red:#ff3d72;
-  --line:rgba(255,47,154,.82);
-  --dimline:rgba(255,47,154,.32);
+  --poster-text:#00d9ff;
+  --poster-scale:1;
+  --pink:#ff8fc7;
+  --pink2:#ffd8ea;
+  --lav:#d9c8ff;
+  --blue:#dff5ff;
+  --ink:#5d4566;
+  --line:#f0c6dc;
+  --paper:#fffafd;
+  --danger:#ff6e92;
 }
 *{box-sizing:border-box}
 body{
@@ -26,473 +24,347 @@ body{
   font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;
   color:var(--ink);
   background:
-    linear-gradient(90deg,rgba(33,247,255,.05) 1px,transparent 1px),
-    linear-gradient(rgba(255,47,154,.06) 1px,transparent 1px),
-    radial-gradient(circle at 12% 8%,rgba(255,47,154,.24),transparent 24%),
-    radial-gradient(circle at 88% 12%,rgba(33,247,255,.18),transparent 22%),
-    #070611;
-  background-size:48px 48px,48px 48px,100% 100%,100% 100%,100% 100%;
-  padding:6px;
+    radial-gradient(circle at 12% 8%,rgba(255,255,255,.9) 0 5%,transparent 6%),
+    linear-gradient(135deg,#fff7fb,#f4edff 48%,#eaf8ff);
+  padding:18px;
 }
-button,input,select{
-  font:inherit;
-  outline:none;
+.wrap{max-width:1280px;margin:0 auto}
+.hero{
+  border:3px solid var(--line);
+  border-radius:30px;
+  padding:18px 22px;
+  background:linear-gradient(135deg,var(--pink),var(--lav));
+  color:white;
+  box-shadow:0 12px 28px #ff8fc755;
+  margin-bottom:16px;
 }
-.shell{
-  min-height:calc(100vh - 12px);
-  border:2px solid var(--pink);
-  border-radius:18px;
-  overflow:hidden;
-  background:linear-gradient(180deg,rgba(12,9,25,.96),rgba(8,7,18,.98));
-  box-shadow:0 0 0 1px rgba(33,247,255,.2),0 0 28px rgba(255,47,154,.22);
-}
-.topbar{
-  display:grid;
-  grid-template-columns:minmax(260px,1fr) auto auto;
-  align-items:center;
-  gap:14px;
-  min-height:52px;
-  padding:10px 18px;
-  border-bottom:1px solid rgba(33,247,255,.65);
-  background:linear-gradient(90deg,#201127,#0d1020 60%,#1b0d25);
-}
-.brand{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  min-width:0;
-}
-.bolt{
-  color:var(--cyan);
-  text-shadow:2px 0 var(--pink),-2px 0 var(--yellow);
-  font-size:24px;
-  font-weight:900;
-}
-.brand h1{
-  margin:0;
-  font-size:24px;
-  line-height:1;
-  letter-spacing:0;
-  color:#fff;
-  text-shadow:3px 0 var(--cyan),-3px 0 var(--pink),0 0 12px rgba(255,47,154,.85);
-  white-space:nowrap;
-}
-.capsule{
-  justify-self:center;
-  border:1px solid var(--cyan);
-  border-radius:999px;
-  padding:8px 18px;
-  color:#d8fbff;
-  background:rgba(33,247,255,.08);
-  font-weight:900;
-  letter-spacing:2px;
-  box-shadow:inset 0 0 12px rgba(33,247,255,.18);
-  white-space:nowrap;
-}
-.tabs{
-  display:flex;
-  gap:8px;
-  justify-content:flex-end;
-}
-.tab-btn,.neon-btn{
-  border:1px solid var(--pink);
-  color:#08111a;
-  background:linear-gradient(#ffe86b,#ffac25);
-  padding:9px 16px;
-  border-radius:8px;
-  font-weight:900;
-  cursor:pointer;
-  box-shadow:0 0 0 1px rgba(255,47,154,.4),0 4px 0 #b44500;
-}
-.tab-btn.on{
-  background:linear-gradient(#61ffff,#00d7ff);
-  box-shadow:0 0 0 1px rgba(33,247,255,.7),0 4px 0 #0077a3;
-}
-.subhead{
-  display:grid;
-  grid-template-columns:minmax(230px,1fr) auto;
-  gap:12px;
-  align-items:end;
-  padding:14px 20px 8px;
-  border-bottom:1px dashed var(--dimline);
-}
-.subhead h2{
-  margin:0;
-  font-size:25px;
-  color:#ffd2e7;
-  text-shadow:0 0 12px rgba(255,47,154,.75);
-}
-.subhead h2::before,.subhead h2::after{
-  content:"▼";
-  color:var(--pink);
-  font-size:16px;
-  margin:0 14px 0 6px;
-}
-.subhead h2::after{margin:0 6px 0 14px}
-.subcode{
-  color:var(--cyan);
-  font-weight:900;
-  letter-spacing:2px;
-  font-size:12px;
+.hero h1{margin:0;font-size:30px;letter-spacing:.04em}
+.hero p{margin:8px 0 0;font-weight:700;opacity:.95}
+.card{
+  background:rgba(255,255,255,.94);
+  border:2px solid var(--line);
+  border-radius:26px;
+  padding:16px;
+  margin-bottom:14px;
+  box-shadow:0 10px 24px #b68bac1f;
 }
 .toolbar{
-  display:flex;
-  flex-wrap:wrap;
+  display:grid;
+  grid-template-columns:1.2fr 1.2fr 1fr 1fr 1fr 1.6fr auto auto;
   gap:10px;
-  align-items:center;
-  padding:14px 16px 10px;
 }
-.tool-group{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:7px;
-  border:1px solid rgba(255,212,71,.75);
-  border-radius:10px;
-  background:rgba(255,212,71,.08);
+input,select,button{
+  border:2px solid var(--line);
+  border-radius:15px;
+  padding:10px 12px;
+  background:white;
+  color:var(--ink);
+  outline:none;
+  font-weight:700;
 }
-.field,.selectish{
-  border:1px solid var(--cyan);
-  border-radius:8px;
-  min-height:34px;
-  padding:8px 10px;
-  color:#f8fdff;
-  background:#0b2436;
+button{cursor:pointer;font-weight:900}
+.primary{border:0;background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}
+.soft{background:white}
+.danger{border:0;background:var(--danger);color:white}
+.note{font-size:calc(13px * var(--poster-scale));opacity:.82;line-height:1.6}
+.count{
+  font-size:16px;
   font-weight:900;
-  box-shadow:inset 0 0 10px rgba(33,247,255,.14);
+  color:#e75ca2;
 }
-.field::placeholder{color:#7bcbd3}
-.date-field{width:150px}
-.girl-picker{position:relative;min-width:250px}
-.girl-picker .field{width:100%}
-.suggest{
-  position:absolute;
-  z-index:20;
-  left:0;
-  right:0;
-  top:42px;
-  display:none;
-  max-height:260px;
-  overflow:auto;
-  border:1px solid var(--cyan);
-  border-radius:8px;
-  background:#090818;
-  box-shadow:0 18px 36px rgba(0,0,0,.5),0 0 18px rgba(33,247,255,.28);
+.preview{
+  width:300px;
+  min-height:600px;
+  margin:0 auto;
+  background:
+    linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.08)),
+    var(--poster-bg, linear-gradient(135deg,#ffe9f4,#f3eaff,#eaf8ff));
+  background-size:cover;
+  background-position:center;
+  border:0;
+  border-radius:0;
+  padding:18px 16px;
+  overflow:hidden;
+  position:relative;
+  box-shadow:0 12px 30px #0002;
 }
-.suggest div{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  padding:9px 10px;
-  cursor:pointer;
-  border-bottom:1px dashed rgba(33,247,255,.18);
+.preview-title{
+  text-align:left;
+  font-size:calc(14px * var(--poster-scale));
+  line-height:1.15;
   font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffff99;
+  letter-spacing:.02em;
+  margin-bottom:2px;
 }
-.suggest div:hover{background:rgba(255,47,154,.18)}
-.count-box{
-  display:flex;
-  align-items:center;
-  gap:9px;
-  color:#ffe894;
+.preview-sub{
+  text-align:left;
+  margin:0 0 8px;
+  font-size:10px;
+  color:var(--poster-text);
   font-weight:900;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffff99;
 }
-.count-num{
-  min-width:62px;
-  text-align:center;
-  border:1px solid var(--cyan);
-  border-radius:7px;
-  padding:7px 16px;
-  color:#fff;
-  background:#09253a;
-}
-.statusline{
-  color:var(--cyan);
-  font-size:12px;
-  font-weight:900;
-}
-.list{
+.shift-list{
   display:flex;
   flex-direction:column;
   gap:8px;
-  padding:8px 16px 12px;
+  align-items:stretch;
 }
-.person-card{
-  display:grid;
-  grid-template-columns:96px minmax(250px,1.2fr) minmax(170px,.65fr) minmax(290px,1.1fr) minmax(260px,.95fr) 86px;
+
+.shift-card{
+  width:100%;
+  min-height:auto;
+  border:0;
+  border-radius:0;
+  padding:0;
+  background:transparent;
+  box-shadow:none;
+  position:relative;
+}
+.shift-card-inner{
+  display:flex;
   gap:8px;
-  align-items:center;
-  min-height:92px;
-  padding:8px;
-  border:2px solid var(--pink);
-  border-radius:12px;
-  background:linear-gradient(90deg,rgba(255,47,154,.28),rgba(25,12,38,.96) 32%,rgba(11,9,24,.98));
-  box-shadow:inset 5px 0 0 var(--pink),0 0 16px rgba(255,47,154,.18);
+  align-items:flex-start;
 }
-.avatar-box{
-  height:74px;
-  border:2px solid var(--cyan);
-  border-radius:9px;
+.shift-avatar{
+  flex:0 0 calc(44px * var(--poster-scale));
+  width:calc(44px * var(--poster-scale));
+  height:calc(44px * var(--poster-scale));
+  border-radius:50%;
   overflow:hidden;
-  background:linear-gradient(145deg,#13273b,#2b1840);
+  border:2px solid rgba(255,255,255,.9);
+  box-shadow:0 2px 8px #004b6066;
+  background:rgba(255,255,255,.85);
   display:flex;
   align-items:center;
   justify-content:center;
-  color:#d6fbff;
-  font-size:11px;
-  font-weight:900;
-  text-align:center;
-  line-height:1.45;
-  box-shadow:inset 0 0 16px rgba(33,247,255,.25);
 }
-.avatar-box img{
+.shift-avatar img{
   width:100%;
   height:100%;
   object-fit:cover;
   display:block;
 }
-.id-badge{
-  display:inline-block;
-  border:1px solid var(--cyan);
-  border-radius:5px;
-  color:var(--cyan);
-  background:#020b14;
-  padding:2px 7px;
-  font-size:10px;
+.shift-avatar-fallback{
+  color:#e75ca2;
+  font-size:calc(13px * var(--poster-scale));
   font-weight:900;
+  text-shadow:none;
 }
-.name-row{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  margin:6px 0 5px;
-  min-width:0;
-}
-.name{
-  min-width:0;
-  color:#fff;
-  font-size:19px;
+.shift-copy{min-width:0;flex:1}
+.shift-name{
+  font-size:calc(13px * var(--poster-scale));
+  line-height:1.25;
   font-weight:900;
-  text-shadow:2px 0 var(--pink),0 0 12px rgba(255,255,255,.34);
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
+  color:var(--poster-text);
+  padding-right:0;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
-.remark{
-  min-height:28px;
-  border:1px dashed var(--dimline);
-  border-radius:6px;
-  padding:6px 8px;
-  color:#f7b8d7;
-  background:rgba(255,47,154,.12);
-  font-size:12px;
-  line-height:1.35;
-  overflow:hidden;
-}
-.stack{
-  display:grid;
-  gap:7px;
-}
-.time-row,.price-row{
-  min-height:30px;
-  border:1px solid var(--cyan);
-  border-radius:8px;
-  padding:5px 10px;
-  background:#0b273a;
-  color:#dfffff;
+.shift-row{
+  margin-top:2px;
+  font-size:calc(13px * var(--poster-scale));
+  line-height:1.15;
   font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
-.price-row{
-  border-color:#d2aa20;
-  color:#ffe55d;
-  background:rgba(255,212,71,.16);
-}
-.mini-select{
-  width:100%;
-  min-width:0;
-  border:1px solid var(--pink);
-  border-radius:999px;
-  padding:4px 28px 4px 10px;
-  color:#fff;
-  background:#2b0a23;
-  font-size:12px;
-  font-weight:900;
-}
-.matrix-title{
-  color:var(--cyan);
-  font-size:11px;
-  font-weight:900;
-  letter-spacing:1px;
-  margin-bottom:3px;
-}
-.tag-grid,.param-grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:6px;
-}
-.param-line{
-  display:grid;
-  grid-template-columns:42px 1fr;
-  align-items:center;
-  gap:5px;
-  color:#ff9bcc;
-  font-size:12px;
-  font-weight:900;
-}
-.side-actions{
-  display:grid;
-  gap:6px;
-}
-.pill-btn{
-  border:1px solid var(--pink);
-  border-radius:8px;
-  padding:7px 8px;
-  color:#080712;
-  background:linear-gradient(#5dffff,#03d9ff);
-  font-size:12px;
-  font-weight:900;
-  cursor:pointer;
-}
-.pill-btn.danger{
-  color:#fff;
-  background:#4b0b36;
-}
-.empty{
-  min-height:240px;
-  border:1px dashed var(--dimline);
-  border-radius:12px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#ffaad4;
-  font-weight:900;
-}
-.table-card{
-  margin:6px 16px 18px;
-  padding:10px;
-  border:1px solid var(--dimline);
-  border-radius:10px;
-  background:rgba(255,47,154,.07);
-}
-.table-head{
+.time-price-line{
   display:flex;
   justify-content:space-between;
-  gap:12px;
-  align-items:center;
-  color:#dffcff;
-  font-weight:900;
-  margin-bottom:8px;
-}
-.copy-bar{
-  display:flex;
-  flex-wrap:wrap;
   gap:8px;
-  justify-content:flex-end;
+  font-size:calc(13px * var(--poster-scale));
+  line-height:1.15;
+  font-weight:900;
+  color:var(--poster-text);
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
-.small-btn{
-  border:1px solid var(--cyan);
-  border-radius:7px;
-  padding:7px 10px;
-  color:#dfffff;
-  background:#10243b;
+.price{font-size:calc(13px * var(--poster-scale));font-weight:900;color:var(--poster-text)}
+.tag-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.tag{
+  display:inline-block;
+  padding:2px 5px;
+  border-radius:999px;
+  background:linear-gradient(135deg,#fff0f7,#f2eaff);
+  border:1px solid #f0c6dc;
+  color:#e75ca2;
+  font-size:calc(12px * var(--poster-scale));
+  font-weight:900;
+}
+.gold-tag{
+  display:inline-block;
+  padding:4px 10px;
+  border-radius:999px;
+  background:linear-gradient(120deg,#5a4300,#ffd95e,#fff4b0,#d8a500,#5a4300);
+  background-size:300% 300%;
+  color:#fff8d6;
+  border:1px solid #ffd95e;
   font-size:12px;
   font-weight:900;
-  cursor:pointer;
+  box-shadow:0 0 12px #ffd95e88;
+  animation:goldFlow 3s linear infinite;
 }
-.small-btn.primary{border-color:var(--pink);background:#4a1234}
-@media(max-width:1120px){
-  .person-card{
-    grid-template-columns:82px 1fr;
-  }
-  .side-actions{grid-template-columns:repeat(3,minmax(0,1fr));grid-column:1 / -1}
-  .tag-grid,.param-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@keyframes goldFlow{
+  0%{background-position:0% 50%}
+  100%{background-position:100% 50%}
 }
-@media(max-width:720px){
-  body{padding:0}
-  .shell{border-radius:0;min-height:100vh}
-  .topbar,.subhead{grid-template-columns:1fr}
-  .capsule{justify-self:start}
-  .brand h1{font-size:20px;white-space:normal}
-  .toolbar{align-items:stretch}
-  .girl-picker,.field,.selectish{width:100%;min-width:0}
-  .person-card{grid-template-columns:1fr}
-  .avatar-box{height:180px}
+.del{display:none}
+.empty{
+  width:100%;
+  text-align:center;
+  padding:34px 10px;
+  color:var(--poster-text);
+  font-size:16px;
+  font-weight:900;
+  text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.table{
+  overflow:auto;border:2px solid var(--line);border-radius:18px;background:white;
+}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}
+th{background:#fff0f7}
+
+.modal-mask{
+  position:fixed; inset:0; background:rgba(0,0,0,.38); z-index:2000;
+  display:none; align-items:center; justify-content:center; padding:18px;
+}
+.modal{
+  width:min(560px,100%); background:white; border:3px solid var(--line); border-radius:26px;
+  padding:18px; box-shadow:0 20px 60px #0004;
+}
+.modal h3{margin:0 0 12px;color:#e75ca2}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-grid label{font-size:13px;font-weight:900;color:var(--ink)}
+.form-grid input,.form-grid select{width:100%;margin-top:5px}
+.price-pill{display:inline-block;padding:10px 12px;border:2px solid var(--line);border-radius:15px;background:#fff8fb;font-weight:900;color:#e75ca2}
+.avatar-status{font-size:13px;font-weight:900;color:#e75ca2}
+@media(max-width:640px){.form-grid{grid-template-columns:1fr}}
+
+@media(max-width:980px){
+  .toolbar{grid-template-columns:1fr}
+  .shift-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  .shift-list{grid-template-columns:1fr}
+}
+@media print{
+  body{background:white;padding:0}
+  .no-print{display:none!important}
+  .wrap{max-width:none}
+  .preview{border:0;box-shadow:none}
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
-<div class="shell">
-  <header class="topbar">
-    <div class="brand"><span class="bolt">↯</span><h1>DONA DONA 人材 LIST</h1><span class="bolt">↯</span></div>
-    <div class="capsule">ALICE ACADEMY / CYBER SHIFT</div>
-    <div class="tabs">
-      <button class="tab-btn on" type="button">人材</button>
-      <button class="tab-btn" type="button">出勤</button>
+<div class="wrap">
+  <div class="hero no-print">
+    <h1>🎀 ALICE ACADEMY · SHIFT LIST 🎀</h1>
+    <p>纯出勤表页面｜日期做标题｜女孩表下拉｜价格 1万～3万｜TAG 可手动编辑</p>
+  </div>
+
+  <div class="card no-print">
+    <h2>出勤录入</h2>
+    <p class="note">当前列表只显示选定日期；女孩价格强制读取女孩表“定价”，没有定价显示 0；编辑用弹框修改，截图实时同步。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="soft" onclick="setPresetBg('pink')">粉色学院背景</button>
+      <button class="soft" onclick="setPresetBg('night')">夜色背景</button>
+      <button class="soft" onclick="setPresetBg('gold')">金色背景</button>
+      <button class="soft" onclick="setPresetBg('blue')">蓝色清爽背景</button>
+      <button class="soft" onclick="setPresetBg('clear')">清除背景</button>
+      <input type="file" id="bgUpload" accept="image/*" style="max-width:220px">
     </div>
-  </header>
-
-  <section class="subhead">
-    <h2>横向き人材出勤表</h2>
-    <div class="subcode">TAG / STATUS / AVATAR / PARAMETER</div>
-  </section>
-
-  <section class="toolbar">
-    <input id="shiftDate" class="field date-field" type="date">
-    <div class="girl-picker">
-      <input id="girlSearch" class="field" placeholder="搜索人材名字...">
-      <div id="girlSuggest" class="suggest"></div>
+    <div class="toolbar">
+      <input id="shiftDate" type="date">
+      <div style="position:relative">
+<input id="girlSearch" placeholder="搜索女孩名字...">
+<div id="girlSuggest" style="position:absolute;left:0;right:0;top:48px;background:white;border:2px solid #f0c6dc;border-radius:16px;max-height:260px;overflow:auto;z-index:999;display:none;box-shadow:0 10px 24px #0001"></div>
+</div>
+      <select id="startSelect"></select>
+      <select id="endSelect"></select>
+      <label style="font-size:12px;font-weight:900">字体大小 <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小"></label>
+      <label style="font-size:12px;font-weight:900">字体颜色 <input id="fontColorInput" type="color" value="#00d9ff" title="字体颜色"></label>
+      <button class="soft" onclick="setPresetTextColor('cyan')">青色字</button>
+      <button class="soft" onclick="setPresetTextColor('pink')">粉色字</button>
+      <button class="soft" onclick="setPresetTextColor('white')">白色字</button>
+      <button class="soft" onclick="setPresetTextColor('gold')">金色字</button>
+      <label style="font-size:12px;font-weight:900">背景缩放 <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放"></label>
+      <select id="priceSelect"></select>
+      <input id="tagInput" placeholder="普通TAG，空格分隔 例：新人 可预约 会喝酒" value="">
+      <input id="goldTagInput" placeholder="金色TAG，空格分隔 例：TOP 回归 王牌">
+      <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
+      <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
-    <select id="startSelect" class="selectish"></select>
-    <select id="endSelect" class="selectish"></select>
-    <button class="neon-btn" id="addShiftBtn" type="button" onclick="addShift()">＋ 新增人材</button>
-    <button class="neon-btn" type="button" onclick="removeLast()">－ 删除最后一个</button>
-    <div class="tool-group">
-      <span class="count-box">出勤人数 <span id="shiftCount" class="count-num">0</span></span>
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
+      <span class="avatar-status" id="avatarStatus"></span>
+      <span class="count">出勤人数：<span id="shiftCount">0</span></span>
+      <button class="soft" onclick="clearAll()">清空全部</button>
+      <button class="soft" onclick="scrollToPreview()">定位截图区</button>
+      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">一键截图</button>
+      <button class="soft" onclick="loadGirls()">刷新女孩表</button>
     </div>
-    <button class="small-btn primary" type="button" onclick="syncNekoProfiles()">同步喵喵基础资料</button>
-    <button class="small-btn" type="button" onclick="loadGirls()">刷新</button>
-    <button class="small-btn" type="button" onclick="copyShiftText()">复制通报</button>
-    <button class="small-btn" type="button" onclick="clearAll()">清空当日</button>
-    <span class="statusline" id="avatarStatus"></span>
-  </section>
+  </div>
 
-  <main class="list" id="shiftList"></main>
+  <div class="card no-print">
+    <h2>当前列表</h2>
+    <div id="dataTable"></div>
 
-  <section class="table-card">
-    <div class="table-head">
-      <span>当前列表</span>
-      <div class="copy-bar">
-        <button class="small-btn" type="button" onclick="copyShiftText()">复制文本</button>
-        <button class="small-btn" type="button" onclick="window.print()">打印 / 保存 PDF</button>
+    <div id="editModalMask" class="modal-mask">
+      <div class="modal">
+        <h3>编辑当前出勤</h3>
+        <div class="form-grid">
+          <label>女孩
+            <select id="editGirlSelect" onchange="syncEditPrice()"></select>
+          </label>
+          <label>定价
+            <div id="editPriceShow" class="price-pill">¥0</div>
+          </label>
+          <label>开始时间
+            <select id="editStartSelect"></select>
+          </label>
+          <label>结束时间
+            <select id="editEndSelect"></select>
+          </label>
+          <label>普通TAG
+            <input id="editTagInput" placeholder="空格分隔 例：新人 可预约 会喝酒">
+          </label>
+          <label>金色TAG
+            <input id="editGoldTagInput" placeholder="例：TOP 回归 王牌">
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+          <button class="soft" onclick="closeEditModal()">取消</button>
+          <button class="primary" onclick="saveEditModal()">保存修改</button>
+        </div>
       </div>
     </div>
-    <div id="dataTable"></div>
-  </section>
+  </div>
+
+  <div class="preview" id="previewBox">
+    <div class="preview-title"><span id="posterTitle"></span></div>
+    <div class="preview-sub"><span id="previewDateText"></span> ｜ 出勤人数 <span id="previewCount">0</span></div>
+    <div class="shift-list" id="shiftList"></div>
+  </div>
 </div>
 
 <script>
 (function(){
   const today = new Date().toISOString().slice(0,10);
-  const DONA_TAGS = ["好色","巨乳","小恶魔","辣妹","纯洁","顺从","新人","运动部","积极","清楚","双马尾","萝莉","病娇","敏感","安穏","M气质","S气质","心理病"];
-  const STATUS_OPTIONS = ["出勤中","待机中","休息前","夜出勤"];
-  const BOOKING_OPTIONS = ["预约可","预约满","不可约"];
-  const PARAM_KEYS = [
-    ["mind","心灵"],
-    ["body","身材"],
-    ["face","颜值"],
-    ["tech","技巧"]
-  ];
-  const GRADES = ["S","A","B","C"];
-  const DEFAULT_PARAMS = {mind:"B", body:"S", face:"A", tech:"A"};
   let girls = [];
   let shifts = [];
   let girlAvatars = {};
   let selectedGirl = "";
+  let editingShiftId = null;
 
   window.yen = function(n){ return "¥" + Math.round(Number(n||0)).toLocaleString(); };
-  function escapeHtml(v){ return String(v ?? "").replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
+
+  function escapeHtml(v){
+    return String(v ?? "").replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+  }
   function jsStr(v){ return String(v ?? "").replace(/\\/g,"\\\\").replace(/'/g,"\\'"); }
-  function cleanText(v){ return String(v || "").replace(/\s+/g," ").trim(); }
-  function splitTags(text){ return String(text||"").replace(/[;；,，、|/]+/g," ").split(/\s+/).map(x=>x.trim()).filter(Boolean).slice(0,4); }
 
   function normalizeTime(t){
     t = String(t || "").trim();
@@ -502,13 +374,23 @@ button,input,select{
     if(h >= 0 && h <= 5) h += 24;
     return String(h).padStart(2,"0") + ":" + String(min).padStart(2,"0");
   }
+
   function displayTime(t){
     const nt = normalizeTime(t);
     const m = nt.match(/^(\d{1,2}):(\d{2})$/);
     if(!m) return nt;
-    return `${String(Number(m[1])).padStart(2,"0")}:${m[2]}`;
+    const h = Number(m[1]);
+    const mm = m[2];
+    if(h >= 24){
+      const showH = h - 24;
+      return mm === "00" ? `凌晨${showH}点` : `凌晨${showH}点${mm}分`;
+    }
+    return mm === "00" ? `${h}点` : `${h}点${mm}分`;
   }
-  function displayTimeRange(start,end){ return `${displayTime(start)} ~ ${displayTime(end)}`; }
+  function displayTimeRange(start,end){
+    return `${displayTime(start)}到${displayTime(end)}`;
+  }
+
   function timeOptions(selected){
     selected = normalizeTime(selected);
     let out = "";
@@ -520,38 +402,44 @@ button,input,select{
     }
     return out;
   }
+
+  function splitTags(text){
+    return String(text||"").replace(/[;；]+/g," ").split(/\s+/).map(x=>x.trim()).filter(Boolean);
+  }
+
+  function getGirlByName(name){
+    return girls.find(g => String(g.name||"") === String(name||""));
+  }
+  function getGirlPrice(name){
+    const g = getGirlByName(name);
+    return Number(g?.list_price || 0);
+  }
+  function currentGirl(){ return getGirlByName(selectedGirl || girlSearch.value); }
+
+  function priceOptions(selected=""){
+    const p = Number(selected || 0);
+    if(p <= 0) return `<option value="0" selected>¥0（女孩表未设置定价）</option>`;
+    return `<option value="${p}" selected>${yen(p)}</option>`;
+  }
+
+  function refreshPriceBySelectedGirl(){
+    const p = Number(currentGirl()?.list_price || 0);
+    priceSelect.innerHTML = priceOptions(p);
+  }
+
+  function applyPreviewStyle(){
+    const scale = Number(fontSizeRange?.value || 20) / 20;
+    const bg = Number(bgSizeRange?.value || 100);
+    const textColor = fontColorInput?.value || "#00d9ff";
+    document.documentElement.style.setProperty("--poster-scale", String(scale));
+    document.documentElement.style.setProperty("--poster-text", textColor);
+    previewBox.style.backgroundSize = bg + "% auto";
+  }
   function apiHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
     return {"Content-Type":"application/json", ...(auth ? {"X-Alice-Role":auth.role} : {})};
   }
-  function getGirlByName(name){ return girls.find(g => String(g.name||"") === String(name||"")); }
-  function getGirlPrice(name){ return Number(getGirlByName(name)?.list_price || 0); }
-  function getGirlRemark(name){ return cleanText(getGirlByName(name)?.remark || getGirlByName(name)?.remark2 || ""); }
-  function currentGirl(){ return getGirlByName(selectedGirl || girlSearch.value); }
-  function defaultTagsFor(name){
-    const g = getGirlByName(name);
-    const remembered = window.girlTagMemory && window.girlTagMemory[name];
-    const fromMemory = splitTags(remembered || g?.tags || "");
-    return [...fromMemory, ...DONA_TAGS].filter((x,i,a)=>x && a.indexOf(x)===i).slice(0,4);
-  }
-  function safeParams(params){
-    if(params && typeof params === "object"){
-      return {...DEFAULT_PARAMS, ...params};
-    }
-    if(typeof params === "string" && params.trim()){
-      try{ return {...DEFAULT_PARAMS, ...JSON.parse(params)}; }catch(e){}
-    }
-    return {...DEFAULT_PARAMS};
-  }
-  function avatarFor(name){
-    const row = girlAvatars[String(name || "").trim()];
-    return row && row.avatar_url ? row.avatar_url + "?v=" + encodeURIComponent(row.updated_at || "") : "";
-  }
-  function renderAvatar(name){
-    const url = avatarFor(name);
-    if(url) return `<div class="avatar-box"><img src="${escapeHtml(url)}" alt=""></div>`;
-    return `<div class="avatar-box">点击下方按钮<br>追加喵喵头像<br><span style="font-size:10px;color:#9befff">头像追加</span></div>`;
-  }
+
   function currentShiftNames(){
     const names = [];
     const seen = new Set();
@@ -567,6 +455,7 @@ button,input,select{
     }
     return names;
   }
+
   async function loadGirlAvatars(){
     const names = currentShiftNames();
     const qs = names.length ? "?names=" + encodeURIComponent(names.join(",")) : "";
@@ -574,27 +463,53 @@ button,input,select{
     const data = await r.json();
     if(data.ok) girlAvatars = data.avatars || {};
   }
-  window.syncNekoProfiles = async function(){
-    avatarStatus.textContent = "同步中：只取名字 / 备注 / 价格 / 第一张图片...";
+
+  function avatarFor(name){
+    const row = girlAvatars[String(name || "").trim()];
+    return row && row.avatar_url ? row.avatar_url + "?v=" + encodeURIComponent(row.updated_at || "") : "";
+  }
+
+  function avatarInitial(name){
+    const clean = String(name || "").replace(/\s+/g,"").replace(/[（(].*$/, "");
+    return escapeHtml(clean.slice(0, 2) || "?");
+  }
+
+  function renderAvatar(name){
+    const url = avatarFor(name);
+    if(url) return `<div class="shift-avatar"><img src="${escapeHtml(url)}" alt=""></div>`;
+    return `<div class="shift-avatar"><span class="shift-avatar-fallback">${avatarInitial(name)}</span></div>`;
+  }
+
+  window.syncNekoAvatars = async function(){
+    const names = currentShiftNames();
+    if(!names.length){ alert("当前没有可更新头像的女孩"); return; }
+    avatarStatus.textContent = "正在更新头像...";
     try{
-      const r = await fetch("/api/neko_profiles/sync", {method:"POST", headers:apiHeaders(), body:JSON.stringify({})});
+      const r = await fetch('/api/neko_avatars/sync', {
+        method:'POST',
+        headers:apiHeaders(),
+        body:JSON.stringify({date:shiftDate.value || today, names})
+      });
       const data = await r.json();
-      if(!data.ok) throw new Error(data.error || "同步失败");
-      await loadGirls();
-      avatarStatus.textContent = `已同步 ${data.updated || 0} 个，图片 ${data.avatars || 0} 张`;
+      if(!data.ok) throw new Error(data.error || "更新失败");
+      Object.assign(girlAvatars, data.avatars || {});
+      render();
+      const ok = (data.results || []).length;
+      const miss = (data.missing || []).length;
+      const err = (data.errors || []).length;
+      avatarStatus.textContent = `已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
     }catch(e){
       console.error(e);
-      avatarStatus.textContent = "同步失败";
-      alert(e.message || "同步失败");
+      avatarStatus.textContent = "头像更新失败";
+      alert(e.message || "头像更新失败");
     }
   };
-  window.syncNekoAvatars = window.syncNekoProfiles;
 
   async function loadPureShifts(autocopy=false){
     const d = shiftDate.value || today;
     const r = await fetch(`/api/pure_shifts?date=${encodeURIComponent(d)}&autocopy=${autocopy?1:0}&v=${Date.now()}`, {cache:"no-store", headers:apiHeaders()});
     const data = await r.json();
-    if(!data.ok) throw new Error(data.error || "读取出勤失败");
+    if(!data.ok) throw new Error(data.error || "读取纯出勤失败");
     shifts = (data.shifts || []).map(x => ({
       id:x.id,
       date:x.date,
@@ -602,47 +517,41 @@ button,input,select{
       start:normalizeTime(x.start || "19:00"),
       end:normalizeTime(x.end || "23:00"),
       tags:splitTags(x.tags || ""),
-      status:x.status || "出勤中",
-      booking:x.booking || "预约可",
-      params:safeParams(x.params),
+      goldTags:splitTags(x.goldTags || ""),
       source:x.source || "manual"
     }));
     window.girlTagMemory = data.girl_tags || {};
     await loadGirlAvatars().catch(e => console.warn("load avatars failed", e));
     render();
   }
+
   async function saveShiftToDb(shift){
-    const payload = {
-      id:shift.id,
-      date:shift.date,
-      girl:shift.girl,
-      start:shift.start,
-      end:shift.end,
-      tags:(shift.tags||[]).join(" "),
-      status:shift.status || "出勤中",
-      booking:shift.booking || "预约可",
-      params:safeParams(shift.params)
-    };
-    const r = await fetch("/api/pure_shifts", {method:"POST", headers:apiHeaders(), body:JSON.stringify(payload)});
+    const payload = {id:shift.id, date:shift.date, girl:shift.girl, start:shift.start, end:shift.end, tags:(shift.tags||[]).join(" "), goldTags:(shift.goldTags||[]).join(" ")};
+    const r = await fetch('/api/pure_shifts', {method:'POST', headers:apiHeaders(), body:JSON.stringify(payload)});
     const data = await r.json();
     if(!data.ok) throw new Error(data.error || "保存失败");
     return data.id;
   }
+
   window.loadGirls = async function(){
     try{
       const r = await fetch("/api/all?v=" + Date.now(), {cache:"no-store", headers:apiHeaders()});
       const data = await r.json();
       girls = data.girls || [];
-      girlSuggest.style.display = "none";
+      renderGirlSelect();
+      refreshPriceBySelectedGirl();
       await loadPureShifts(false);
     }catch(e){
       console.error(e);
-      alert("读取女孩表 / 出勤失败，请确认后端正在运行，并已登录账号。");
+      alert("读取女孩表/纯出勤失败，请确认后端正在运行，并已登录账号。");
     }
   };
+
+  function renderGirlSelect(){ renderGirlSuggest(""); }
+
   window.addShift = async function(){
     const girlName = selectedGirl || girlSearch.value.trim();
-    if(!girlName){ alert("请先选择人材"); return; }
+    if(!girlName){ alert("请先选择女孩"); return; }
     const shift = {
       id:"",
       source:"manual",
@@ -650,19 +559,21 @@ button,input,select{
       girl:girlName,
       start:normalizeTime(startSelect.value),
       end:normalizeTime(endSelect.value),
-      tags:defaultTagsFor(girlName),
-      status:"出勤中",
-      booking:"预约可",
-      params:{...DEFAULT_PARAMS}
+      tags:splitTags(tagInput.value || ""),
+      goldTags:splitTags(goldTagInput.value)
     };
     try{
       shift.id = await saveShiftToDb(shift);
       shifts.push(shift);
-      selectedGirl = "";
-      girlSearch.value = "";
+      window.girlTagMemory = window.girlTagMemory || {};
+      window.girlTagMemory[girlName] = (shift.tags||[]).join(" ");
+      goldTagInput.value = "";
+      tagInput.value = "";
       render();
+      scrollToPreview();
     }catch(e){ console.error(e); alert(e.message || "保存失败"); }
   };
+
   window.removeLast = async function(){
     const d = shiftDate.value || today;
     const last = shifts.filter(s => s.date===d).at(-1);
@@ -670,7 +581,7 @@ button,input,select{
   };
   window.deleteShift = async function(id){
     try{
-      const r = await fetch("/api/pure_shifts/delete", {method:"POST", headers:apiHeaders(), body:JSON.stringify({id})});
+      const r = await fetch('/api/pure_shifts/delete', {method:'POST', headers:apiHeaders(), body:JSON.stringify({id})});
       const data = await r.json();
       if(!data.ok) throw new Error(data.error || "删除失败");
       shifts = shifts.filter(s => String(s.id) !== String(id));
@@ -679,137 +590,140 @@ button,input,select{
   };
   window.clearAll = async function(){
     const d = shiftDate.value || today;
-    if(!confirm("确认清空当前日期的人材出勤表？")) return;
+    if(!confirm("确认清空当前日期的出勤表？")) return;
     try{
-      const r = await fetch("/api/pure_shifts/clear", {method:"POST", headers:apiHeaders(), body:JSON.stringify({date:d})});
+      const r = await fetch('/api/pure_shifts/clear', {method:'POST', headers:apiHeaders(), body:JSON.stringify({date:d})});
       const data = await r.json();
       if(!data.ok) throw new Error(data.error || "清空失败");
       shifts = shifts.filter(s => s.date !== d);
       render();
     }catch(e){ console.error(e); alert(e.message || "清空失败"); }
   };
+  window.scrollToPreview = function(){ previewBox.scrollIntoView({behavior:"smooth", block:"start"}); };
+
   function rowsForDate(){
     const d = shiftDate.value || today;
     return shifts.filter(s => s.date === d);
   }
-  function selectOptions(values, selected){
-    return values.map(v=>`<option value="${escapeHtml(v)}" ${String(v)===String(selected)?"selected":""}>${escapeHtml(v)}</option>`).join("");
-  }
-  function tagSelect(rowIndex, tagIndex, selected){
-    return `<select class="mini-select" onchange="updateShiftTag(${rowIndex},${tagIndex},this.value)">${selectOptions(DONA_TAGS, selected || DONA_TAGS[tagIndex] || DONA_TAGS[0])}</select>`;
-  }
-  function paramSelect(rowIndex, key, selected){
-    return `<select class="mini-select" onchange="updateShiftParam(${rowIndex},'${key}',this.value)">${selectOptions(GRADES, selected || DEFAULT_PARAMS[key] || "B")}</select>`;
-  }
-  function renderRow(s, i){
-    const p = getGirlPrice(s.girl);
-    const tags = [...(s.tags || [])];
-    while(tags.length < 4) tags.push(DONA_TAGS[tags.length] || DONA_TAGS[0]);
-    const params = safeParams(s.params);
-    const remark = getGirlRemark(s.girl) || "备注未填写";
-    return `<article class="person-card">
-      ${renderAvatar(s.girl)}
-      <section>
-        <span class="id-badge">ID ${String(i + 1).padStart(3,"0")}</span>
-        <div class="name-row"><span class="name">${escapeHtml(s.girl)}</span></div>
-        <div class="remark">${escapeHtml(remark).slice(0,90)}</div>
-      </section>
-      <section class="stack">
-        <div class="time-row">
-          <select class="mini-select" onchange="updateShiftField(${i},'start',this.value)">${timeOptions(s.start)}</select>
-          <select class="mini-select" style="margin-top:5px" onchange="updateShiftField(${i},'end',this.value)">${timeOptions(s.end)}</select>
-        </div>
-        <div class="price-row">${p > 0 ? `${yen(p)} /h` : "¥0 /h"}</div>
-      </section>
-      <section>
-        <div class="matrix-title">TAG</div>
-        <div class="tag-grid">${tags.map((t,idx)=>tagSelect(i,idx,t)).join("")}</div>
-      </section>
-      <section>
-        <div class="matrix-title">PARAMETER</div>
-        <div class="param-grid">${PARAM_KEYS.map(([key,label])=>`<div class="param-line"><span>${label}</span>${paramSelect(i,key,params[key])}</div>`).join("")}</div>
-      </section>
-      <section class="side-actions">
-        <select class="pill-btn" onchange="updateShiftField(${i},'status',this.value)">${selectOptions(STATUS_OPTIONS, s.status)}</select>
-        <select class="pill-btn" onchange="updateShiftField(${i},'booking',this.value)">${selectOptions(BOOKING_OPTIONS, s.booking)}</select>
-        <button class="pill-btn danger" type="button" onclick="deleteShift('${jsStr(s.id)}')">删除</button>
-      </section>
-    </article>`;
-  }
+
   function renderTable(){
     const rows = rowsForDate();
-    if(!rows.length){ dataTable.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
-    dataTable.innerHTML = rows.map((s,i)=>{
-      const params = safeParams(s.params);
-      return `<div style="display:grid;grid-template-columns:60px 1fr 150px 1fr 1fr 90px;gap:8px;padding:7px 0;border-bottom:1px dashed rgba(255,47,154,.25);font-size:12px">
-        <b>ID ${String(i+1).padStart(3,"0")}</b>
-        <span>${escapeHtml(s.girl)}</span>
-        <span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>
-        <span>${escapeHtml((s.tags||[]).join(" / "))}</span>
-        <span>心${params.mind} 身${params.body} 颜${params.face} 技${params.tech}</span>
-        <span>${escapeHtml(s.status || "")}</span>
-      </div>`;
+    if(!rows.length){ dataTable.innerHTML = '<div class="note">当前日期还没有出勤数据。房间安排录入后会显示在这里。</div>'; return; }
+    let h = '<div class="table"><table><thead><tr><th>女孩</th><th>时间</th><th>定价</th><th>普通TAG</th><th>金色TAG</th><th>来源</th><th>操作</th></tr></thead><tbody>';
+    rows.forEach(s=>{
+      h += `<tr>
+        <td>${escapeHtml(s.girl)}</td>
+        <td>${escapeHtml(displayTimeRange(s.start,s.end))}</td>
+        <td>${yen(getGirlPrice(s.girl))}</td>
+        <td>${escapeHtml((s.tags||[]).join(" "))}</td>
+        <td>${escapeHtml((s.goldTags||[]).join(" / "))}</td>
+        <td>${s.source === "manual" ? "手动新增" : "房间安排"}</td>
+        <td><button class="soft" onclick="openEditModal('${jsStr(s.id)}')">编辑</button> <button class="danger" onclick="deleteShift('${jsStr(s.id)}')">删除</button></td>
+      </tr>`;
+    });
+    dataTable.innerHTML = h + "</tbody></table></div>";
+  }
+
+  function renderTags(tags,goldTags){
+    const normal = (tags||[]).map(t=>`<span class="tag">${escapeHtml(t)}</span>`).join("");
+    const gold = (goldTags||[]).map(t=>`<span class="gold-tag">${escapeHtml(t)}</span>`).join("");
+    return normal || gold ? `<div class="tag-wrap">${gold}${normal}</div>` : "";
+  }
+
+  function renderPreview(){
+    const d = shiftDate.value || today;
+    const rows = rowsForDate();
+    posterTitle.textContent = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤`;
+    previewDateText.textContent = "";
+    previewCount.textContent = rows.length;
+    shiftCount.textContent = rows.length;
+    if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
+    shiftList.innerHTML = rows.map(s=>{
+      const p = getGirlPrice(s.girl);
+      const priceText = p > 0 ? `<span>${yen(p)} /h</span>` : `<span>¥0</span>`;
+      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
     }).join("");
   }
-  function render(){
-    const rows = rowsForDate();
-    shiftCount.textContent = rows.length;
-    shiftList.innerHTML = rows.length ? rows.map(renderRow).join("") : '<div class="empty">选择人材后点击“新增人材”，这里会生成多娜多娜风格横向出勤表。</div>';
-    renderTable();
-  }
-  async function saveRowByIndex(i){
-    const row = rowsForDate()[i];
-    if(!row) return;
-    try{
-      row.id = await saveShiftToDb(row);
-      window.girlTagMemory = window.girlTagMemory || {};
-      window.girlTagMemory[row.girl] = (row.tags||[]).join(" ");
-      avatarStatus.textContent = "已保存";
-      setTimeout(()=>{ if(avatarStatus.textContent === "已保存") avatarStatus.textContent = ""; }, 1200);
-    }catch(e){
-      console.error(e);
-      avatarStatus.textContent = "保存失败";
-      alert(e.message || "保存失败");
-    }
-  }
-  window.updateShiftField = async function(i, field, value){
-    const row = rowsForDate()[i];
-    if(!row) return;
-    if(field === "start" || field === "end") row[field] = normalizeTime(value);
-    else row[field] = value;
-    render();
-    await saveRowByIndex(i);
-  };
-  window.updateShiftTag = async function(i, tagIndex, value){
-    const row = rowsForDate()[i];
-    if(!row) return;
-    row.tags = [...(row.tags || [])];
-    row.tags[tagIndex] = value;
-    row.tags = row.tags.filter(Boolean).slice(0,4);
-    render();
-    await saveRowByIndex(i);
-  };
-  window.updateShiftParam = async function(i, key, value){
-    const row = rowsForDate()[i];
-    if(!row) return;
-    row.params = safeParams(row.params);
-    row.params[key] = value;
-    render();
-    await saveRowByIndex(i);
-  };
+
   function renderGirlSuggest(keyword=""){
     const box = girlSuggest;
     keyword = String(keyword||"").trim().toLowerCase();
-    const rows = girls.filter(g => !keyword || String(g.name||"").toLowerCase().includes(keyword)).slice(0,80);
+    const rows = girls.filter(g => !keyword || String(g.name||"").toLowerCase().includes(keyword));
     if(!rows.length){ box.style.display="none"; return; }
-    box.innerHTML = rows.map(g=>`<div onclick="chooseGirl('${jsStr(g.name)}')"><span>${escapeHtml(g.name)}</span><span>${yen(g.list_price||0)}</span></div>`).join("");
+    box.innerHTML = rows.map(g=>`<div onclick="chooseGirl('${jsStr(g.name)}')" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f7d7e6;font-weight:800">🎀 ${escapeHtml(g.name)} <span style="float:right;color:#e75ca2">${yen(g.list_price||0)}</span></div>`).join("");
     box.style.display = "block";
   }
   window.chooseGirl = function(name){
     selectedGirl = name;
     girlSearch.value = name;
     girlSuggest.style.display = "none";
+    refreshPriceBySelectedGirl();
+    tagInput.value = (window.girlTagMemory && window.girlTagMemory[name]) ? window.girlTagMemory[name] : "";
   };
+
+  function girlSelectOptions(selected){
+    return girls.map(g=>`<option value="${escapeHtml(g.name)}" ${String(g.name)===String(selected)?"selected":""}>${escapeHtml(g.name)}｜${yen(g.list_price||0)}</option>`).join("");
+  }
+  window.openEditModal = function(id){
+    const s = shifts.find(x => String(x.id) === String(id));
+    if(!s) return;
+    editingShiftId = s.id;
+    editGirlSelect.innerHTML = girlSelectOptions(s.girl);
+    editStartSelect.innerHTML = timeOptions(s.start);
+    editEndSelect.innerHTML = timeOptions(s.end);
+    editTagInput.value = (s.tags||[]).join(" ");
+    editGoldTagInput.value = (s.goldTags||[]).join(" ");
+    syncEditPrice();
+    editModalMask.style.display = "flex";
+  };
+  window.syncEditPrice = function(){ editPriceShow.textContent = yen(getGirlPrice(editGirlSelect.value)); };
+  window.closeEditModal = function(){ editModalMask.style.display = "none"; editingShiftId = null; };
+  window.saveEditModal = async function(){
+    const s = shifts.find(x => String(x.id) === String(editingShiftId));
+    if(!s) return closeEditModal();
+    s.girl = editGirlSelect.value;
+    s.start = normalizeTime(editStartSelect.value);
+    s.end = normalizeTime(editEndSelect.value);
+    s.tags = splitTags(editTagInput.value || "");
+    s.goldTags = splitTags(editGoldTagInput.value);
+    try{
+      s.id = await saveShiftToDb(s);
+      window.girlTagMemory = window.girlTagMemory || {};
+      window.girlTagMemory[s.girl] = (s.tags||[]).join(" ");
+      closeEditModal();
+      render();
+    }catch(e){ console.error(e); alert(e.message || "保存失败"); }
+  };
+
+  window.setPresetTextColor = function(type){
+    const colors = {cyan:"#00d9ff", pink:"#ff5ca8", white:"#ffffff", gold:"#ffe17a"};
+    if(fontColorInput && colors[type]) fontColorInput.value = colors[type];
+    applyPreviewStyle();
+  };
+
+  window.setPresetBg = function(type){
+    const bgs = {
+      pink:"linear-gradient(135deg,rgba(255,210,235,.72),rgba(235,220,255,.72)), radial-gradient(circle at 50% 35%,#ffffff55 0 18%,transparent 19%), linear-gradient(160deg,#ff9ccc,#d9c8ff)",
+      night:"linear-gradient(135deg,rgba(20,10,30,.68),rgba(45,15,60,.55)), radial-gradient(circle at 70% 18%,#ffffff77 0 8%,transparent 9%), linear-gradient(160deg,#1a0d2d,#5b1a55,#111827)",
+      gold:"linear-gradient(135deg,rgba(80,40,0,.52),rgba(255,220,120,.45)), radial-gradient(circle at 40% 25%,#fff0aa99 0 16%,transparent 17%), linear-gradient(160deg,#6c4300,#d19b22,#fff2b0)",
+      blue:"linear-gradient(135deg,rgba(160,235,255,.58),rgba(230,245,255,.55)), radial-gradient(circle at 60% 25%,#ffffffaa 0 18%,transparent 19%), linear-gradient(160deg,#b8f0ff,#dff5ff,#f7fbff)"
+    };
+    if(type === "clear") previewBox.style.removeProperty("--poster-bg");
+    else previewBox.style.setProperty("--poster-bg", bgs[type]);
+  };
+
+  window.captureShift = async function(){
+    try{
+      applyPreviewStyle();
+      const canvas = await html2canvas(previewBox,{backgroundColor:null,scale:3,useCORS:true});
+      canvas.toBlob(blob=>{
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "alice_shift.png"; a.click(); URL.revokeObjectURL(url);
+      },"image/png");
+    }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许下载。"); }
+  };
+
   function weekdayCN(dateStr){
     const ds=["周日","周一","周二","周三","周四","周五","周六"];
     const d = new Date(dateStr+"T00:00:00");
@@ -820,34 +734,48 @@ button,input,select{
     const rows = rowsForDate();
     let out = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤\n\n`;
     rows.forEach(s=>{
+      const tags = (s.tags||[]).map(t=>`（${t}）`).join("");
+      const gold = (s.goldTags||[]).map(t=>`【${t}】`).join("");
       const p = getGirlPrice(s.girl);
-      const tags = (s.tags || []).map(t=>`【${t}】`).join("");
-      const params = safeParams(s.params);
-      out += `${s.girl}${tags} ${s.status || ""} ${s.booking || ""}\n`;
-      out += `${displayTimeRange(s.start,s.end)}  ${p > 0 ? Math.round(p/1000) + "000/h" : "¥0"}\n`;
-      out += `心${params.mind} 身${params.body} 颜${params.face} 技${params.tech}\n`;
-      const remark = getGirlRemark(s.girl);
-      if(remark) out += `${remark}\n`;
-      out += "\n";
+      out += `${gold}${s.girl}${tags}\n`;
+      out += p > 0 ? `${displayTimeRange(s.start,s.end)}             ${Math.round(p/1000)}000/h\n\n` : `${displayTimeRange(s.start,s.end)}             ¥0\n\n`;
     });
-    return out.trim();
+    out += "https://ailisi99.com/";
+    return out;
   }
   window.copyShiftText = async function(){
     try{ await navigator.clipboard.writeText(buildCopyText()); alert("已复制出勤文本"); }
     catch(e){ console.error(e); alert("复制失败"); }
   };
 
+  function render(){ applyPreviewStyle(); renderTable(); renderPreview(); }
+
   shiftDate.value = today;
-  startSelect.innerHTML = timeOptions("18:00");
+  startSelect.innerHTML = timeOptions("19:00");
   endSelect.innerHTML = timeOptions("23:00");
+  priceSelect.innerHTML = priceOptions(0);
+  tagInput.value = "";
   shiftDate.addEventListener("change", ()=>loadPureShifts(true));
+
   window.addEventListener("DOMContentLoaded", async()=>{
     await loadGirls();
-    girlSearch.addEventListener("input", e=>{ selectedGirl = e.target.value; renderGirlSuggest(e.target.value); });
+    girlSearch.addEventListener("input", e=>{ selectedGirl = e.target.value; renderGirlSuggest(e.target.value); refreshPriceBySelectedGirl(); });
     girlSearch.addEventListener("focus", ()=>renderGirlSuggest(girlSearch.value));
-    document.addEventListener("click", e=>{
-      if(!e.target.closest(".girl-picker")) girlSuggest.style.display="none";
+    bgUpload.addEventListener("change", e=>{
+      const file = e.target.files && e.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => { previewBox.style.setProperty("--poster-bg", `url("${ev.target.result}")`); applyPreviewStyle(); };
+      reader.readAsDataURL(file);
     });
+    fontSizeRange.addEventListener("input", render);
+    fontColorInput.addEventListener("input", render);
+    bgSizeRange.addEventListener("input", applyPreviewStyle);
+    document.addEventListener("click", e=>{
+      if(!e.target.closest("#girlSuggest") && e.target.id !== "girlSearch") girlSuggest.style.display="none";
+      if(e.target === editModalMask) closeEditModal();
+    });
+    render();
   });
 })();
 </script>

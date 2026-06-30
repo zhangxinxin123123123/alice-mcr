@@ -85,7 +85,6 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS pure_shifts(
             id INTEGER PRIMARY KEY AUTOINCREMENT, shift_date TEXT NOT NULL, girl_name TEXT NOT NULL,
             start_time TEXT DEFAULT '19:00', end_time TEXT DEFAULT '23:00', tags TEXT DEFAULT '', gold_tags TEXT DEFAULT '',
-            status_text TEXT DEFAULT '出勤中', booking_status TEXT DEFAULT '预约可', params_json TEXT DEFAULT '',
             sort_order INTEGER DEFAULT 0, source TEXT DEFAULT 'manual', note TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
@@ -119,13 +118,6 @@ def init_db():
             c.execute("ALTER TABLE girls ADD COLUMN girl_alias TEXT DEFAULT ''")
         if 'email' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
-        pure_cols = [r[1] for r in c.execute('PRAGMA table_info(pure_shifts)').fetchall()]
-        if 'status_text' not in pure_cols:
-            c.execute("ALTER TABLE pure_shifts ADD COLUMN status_text TEXT DEFAULT '出勤中'")
-        if 'booking_status' not in pure_cols:
-            c.execute("ALTER TABLE pure_shifts ADD COLUMN booking_status TEXT DEFAULT '预约可'")
-        if 'params_json' not in pure_cols:
-            c.execute("ALTER TABLE pure_shifts ADD COLUMN params_json TEXT DEFAULT ''")
         c.execute("UPDATE quick_links SET group_name='网址' WHERE group_name='排班表'")
         c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
         c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
@@ -224,6 +216,16 @@ def first_nonempty(*values):
             return text
     return ''
 
+def absolute_neko_url(value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    if value.startswith('//'):
+        return 'https:' + value
+    if value.startswith('/'):
+        return urljoin(NEKO_BASE_URL + '/', value.lstrip('/'))
+    return value
+
 def neko_price(item):
     keys = ('price', 'model_price', 'service_price', 'list_price', 'fee', 'model_fee', 'course_price')
     for key in keys:
@@ -237,14 +239,24 @@ def neko_price(item):
                 return price
     return 0
 
-def neko_profile_from_item(item):
+def neko_profile_from_item(item, index=0):
     name = first_nonempty(item.get('post_title'), item.get('name'), item.get('model_name'))
     remark = first_nonempty(
         item.get('model_brief'), item.get('model_detail'), item.get('post_excerpt'),
         item.get('excerpt'), item.get('description'), item.get('remark'),
         item.get('post_content'), item.get('content'))
-    image = first_neko_image(item)
-    return {'name': name, 'remark': remark, 'price': neko_price(item), 'image': image}
+    image = absolute_neko_url(first_neko_image(item))
+    link = absolute_neko_url(item.get('link') or item.get('url') or '')
+    if not link and item.get('post_name'):
+        link = NEKO_BASE_URL + '/model/' + str(item.get('post_name')).strip('/').strip() + '/'
+    return {
+        'id': str(index + 1).zfill(3),
+        'name': name,
+        'remark': remark,
+        'price': neko_price(item),
+        'image': image,
+        'link': link,
+    }
 
 def fetch_neko_girls():
     urls = [
@@ -1462,23 +1474,13 @@ def normalize_tag_text(text):
 def normalize_gold_tag_text(text):
     return " ".join(re.sub(r"[;；]+", " ", str(text or "")).split())
 
-def safe_json_obj(text):
-    try:
-        data = json.loads(text or '{}')
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
 def pure_shift_rows_for_date(c, date_str):
     pure = []
     for r in c.execute("SELECT * FROM pure_shifts WHERE shift_date=? ORDER BY sort_order ASC,id ASC", (date_str,)).fetchall():
         pure.append({
             'id': f"pure_{r['id']}", 'raw_id': r['id'], 'date': r['shift_date'], 'girl': r['girl_name'],
             'start': r['start_time'], 'end': r['end_time'], 'tags': normalize_tag_text(r['tags']),
-            'goldTags': normalize_gold_tag_text(r['gold_tags']),
-            'status': r['status_text'] or '出勤中', 'booking': r['booking_status'] or '预约可',
-            'params': safe_json_obj(r['params_json']),
-            'source': 'manual', 'sort_order': r['sort_order'] or 0
+            'goldTags': normalize_gold_tag_text(r['gold_tags']), 'source': 'manual', 'sort_order': r['sort_order'] or 0
         })
     schedules = []
     for r in c.execute("SELECT * FROM girl_schedules WHERE schedule_date=? AND COALESCE(status,'出勤')='出勤' ORDER BY id ASC", (date_str,)).fetchall():
@@ -1488,9 +1490,7 @@ def pure_shift_rows_for_date(c, date_str):
         schedules.append({
             'id': f"schedule_{r['id']}", 'raw_id': r['id'], 'date': r['schedule_date'], 'girl': r['girl_name'],
             'start': r['start_time'] or '00:00', 'end': r['end_time'] or '04:00', 'tags': tag_text,
-            'goldTags': '房间' if '房间安排自动生成' in str(r['note'] or '') else '',
-            'status': '出勤中', 'booking': '预约可', 'params': {},
-            'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
+            'goldTags': '房间' if '房间安排自动生成' in str(r['note'] or '') else '', 'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
         })
     return pure + schedules
 
@@ -1505,12 +1505,8 @@ def copy_yesterday_pure_if_empty(c, date_str):
     yday = str(d - timedelta(days=1))
     yrows = pure_shift_rows_for_date(c, yday)
     for idx, r in enumerate(yrows, start=1):
-        c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,status_text,booking_status,params_json,sort_order,source,note)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (date_str, r['girl'], r['start'], r['end'], normalize_tag_text(r.get('tags','')),
-                   normalize_gold_tag_text(r.get('goldTags','')), r.get('status') or '出勤中',
-                   r.get('booking') or '预约可', json.dumps(r.get('params') or {}, ensure_ascii=False),
-                   idx, 'manual', '从昨日纯出勤自动复制'))
+        c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source,note)
+                     VALUES(?,?,?,?,?,?,?,?,?)""", (date_str, r['girl'], r['start'], r['end'], normalize_tag_text(r.get('tags','')), normalize_gold_tag_text(r.get('goldTags','')), idx, 'manual', '从昨日纯出勤自动复制'))
     return len(yrows)
 
 @app.route('/api/pure_shifts', methods=['GET'])
@@ -1536,18 +1532,13 @@ def api_pure_shifts_save():
     end = str(d.get('end') or d.get('end_time') or '23:00').strip()
     tags = normalize_tag_text(d.get('tags') if not isinstance(d.get('tags'), list) else ' '.join(d.get('tags')))
     gold_tags = normalize_gold_tag_text(d.get('goldTags') if not isinstance(d.get('goldTags'), list) else ' '.join(d.get('goldTags')))
-    status_text = str(d.get('status') or d.get('status_text') or '出勤中').strip()
-    booking_status = str(d.get('booking') or d.get('booking_status') or '预约可').strip()
-    params = d.get('params') if isinstance(d.get('params'), dict) else safe_json_obj(d.get('params_json'))
-    params_json = json.dumps(params or {}, ensure_ascii=False)
     raw_id = str(d.get('id') or '')
     with conn() as c:
         c.execute("""INSERT INTO girl_tag_memory(girl_name,tags,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
                      ON CONFLICT(girl_name) DO UPDATE SET tags=excluded.tags, updated_at=CURRENT_TIMESTAMP""", (girl, tags))
         if raw_id.startswith('pure_'):
             sid = int(raw_id.split('_',1)[1])
-            c.execute("""UPDATE pure_shifts SET shift_date=?,girl_name=?,start_time=?,end_time=?,tags=?,gold_tags=?,status_text=?,booking_status=?,params_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                      (shift_date, girl, start, end, tags, gold_tags, status_text, booking_status, params_json, sid))
+            c.execute("""UPDATE pure_shifts SET shift_date=?,girl_name=?,start_time=?,end_time=?,tags=?,gold_tags=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, girl, start, end, tags, gold_tags, sid))
             return jsonify(ok=True, id=f'pure_{sid}')
         if raw_id.startswith('schedule_'):
             sid = int(raw_id.split('_',1)[1])
@@ -1555,10 +1546,8 @@ def api_pure_shifts_save():
             c.execute("""UPDATE girl_schedules SET schedule_date=?, girl_id=?, girl_name=?, start_time=?, end_time=?, price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, int(g['id']) if g else 0, girl, start, end, 0, sid))
             return jsonify(ok=True, id=f'schedule_{sid}')
         max_sort = c.execute('SELECT COALESCE(MAX(sort_order),0) AS m FROM pure_shifts WHERE shift_date=?', (shift_date,)).fetchone()['m']
-        cur = c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,status_text,booking_status,params_json,sort_order,source)
-                           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                        (shift_date, girl, start, end, tags, gold_tags, status_text, booking_status,
-                         params_json, int(max_sort or 0)+1, 'manual'))
+        cur = c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source)
+                           VALUES(?,?,?,?,?,?,?,?)""", (shift_date, girl, start, end, tags, gold_tags, int(max_sort or 0)+1, 'manual'))
         return jsonify(ok=True, id=f"pure_{cur.lastrowid}")
 
 @app.route('/api/pure_shifts/delete', methods=['POST'])
@@ -1639,45 +1628,18 @@ def api_neko_avatars_sync():
                    missing=missing, errors=errors,
                    avatars={r['girl_name']:r for r in results})
 
-@app.route('/api/neko_profiles/sync', methods=['POST'])
-def api_neko_profiles_sync():
-    init_db()
+@app.route('/api/neko_profiles', methods=['GET'])
+def api_neko_profiles():
     try:
         neko_items, source = fetch_neko_girls()
     except Exception as e:
-        return jsonify(ok=False, error=str(e), updated=0, avatars=0, errors=[]), 502
-
-    updated = 0
-    avatar_count = 0
+        return jsonify(ok=False, error=str(e), source='', profiles=[]), 502
     profiles = []
-    errors = []
-    with conn() as c:
-        for item in neko_items:
-            profile = neko_profile_from_item(item)
-            name = profile.get('name', '').strip()
-            if not name:
-                continue
-            price = int(profile.get('price') or 0)
-            remark = profile.get('remark') or ''
-            c.execute("""INSERT INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,list_price,contact,tags,remark,remark2)
-                         VALUES(?,?,?,?,?,?,?,?,?,?)
-                         ON CONFLICT(name) DO UPDATE SET
-                         list_price=CASE WHEN excluded.list_price>0 THEN excluded.list_price ELSE girls.list_price END,
-                         remark=CASE WHEN excluded.remark<>'' THEN excluded.remark ELSE girls.remark END,
-                         updated_at=CURRENT_TIMESTAMP""",
-                      (name, '', '普通', '在职', 10000, price, '', '', remark, '喵喵基础资料同步'))
-            updated += 1
-            avatar_url = ''
-            if profile.get('image'):
-                try:
-                    avatar_url = cache_avatar(name, name, profile['image'])
-                    if avatar_url:
-                        avatar_count += 1
-                except Exception as e:
-                    errors.append({'girl_name': name, 'image': profile.get('image'), 'error': str(e)})
-            profiles.append({'name': name, 'remark': remark, 'price': price, 'avatar_url': avatar_url})
-    return jsonify(ok=True, source=source, source_count=len(neko_items), updated=updated,
-                   avatars=avatar_count, profiles=profiles, errors=errors)
+    for idx, item in enumerate(neko_items):
+        p = neko_profile_from_item(item, idx)
+        if p.get('name'):
+            profiles.append(p)
+    return jsonify(ok=True, source=source, source_count=len(neko_items), profiles=profiles)
 
 def time_to_min(t):
     m = re.match(r"^(\d{1,2})(?::|\.)(\d{2})$", str(t or '').strip()) or re.match(r"^(\d{1,2})$", str(t or '').strip())

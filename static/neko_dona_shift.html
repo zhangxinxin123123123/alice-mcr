@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>喵喵 DONA DONA 人材 LIST</title>
+<style>
+:root{
+  --bg:#080712;
+  --panel:#150b22;
+  --ink:#f9efff;
+  --muted:#b8a7c9;
+  --pink:#ff2f9a;
+  --cyan:#21f7ff;
+  --yellow:#ffd447;
+  --dimline:rgba(255,47,154,.32);
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;
+  color:var(--ink);
+  background:
+    linear-gradient(90deg,rgba(33,247,255,.05) 1px,transparent 1px),
+    linear-gradient(rgba(255,47,154,.06) 1px,transparent 1px),
+    radial-gradient(circle at 12% 8%,rgba(255,47,154,.24),transparent 24%),
+    radial-gradient(circle at 88% 12%,rgba(33,247,255,.18),transparent 22%),
+    #070611;
+  background-size:48px 48px,48px 48px,100% 100%,100% 100%,100% 100%;
+  padding:6px;
+}
+button,input,select{font:inherit;outline:none}
+.shell{
+  min-height:calc(100vh - 12px);
+  border:2px solid var(--pink);
+  border-radius:18px;
+  overflow:hidden;
+  background:linear-gradient(180deg,rgba(12,9,25,.96),rgba(8,7,18,.98));
+  box-shadow:0 0 0 1px rgba(33,247,255,.2),0 0 28px rgba(255,47,154,.22);
+}
+.topbar{
+  display:grid;
+  grid-template-columns:minmax(260px,1fr) auto auto;
+  gap:14px;
+  align-items:center;
+  min-height:52px;
+  padding:10px 18px;
+  border-bottom:1px solid rgba(33,247,255,.65);
+  background:linear-gradient(90deg,#201127,#0d1020 60%,#1b0d25);
+}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.bolt{color:var(--cyan);text-shadow:2px 0 var(--pink),-2px 0 var(--yellow);font-size:24px;font-weight:900}
+.brand h1{
+  margin:0;
+  font-size:24px;
+  line-height:1;
+  color:#fff;
+  text-shadow:3px 0 var(--cyan),-3px 0 var(--pink),0 0 12px rgba(255,47,154,.85);
+  white-space:nowrap;
+}
+.capsule{
+  justify-self:center;
+  border:1px solid var(--cyan);
+  border-radius:999px;
+  padding:8px 18px;
+  color:#d8fbff;
+  background:rgba(33,247,255,.08);
+  font-weight:900;
+  letter-spacing:2px;
+  box-shadow:inset 0 0 12px rgba(33,247,255,.18);
+  white-space:nowrap;
+}
+.tabs{display:flex;gap:8px;justify-content:flex-end}
+.tab-btn,.neon-btn{
+  border:1px solid var(--pink);
+  color:#08111a;
+  background:linear-gradient(#ffe86b,#ffac25);
+  padding:9px 16px;
+  border-radius:8px;
+  font-weight:900;
+  cursor:pointer;
+  box-shadow:0 0 0 1px rgba(255,47,154,.4),0 4px 0 #b44500;
+}
+.tab-btn.on{background:linear-gradient(#61ffff,#00d7ff);box-shadow:0 0 0 1px rgba(33,247,255,.7),0 4px 0 #0077a3}
+.subhead{
+  display:grid;
+  grid-template-columns:minmax(230px,1fr) auto;
+  gap:12px;
+  align-items:end;
+  padding:14px 20px 8px;
+  border-bottom:1px dashed var(--dimline);
+}
+.subhead h2{margin:0;font-size:25px;color:#ffd2e7;text-shadow:0 0 12px rgba(255,47,154,.75)}
+.subhead h2::before,.subhead h2::after{content:"▼";color:var(--pink);font-size:16px;margin:0 14px 0 6px}
+.subhead h2::after{margin:0 6px 0 14px}
+.subcode{color:var(--cyan);font-weight:900;letter-spacing:2px;font-size:12px}
+.toolbar{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  align-items:center;
+  padding:14px 16px 10px;
+}
+.field,.selectish{
+  border:1px solid var(--cyan);
+  border-radius:8px;
+  min-height:34px;
+  padding:8px 10px;
+  color:#f8fdff;
+  background:#0b2436;
+  font-weight:900;
+  box-shadow:inset 0 0 10px rgba(33,247,255,.14);
+}
+.field::placeholder{color:#7bcbd3}
+.date-field{width:150px}
+.count-box{display:flex;align-items:center;gap:9px;color:#ffe894;font-weight:900}
+.count-num{min-width:62px;text-align:center;border:1px solid var(--cyan);border-radius:7px;padding:7px 16px;color:#fff;background:#09253a}
+.statusline{color:var(--cyan);font-size:12px;font-weight:900}
+.list{display:flex;flex-direction:column;gap:8px;padding:8px 16px 12px}
+.person-card{
+  display:grid;
+  grid-template-columns:96px minmax(250px,1.2fr) minmax(170px,.65fr) minmax(290px,1.1fr) minmax(260px,.95fr) 92px;
+  gap:8px;
+  align-items:center;
+  min-height:92px;
+  padding:8px;
+  border:2px solid var(--pink);
+  border-radius:12px;
+  background:linear-gradient(90deg,rgba(255,47,154,.28),rgba(25,12,38,.96) 32%,rgba(11,9,24,.98));
+  box-shadow:inset 5px 0 0 var(--pink),0 0 16px rgba(255,47,154,.18);
+}
+.avatar-box{
+  height:74px;
+  border:2px solid var(--cyan);
+  border-radius:9px;
+  overflow:hidden;
+  background:linear-gradient(145deg,#13273b,#2b1840);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#d6fbff;
+  font-size:11px;
+  font-weight:900;
+  text-align:center;
+  line-height:1.45;
+  box-shadow:inset 0 0 16px rgba(33,247,255,.25);
+}
+.avatar-box img{width:100%;height:100%;object-fit:cover;display:block}
+.id-badge{display:inline-block;border:1px solid var(--cyan);border-radius:5px;color:var(--cyan);background:#020b14;padding:2px 7px;font-size:10px;font-weight:900}
+.name-row{display:flex;align-items:center;gap:8px;margin:6px 0 5px;min-width:0}
+.name{
+  min-width:0;
+  color:#fff;
+  font-size:19px;
+  font-weight:900;
+  text-shadow:2px 0 var(--pink),0 0 12px rgba(255,255,255,.34);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.remark{min-height:28px;border:1px dashed var(--dimline);border-radius:6px;padding:6px 8px;color:#f7b8d7;background:rgba(255,47,154,.12);font-size:12px;line-height:1.35;overflow:hidden}
+.stack{display:grid;gap:7px}
+.time-row,.price-row{min-height:30px;border:1px solid var(--cyan);border-radius:8px;padding:5px 10px;background:#0b273a;color:#dfffff;font-weight:900}
+.price-row{border-color:#d2aa20;color:#ffe55d;background:rgba(255,212,71,.16)}
+.mini-select{width:100%;min-width:0;border:1px solid var(--pink);border-radius:999px;padding:4px 28px 4px 10px;color:#fff;background:#2b0a23;font-size:12px;font-weight:900}
+.matrix-title{color:var(--cyan);font-size:11px;font-weight:900;letter-spacing:1px;margin-bottom:3px}
+.tag-grid,.param-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.param-line{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:5px;color:#ff9bcc;font-size:12px;font-weight:900}
+.side-actions{display:grid;gap:6px}
+.pill-btn{border:1px solid var(--pink);border-radius:8px;padding:7px 8px;color:#080712;background:linear-gradient(#5dffff,#03d9ff);font-size:12px;font-weight:900;cursor:pointer}
+.pill-btn.danger{color:#fff;background:#4b0b36}
+.empty{min-height:240px;border:1px dashed var(--dimline);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#ffaad4;font-weight:900}
+.small-btn{border:1px solid var(--cyan);border-radius:7px;padding:7px 10px;color:#dfffff;background:#10243b;font-size:12px;font-weight:900;cursor:pointer}
+.small-btn.primary{border-color:var(--pink);background:#4a1234}
+@media(max-width:1120px){
+  .person-card{grid-template-columns:82px 1fr}
+  .side-actions{grid-template-columns:repeat(3,minmax(0,1fr));grid-column:1 / -1}
+}
+@media(max-width:720px){
+  body{padding:0}
+  .shell{border-radius:0;min-height:100vh}
+  .topbar,.subhead{grid-template-columns:1fr}
+  .capsule{justify-self:start}
+  .brand h1{font-size:20px;white-space:normal}
+  .toolbar{align-items:stretch}
+  .field,.selectish{width:100%;min-width:0}
+  .person-card{grid-template-columns:1fr}
+  .avatar-box{height:180px}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><span class="bolt">↯</span><h1>NEKO DONA DONA 人材 LIST</h1><span class="bolt">↯</span></div>
+    <div class="capsule">NEKO MIAOMIAO / CYBER SHIFT</div>
+    <div class="tabs">
+      <button class="tab-btn on" type="button">喵喵</button>
+      <button class="tab-btn" type="button">出勤</button>
+    </div>
+  </header>
+  <section class="subhead">
+    <h2>横向き人材出勤表</h2>
+    <div class="subcode">TAG / STATUS / AVATAR / PARAMETER</div>
+  </section>
+  <section class="toolbar">
+    <input id="shiftDate" class="field date-field" type="date">
+    <input id="searchInput" class="field" placeholder="搜索喵喵名字 / 备注" oninput="render()">
+    <button class="neon-btn" type="button" onclick="loadNekoProfiles()">刷新喵喵资料</button>
+    <button class="small-btn primary" type="button" onclick="selectAllVisible()">全部加入出勤</button>
+    <button class="small-btn" type="button" onclick="clearDay()">清空当日</button>
+    <button class="small-btn" type="button" onclick="copyShiftText()">复制通报</button>
+    <span class="count-box">喵喵人数 <span id="totalCount" class="count-num">0</span></span>
+    <span class="count-box">出勤人数 <span id="shiftCount" class="count-num">0</span></span>
+    <span class="statusline" id="statusLine">准备读取喵喵资料。</span>
+  </section>
+  <main class="list" id="shiftList"></main>
+</div>
+
+<script>
+(function(){
+  const today = new Date().toISOString().slice(0,10);
+  const DONA_TAGS = ["好色","巨乳","小恶魔","辣妹","纯洁","顺从","新人","运动部","积极","清楚","双马尾","萝莉","病娇","敏感","安穏","M气质","S气质","心理病"];
+  const STATUS_OPTIONS = ["出勤中","待机中","休息前","夜出勤"];
+  const BOOKING_OPTIONS = ["预约可","预约满","不可约"];
+  const PARAM_KEYS = [["mind","心灵"],["body","身材"],["face","颜值"],["tech","技巧"]];
+  const GRADES = ["S","A","B","C"];
+  const DEFAULT_PARAMS = {mind:"B", body:"S", face:"A", tech:"A"};
+  let profiles = [];
+  let shifts = {};
+
+  function authHeaders(){
+    const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
+    return auth ? {"X-Alice-Role":auth.role} : {};
+  }
+  function escapeHtml(v){return String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
+  function jsAttr(v){
+    return escapeHtml(String(v??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
+  }
+  function yen(n){return "¥" + Math.round(Number(n||0)).toLocaleString();}
+  function dayKey(){return "neko_dona_shift_" + (shiftDate.value || today);}
+  function loadDay(){try{shifts = JSON.parse(localStorage.getItem(dayKey()) || "{}") || {};}catch(e){shifts={};}}
+  function saveDay(){localStorage.setItem(dayKey(), JSON.stringify(shifts));}
+  function normalizeTime(t){return String(t||"").trim() || "18:00";}
+  function timeOptions(selected){
+    selected = normalizeTime(selected);
+    let out = "";
+    for(let h=12; h<=29; h++){
+      for(const m of [0,30]){
+        const v = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+        out += `<option value="${v}" ${v===selected?"selected":""}>${h>=24?String(h).padStart(2,"0"):String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}</option>`;
+      }
+    }
+    return out;
+  }
+  function profileKey(p){return p.name || p.id;}
+  function defaultShift(p){
+    return {start:"18:00", end:"23:00", tags:["新人","好色","巨乳","顺从"], status:"出勤中", booking:"预约可", params:{...DEFAULT_PARAMS}};
+  }
+  function ensureShift(p){
+    const key = profileKey(p);
+    if(!shifts[key]) shifts[key] = defaultShift(p);
+    return shifts[key];
+  }
+  function selectedProfiles(){
+    return profiles.filter(p => shifts[profileKey(p)]);
+  }
+  function visibleProfiles(){
+    const q = String(searchInput.value||"").trim().toLowerCase();
+    return profiles.filter(p => !q || [p.name,p.remark].join(" ").toLowerCase().includes(q));
+  }
+  function selectOptions(values, selected){
+    return values.map(v=>`<option value="${escapeHtml(v)}" ${String(v)===String(selected)?"selected":""}>${escapeHtml(v)}</option>`).join("");
+  }
+  function tagSelect(key, idx, selected){
+    return `<select class="mini-select" onchange="updateTag('${jsAttr(key)}',${idx},this.value)">${selectOptions(DONA_TAGS, selected || DONA_TAGS[idx] || DONA_TAGS[0])}</select>`;
+  }
+  function paramSelect(key, param, selected){
+    return `<select class="mini-select" onchange="updateParam('${jsAttr(key)}','${param}',this.value)">${selectOptions(GRADES, selected || DEFAULT_PARAMS[param] || "B")}</select>`;
+  }
+  function renderCard(p, idx){
+    const key = profileKey(p);
+    const s = ensureShift(p);
+    const tags = [...(s.tags||[])];
+    while(tags.length < 4) tags.push(DONA_TAGS[tags.length] || DONA_TAGS[0]);
+    const params = {...DEFAULT_PARAMS, ...(s.params||{})};
+    return `<article class="person-card">
+      <div class="avatar-box">${p.image ? `<img src="${escapeHtml(p.image)}" alt="">` : "喵喵<br>NO IMAGE"}</div>
+      <section>
+        <span class="id-badge">ID ${escapeHtml(p.id || String(idx+1).padStart(3,"0"))}</span>
+        <div class="name-row"><span class="name">${escapeHtml(p.name)}</span></div>
+        <div class="remark">${escapeHtml(p.remark || "喵喵资料暂无备注").slice(0,100)}</div>
+      </section>
+      <section class="stack">
+        <div class="time-row">
+          <select class="mini-select" onchange="updateField('${jsAttr(key)}','start',this.value)">${timeOptions(s.start)}</select>
+          <select class="mini-select" style="margin-top:5px" onchange="updateField('${jsAttr(key)}','end',this.value)">${timeOptions(s.end)}</select>
+        </div>
+        <div class="price-row">${p.price ? `${yen(p.price)} /h` : "价格未写"}</div>
+      </section>
+      <section>
+        <div class="matrix-title">TAG</div>
+        <div class="tag-grid">${tags.map((t,i)=>tagSelect(key,i,t)).join("")}</div>
+      </section>
+      <section>
+        <div class="matrix-title">PARAMETER</div>
+        <div class="param-grid">${PARAM_KEYS.map(([param,label])=>`<div class="param-line"><span>${label}</span>${paramSelect(key,param,params[param])}</div>`).join("")}</div>
+      </section>
+      <section class="side-actions">
+        <select class="pill-btn" onchange="updateField('${jsAttr(key)}','status',this.value)">${selectOptions(STATUS_OPTIONS, s.status)}</select>
+        <select class="pill-btn" onchange="updateField('${jsAttr(key)}','booking',this.value)">${selectOptions(BOOKING_OPTIONS, s.booking)}</select>
+        <button class="pill-btn danger" type="button" onclick="removeShift('${jsAttr(key)}')">移除</button>
+      </section>
+    </article>`;
+  }
+  window.render = function(){
+    const rows = selectedProfiles();
+    totalCount.textContent = String(profiles.length);
+    shiftCount.textContent = String(rows.length);
+    if(!rows.length){
+      const visible = visibleProfiles();
+      shiftList.innerHTML = visible.length
+        ? visible.map((p,i)=>`<article class="person-card" style="grid-template-columns:96px minmax(250px,1fr) 110px"><div class="avatar-box">${p.image?`<img src="${escapeHtml(p.image)}" alt="">`:"喵喵<br>NO IMAGE"}</div><section><span class="id-badge">ID ${escapeHtml(p.id||String(i+1).padStart(3,"0"))}</span><div class="name-row"><span class="name">${escapeHtml(p.name)}</span></div><div class="remark">${escapeHtml(p.remark||"喵喵资料暂无备注").slice(0,120)}</div></section><button class="pill-btn" type="button" onclick="addShift('${jsAttr(profileKey(p))}')">加入</button></article>`).join("")
+        : '<div class="empty">没有匹配的喵喵资料。</div>';
+      return;
+    }
+    shiftList.innerHTML = rows.map(renderCard).join("");
+  };
+  window.addShift = function(key){
+    const p = profiles.find(x => profileKey(x) === key);
+    if(p) ensureShift(p);
+    saveDay();
+    render();
+  };
+  window.removeShift = function(key){delete shifts[key];saveDay();render();};
+  window.updateField = function(key, field, value){
+    const p = profiles.find(x => profileKey(x) === key);
+    if(!p) return;
+    const s = ensureShift(p);
+    s[field] = value;
+    saveDay();
+    render();
+  };
+  window.updateTag = function(key, idx, value){
+    const p = profiles.find(x => profileKey(x) === key);
+    if(!p) return;
+    const s = ensureShift(p);
+    s.tags = [...(s.tags||[])];
+    s.tags[idx] = value;
+    saveDay();
+    render();
+  };
+  window.updateParam = function(key, param, value){
+    const p = profiles.find(x => profileKey(x) === key);
+    if(!p) return;
+    const s = ensureShift(p);
+    s.params = {...DEFAULT_PARAMS, ...(s.params||{})};
+    s.params[param] = value;
+    saveDay();
+    render();
+  };
+  window.selectAllVisible = function(){
+    visibleProfiles().forEach(p => ensureShift(p));
+    saveDay();
+    render();
+  };
+  window.clearDay = function(){
+    if(!confirm("清空当天喵喵多娜出勤表？")) return;
+    shifts = {};
+    saveDay();
+    render();
+  };
+  window.copyShiftText = async function(){
+    const rows = selectedProfiles();
+    const d = shiftDate.value || today;
+    const text = rows.map(p=>{
+      const s = ensureShift(p);
+      const params = {...DEFAULT_PARAMS, ...(s.params||{})};
+      return `${p.name} ${(s.tags||[]).map(t=>`【${t}】`).join("")} ${s.status} ${s.booking}
+${s.start} ~ ${s.end}  ${p.price ? yen(p.price) + "/h" : "价格未写"}
+心${params.mind} 身${params.body} 颜${params.face} 技${params.tech}
+${p.remark || ""}`;
+    }).join("\n\n");
+    try{await navigator.clipboard.writeText(`${d} 喵喵多娜出勤\n\n${text}`.trim());alert("已复制");}
+    catch(e){prompt("复制失败，请手动复制：", text);}
+  };
+  window.loadNekoProfiles = async function(){
+    statusLine.textContent = "正在读取喵喵资料...";
+    try{
+      const r = await fetch("/api/neko_profiles?v=" + Date.now(), {cache:"no-store", headers:authHeaders()});
+      const data = await r.json();
+      if(!data.ok) throw new Error(data.error || "读取失败");
+      profiles = data.profiles || [];
+      statusLine.textContent = `已读取 ${profiles.length} 个喵喵资料｜来源 ${data.source || ""}`;
+      render();
+    }catch(e){
+      console.error(e);
+      statusLine.textContent = "读取失败";
+      shiftList.innerHTML = '<div class="empty">读取喵喵资料失败，请确认已登录管理员并且后端能访问喵喵网站。</div>';
+    }
+  };
+  shiftDate.value = today;
+  shiftDate.addEventListener("change",()=>{loadDay();render();});
+  window.addEventListener("DOMContentLoaded",()=>{loadDay();loadNekoProfiles();});
+})();
+</script>
+</body>
+</html>
