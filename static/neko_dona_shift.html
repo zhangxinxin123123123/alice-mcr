@@ -180,6 +180,10 @@ button,input,select{font:inherit;outline:none}
 .empty{min-height:240px;border:1px dashed var(--dimline);border-radius:12px;display:flex;align-items:center;justify-content:center;color:#ffaad4;font-weight:900}
 .small-btn{border:1px solid var(--cyan);border-radius:7px;padding:7px 10px;color:#dfffff;background:#10243b;font-size:12px;font-weight:900;cursor:pointer}
 .small-btn.primary{border-color:var(--pink);background:#4a1234}
+.image-panel{margin:4px 16px 10px;border-top:1px dashed var(--dimline);padding-top:10px}
+.image-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.image-info{color:#ffe894;font-size:12px;font-weight:900}
+.image-preview{display:block;max-width:420px;width:100%;border:2px solid var(--pink);border-radius:10px;background:#080712;box-shadow:0 0 18px rgba(255,47,154,.22)}
 @media(max-width:1120px){
   .person-card{grid-template-columns:82px 1fr}
   .side-actions{grid-template-columns:repeat(3,minmax(0,1fr));grid-column:1 / -1}
@@ -218,9 +222,18 @@ button,input,select{font:inherit;outline:none}
     <button class="small-btn primary" type="button" onclick="selectAllVisible()">全部加入出勤</button>
     <button class="small-btn" type="button" onclick="clearDay()">清空当日</button>
     <button class="small-btn" type="button" onclick="copyShiftText()">复制通报</button>
+    <button class="small-btn primary" type="button" onclick="generateCustomerImage()">生成客人图</button>
     <span class="count-box">喵喵人数 <span id="totalCount" class="count-num">0</span></span>
     <span class="count-box">出勤人数 <span id="shiftCount" class="count-num">0</span></span>
     <span class="statusline" id="statusLine">准备读取喵喵资料。</span>
+  </section>
+  <section class="image-panel" id="customerImagePanel" hidden>
+    <div class="image-actions">
+      <span class="image-info" id="customerImageInfo"></span>
+      <button class="small-btn primary" type="button" onclick="copyCustomerImage()">复制图片</button>
+      <button class="small-btn" type="button" onclick="downloadCustomerImage()">下载PNG</button>
+    </div>
+    <img class="image-preview" id="customerImagePreview" alt="喵喵每日出勤图">
   </section>
   <main class="list" id="shiftList"></main>
 </div>
@@ -237,6 +250,8 @@ button,input,select{font:inherit;outline:none}
   let profiles = [];
   let shifts = {};
   let dragKey = "";
+  let customerImageBlob = null;
+  let customerImageFilename = "";
 
   function authHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
@@ -348,6 +363,23 @@ button,input,select{font:inherit;outline:none}
   }
   function selectOptions(values, selected){
     return values.map(v=>`<option value="${escapeHtml(v)}" ${String(v)===String(selected)?"selected":""}>${escapeHtml(v)}</option>`).join("");
+  }
+  function shiftImageRows(){
+    return selectedProfiles().map(p => {
+      const s = ensureShift(p);
+      return {
+        key: profileKey(p),
+        name: s.name || baseName(p),
+        remark: s.remark || baseRemark(p),
+        price: moneyInput(s.price) || moneyInput(p.price),
+        image: p.image || "",
+        start: s.start,
+        end: s.end,
+        tags: (s.tags || []).slice(0,4),
+        status: s.status,
+        booking: s.booking,
+      };
+    });
   }
   function tagSelect(key, idx, selected){
     return `<select class="mini-select" onchange="updateTag('${jsAttr(key)}',${idx},this.value)">${selectOptions(DONA_TAGS, selected || DONA_TAGS[idx] || DONA_TAGS[0])}</select>`;
@@ -508,6 +540,288 @@ ${s.remark || p.remark || ""}`;
     }).join("\n\n");
     try{await navigator.clipboard.writeText(`${d} 喵喵多娜出勤\n\n${text}`.trim());alert("已复制");}
     catch(e){prompt("复制失败，请手动复制：", text);}
+  };
+  function roundRect(ctx, x, y, w, h, r){
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+  function drawText(ctx, text, x, y, maxWidth, lineHeight, maxLines){
+    const chars = String(text || "").split("");
+    let line = "";
+    let lines = [];
+    chars.forEach(ch => {
+      const next = line + ch;
+      if(ctx.measureText(next).width > maxWidth && line){
+        lines.push(line);
+        line = ch;
+      }else{
+        line = next;
+      }
+    });
+    if(line) lines.push(line);
+    if(maxLines && lines.length > maxLines){
+      lines = lines.slice(0, maxLines);
+      const last = lines.length - 1;
+      while(lines[last] && ctx.measureText(lines[last] + "...").width > maxWidth){
+        lines[last] = lines[last].slice(0, -1);
+      }
+      lines[last] = (lines[last] || "").replace(/[，。,.、\s]+$/,"") + "...";
+    }
+    lines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
+    return lines.length * lineHeight;
+  }
+  function drawPill(ctx, text, x, y, fill, stroke, color){
+    const label = String(text || "");
+    ctx.font = "800 22px 'Microsoft YaHei', sans-serif";
+    const w = Math.min(210, Math.max(74, ctx.measureText(label).width + 34));
+    roundRect(ctx, x, y, w, 36, 18);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x + w / 2, y + 18);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    return w;
+  }
+  function loadCanvasImage(src){
+    return new Promise(resolve => {
+      if(!src) return resolve(null);
+      let done = false;
+      const img = new Image();
+      const finish = value => {
+        if(done) return;
+        done = true;
+        resolve(value);
+      };
+      img.crossOrigin = "anonymous";
+      img.onload = () => finish(img);
+      img.onerror = () => finish(null);
+      img.src = src;
+      setTimeout(() => finish(null), 4500);
+    });
+  }
+  function drawCoverImage(ctx, img, x, y, w, h, r){
+    if(!img) return false;
+    const scale = Math.max(w / img.width, h / img.height);
+    const sw = w / scale;
+    const sh = h / scale;
+    const sx = (img.width - sw) / 2;
+    const sy = (img.height - sh) / 2;
+    ctx.save();
+    roundRect(ctx, x, y, w, h, r);
+    ctx.clip();
+    try{
+      ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+    }catch(e){
+      ctx.restore();
+      return false;
+    }
+    ctx.restore();
+    return true;
+  }
+  function drawAvatarFallback(ctx, x, y, w, h, label){
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, "#102b46");
+    g.addColorStop(1, "#3a1137");
+    roundRect(ctx, x, y, w, h, 18);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = "#21f7ff";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = "#dfffff";
+    ctx.font = "900 22px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label.slice(0,2) || "喵喵", x + w / 2, y + h / 2);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
+  function canvasToBlob(canvas){
+    return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  }
+  function downloadBlob(blob, filename){
+    if(!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+  }
+  async function copyBlob(blob){
+    if(!blob || !navigator.clipboard || !window.ClipboardItem) return false;
+    try{
+      await navigator.clipboard.write([new ClipboardItem({"image/png": blob})]);
+      return true;
+    }catch(e){
+      return false;
+    }
+  }
+  function drawCustomerSchedule(ctx, rows, images, d, width, height){
+    ctx.clearRect(0,0,width,height);
+    const bg = ctx.createLinearGradient(0,0,width,height);
+    bg.addColorStop(0, "#080712");
+    bg.addColorStop(.48, "#12091f");
+    bg.addColorStop(1, "#061523");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,width,height);
+    ctx.strokeStyle = "rgba(33,247,255,.12)";
+    ctx.lineWidth = 1;
+    for(let y=0; y<height; y+=42){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke();
+    }
+    for(let x=0; x<width; x+=42){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke();
+    }
+    ctx.strokeStyle = "#ff2f9a";
+    ctx.lineWidth = 6;
+    roundRect(ctx, 12, 12, width - 24, height - 24, 28);
+    ctx.stroke();
+
+    ctx.fillStyle = "#21f7ff";
+    ctx.font = "900 24px 'Microsoft YaHei', sans-serif";
+    ctx.fillText("NEKO MIAOMIAO / DONA DONA SHIFT", 50, 66);
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = "#ff2f9a";
+    ctx.shadowBlur = 16;
+    ctx.font = "900 52px 'Microsoft YaHei', sans-serif";
+    ctx.fillText("今日出勤", 50, 128);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#ffe55d";
+    ctx.font = "900 28px 'Microsoft YaHei', sans-serif";
+    ctx.fillText(d, 50, 170);
+    drawPill(ctx, `${rows.length} 人出勤`, width - 230, 58, "#1b0b2b", "#21f7ff", "#dfffff");
+
+    let y = 220;
+    rows.forEach((row, idx) => {
+      const cardX = 38;
+      const cardW = width - 76;
+      const cardH = 178;
+      const cg = ctx.createLinearGradient(cardX, y, cardX + cardW, y + cardH);
+      cg.addColorStop(0, "rgba(255,47,154,.30)");
+      cg.addColorStop(.45, "rgba(25,12,38,.96)");
+      cg.addColorStop(1, "rgba(8,9,24,.98)");
+      roundRect(ctx, cardX, y, cardW, cardH, 18);
+      ctx.fillStyle = cg;
+      ctx.fill();
+      ctx.strokeStyle = "#ff2f9a";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = "#ff2f9a";
+      roundRect(ctx, cardX, y, 12, cardH, 6);
+      ctx.fill();
+
+      const imgX = cardX + 24;
+      const imgY = y + 22;
+      const imgSize = 132;
+      if(!drawCoverImage(ctx, images[idx], imgX, imgY, imgSize, imgSize, 16)){
+        drawAvatarFallback(ctx, imgX, imgY, imgSize, imgSize, row.name);
+      }
+      ctx.strokeStyle = "#21f7ff";
+      ctx.lineWidth = 3;
+      roundRect(ctx, imgX, imgY, imgSize, imgSize, 16);
+      ctx.stroke();
+
+      const textX = imgX + imgSize + 26;
+      ctx.fillStyle = "#21f7ff";
+      ctx.font = "900 18px 'Microsoft YaHei', sans-serif";
+      ctx.fillText(`ID ${String(idx + 1).padStart(3,"0")}`, textX, y + 34);
+      ctx.fillStyle = "#fff";
+      ctx.shadowColor = "#ff2f9a";
+      ctx.shadowBlur = 8;
+      ctx.font = "900 36px 'Microsoft YaHei', sans-serif";
+      drawText(ctx, row.name, textX, y + 78, 330, 38, 1);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#f7b8d7";
+      ctx.font = "700 22px 'Microsoft YaHei', sans-serif";
+      drawText(ctx, row.remark || "欢迎预约", textX, y + 116, 390, 28, 2);
+
+      const rightX = width - 342;
+      ctx.fillStyle = "#dfffff";
+      ctx.font = "900 27px 'Microsoft YaHei', sans-serif";
+      ctx.fillText(`${row.start} ~ ${row.end}`, rightX, y + 50);
+      ctx.fillStyle = "#ffe55d";
+      ctx.font = "900 26px 'Microsoft YaHei', sans-serif";
+      ctx.fillText(row.price ? `${yen(row.price)} /h` : "价格咨询", rightX, y + 88);
+      const statusW = drawPill(ctx, row.status || "出勤中", rightX, y + 112, "#073044", "#21f7ff", "#dfffff");
+      drawPill(ctx, row.booking || "预约可", rightX + statusW + 10, y + 112, "#3b092d", "#ff2f9a", "#ffd2e7");
+
+      let tx = textX;
+      let ty = y + 136;
+      (row.tags || []).slice(0,4).forEach(tag => {
+        const w = drawPill(ctx, tag, tx, ty, "rgba(255,47,154,.18)", "#ff2f9a", "#ffffff");
+        tx += w + 8;
+        if(tx > rightX - 120){
+          tx = textX;
+          ty += 40;
+        }
+      });
+      y += cardH + 22;
+    });
+    ctx.fillStyle = "#69faff";
+    ctx.font = "800 20px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("预约请确认当日空档", width / 2, height - 42);
+    ctx.textAlign = "left";
+  }
+  window.generateCustomerImage = async function(){
+    saveDay();
+    const rows = shiftImageRows();
+    if(!rows.length){
+      alert("请先加入出勤女孩");
+      return;
+    }
+    statusLine.textContent = "正在生成客人图...";
+    const d = shiftDate.value || today;
+    const width = 900;
+    const height = 260 + rows.length * 200 + 76;
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    const images = await Promise.all(rows.map(row => loadCanvasImage(row.image)));
+    drawCustomerSchedule(ctx, rows, images, d, width, height);
+    const blob = await canvasToBlob(canvas);
+    if(!blob){
+      alert("图片生成失败");
+      statusLine.textContent = "图片生成失败";
+      return;
+    }
+    customerImageBlob = blob;
+    customerImageFilename = `neko-shift-${d}.png`;
+    customerImagePreview.src = URL.createObjectURL(blob);
+    customerImagePanel.hidden = false;
+    customerImageInfo.textContent = `${d} 客人出勤图已生成`;
+    const copied = await copyBlob(blob);
+    downloadBlob(blob, customerImageFilename);
+    statusLine.textContent = copied ? "客人图已生成并复制，也已下载。" : "客人图已生成并下载。";
+  };
+  window.copyCustomerImage = async function(){
+    if(!customerImageBlob){
+      await generateCustomerImage();
+      return;
+    }
+    const copied = await copyBlob(customerImageBlob);
+    statusLine.textContent = copied ? "图片已复制。" : "当前浏览器不支持直接复制图片，请使用下载PNG。";
+  };
+  window.downloadCustomerImage = function(){
+    if(!customerImageBlob){
+      generateCustomerImage();
+      return;
+    }
+    downloadBlob(customerImageBlob, customerImageFilename || `neko-shift-${shiftDate.value || today}.png`);
   };
   window.loadNekoProfiles = async function(){
     statusLine.textContent = "正在读取喵喵资料...";
