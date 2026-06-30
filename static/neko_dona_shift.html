@@ -149,7 +149,7 @@ button,input,select{font:inherit;outline:none}
 .avatar-box img{width:100%;height:100%;object-fit:cover;display:block}
 .id-badge{display:inline-block;border:1px solid var(--cyan);border-radius:5px;color:var(--cyan);background:#020b14;padding:2px 7px;font-size:10px;font-weight:900}
 .name-row{display:flex;align-items:center;gap:8px;margin:6px 0 5px;min-width:0}
-.name{
+.name,.edit-name{
   min-width:0;
   color:#fff;
   font-size:19px;
@@ -159,11 +159,18 @@ button,input,select{font:inherit;outline:none}
   text-overflow:ellipsis;
   white-space:nowrap;
 }
-.remark{min-height:28px;border:1px dashed var(--dimline);border-radius:6px;padding:6px 8px;color:#f7b8d7;background:rgba(255,47,154,.12);font-size:12px;line-height:1.35;overflow:hidden}
+.edit-name{width:100%;border:1px solid rgba(255,47,154,.5);border-radius:6px;padding:4px 8px;background:rgba(255,47,154,.18)}
+.remark,.edit-remark{min-height:28px;border:1px dashed var(--dimline);border-radius:6px;padding:6px 8px;color:#f7b8d7;background:rgba(255,47,154,.12);font-size:12px;line-height:1.35;overflow:hidden}
+.edit-remark{width:100%;height:38px;resize:vertical}
 .stack{display:grid;gap:7px}
 .time-row,.price-row{min-height:30px;border:1px solid var(--cyan);border-radius:8px;padding:5px 10px;background:#0b273a;color:#dfffff;font-weight:900}
 .price-row{border-color:#d2aa20;color:#ffe55d;background:rgba(255,212,71,.16)}
+.price-row{display:flex;align-items:center;gap:6px}
+.price-input{width:100%;min-width:0;border:0;background:transparent;color:#ffe55d;font-weight:900}
 .mini-select{width:100%;min-width:0;border:1px solid var(--pink);border-radius:999px;padding:4px 28px 4px 10px;color:#fff;background:#2b0a23;font-size:12px;font-weight:900}
+.dragging{opacity:.62}
+.person-card{cursor:grab}
+.person-card:active{cursor:grabbing}
 .matrix-title{color:var(--cyan);font-size:11px;font-weight:900;letter-spacing:1px;margin-bottom:3px}
 .tag-grid,.param-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .param-line{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:5px;color:#ff9bcc;font-size:12px;font-weight:900}
@@ -229,6 +236,7 @@ button,input,select{font:inherit;outline:none}
   const DEFAULT_PARAMS = {mind:"B", body:"S", face:"A", tech:"A"};
   let profiles = [];
   let shifts = {};
+  let dragKey = "";
 
   function authHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
@@ -239,6 +247,14 @@ button,input,select{font:inherit;outline:none}
     return escapeHtml(String(v??"").replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
   }
   function yen(n){return "¥" + Math.round(Number(n||0)).toLocaleString();}
+  function moneyInput(v){
+    const text = String(v ?? "").replace(/[^\d.万wW]/g,"");
+    const m = text.match(/[\d.]+/);
+    if(!m) return 0;
+    const n = Number(m[0] || 0);
+    if(!Number.isFinite(n)) return 0;
+    return /万|w/i.test(text) ? Math.round(n * 10000) : Math.round(n);
+  }
   function dayKey(){return "neko_dona_shift_" + (shiftDate.value || today);}
   function loadDay(){try{shifts = JSON.parse(localStorage.getItem(dayKey()) || "{}") || {};}catch(e){shifts={};}}
   function saveDay(){localStorage.setItem(dayKey(), JSON.stringify(shifts));}
@@ -255,13 +271,55 @@ button,input,select{font:inherit;outline:none}
     return out;
   }
   function profileKey(p){return p.name || p.id;}
-  function defaultShift(p){
-    return {start:"18:00", end:"23:00", tags:["新人","好色","巨乳","顺从"], status:"出勤中", booking:"预约可", params:{...DEFAULT_PARAMS}};
+  function splitTitleName(v){
+    const notes = [];
+    const raw = String(v || "");
+    const name = raw.replace(/（([^）]+)）|\(([^)]+)\)/g, (_, a, b) => {
+      const note = String(a || b || "").trim();
+      if(note && !notes.includes(note)) notes.push(note);
+      return " ";
+    }).replace(/\s+/g," ").trim();
+    return {name:name || raw, remark:notes.join(" / ")};
   }
-  function normalizeShift(s){
+  function joinNotes(){
+    const notes = [];
+    Array.from(arguments).forEach(v => {
+      String(v || "").split(" / ").map(x=>x.trim()).filter(Boolean).forEach(x => {
+        if(!notes.includes(x)) notes.push(x);
+      });
+    });
+    return notes.join(" / ");
+  }
+  function baseName(p){
+    return splitTitleName(p.name).name || p.name || "";
+  }
+  function baseRemark(p){
+    return joinNotes(splitTitleName(p.name).remark, p.remark);
+  }
+  function nextOrder(){
+    const nums = Object.values(shifts).map(s => Number(s && s.order)).filter(Number.isFinite);
+    return nums.length ? Math.max(...nums) + 1 : 0;
+  }
+  function displayName(p){
+    const s = shifts[profileKey(p)] || {};
+    return String(s.name || baseName(p));
+  }
+  function displayRemark(p){
+    const s = shifts[profileKey(p)] || {};
+    return String(s.remark || baseRemark(p));
+  }
+  function defaultShift(p){
+    return {start:"18:00", end:"23:00", tags:["新人","好色","巨乳","顺从"], status:"出勤中", booking:"预约可", name:baseName(p), remark:baseRemark(p), price:Number(p.price || 0), order:nextOrder(), params:{...DEFAULT_PARAMS}};
+  }
+  function normalizeShift(s, p){
     s = s || {};
     s.start = normalizeTime(s.start || "18:00");
     s.end = normalizeTime(s.end || "23:00");
+    if(s.name === undefined) s.name = p ? baseName(p) : "";
+    if(s.remark === undefined) s.remark = p ? baseRemark(p) : "";
+    if(!moneyInput(s.price) && p && Number(p.price || 0)) s.price = Number(p.price || 0);
+    else s.price = moneyInput(s.price);
+    if(!Number.isFinite(Number(s.order))) s.order = nextOrder();
     s.tags = Array.isArray(s.tags) ? s.tags.slice(0,4) : [];
     while(s.tags.length < 4) s.tags.push(DONA_TAGS[s.tags.length] || DONA_TAGS[0]);
     if(!STATUS_OPTIONS.includes(s.status)) s.status = STATUS_OPTIONS[0];
@@ -276,15 +334,17 @@ button,input,select{font:inherit;outline:none}
   function ensureShift(p){
     const key = profileKey(p);
     if(!shifts[key]) shifts[key] = defaultShift(p);
-    shifts[key] = normalizeShift(shifts[key]);
+    shifts[key] = normalizeShift(shifts[key], p);
     return shifts[key];
   }
   function selectedProfiles(){
-    return profiles.filter(p => shifts[profileKey(p)]);
+    return profiles
+      .filter(p => shifts[profileKey(p)])
+      .sort((a,b) => (Number(shifts[profileKey(a)]?.order) || 0) - (Number(shifts[profileKey(b)]?.order) || 0));
   }
   function visibleProfiles(){
     const q = String(searchInput.value||"").trim().toLowerCase();
-    return profiles.filter(p => !q || [p.name,p.remark].join(" ").toLowerCase().includes(q));
+    return profiles.filter(p => !q || [displayName(p),displayRemark(p)].join(" ").toLowerCase().includes(q));
   }
   function selectOptions(values, selected){
     return values.map(v=>`<option value="${escapeHtml(v)}" ${String(v)===String(selected)?"selected":""}>${escapeHtml(v)}</option>`).join("");
@@ -301,19 +361,22 @@ button,input,select{font:inherit;outline:none}
     const tags = [...(s.tags||[])];
     while(tags.length < 4) tags.push(DONA_TAGS[tags.length] || DONA_TAGS[0]);
     const params = {...DEFAULT_PARAMS, ...(s.params||{})};
-    return `<article class="person-card">
+    const name = s.name || p.name || "";
+    const remark = s.remark || p.remark || "";
+    const price = moneyInput(s.price) || moneyInput(p.price);
+    return `<article class="person-card" draggable="true" ondragstart="dragStart(event,'${jsAttr(key)}')" ondragover="dragOver(event)" ondrop="dropShift(event,'${jsAttr(key)}')" ondragend="dragEnd(event)">
       <div class="avatar-box">${p.image ? `<img src="${escapeHtml(p.image)}" alt="">` : "喵喵<br>NO IMAGE"}</div>
       <section>
-        <span class="id-badge">ID ${escapeHtml(p.id || String(idx+1).padStart(3,"0"))}</span>
-        <div class="name-row"><span class="name">${escapeHtml(p.name)}</span></div>
-        <div class="remark">${escapeHtml(p.remark || "喵喵资料暂无备注").slice(0,100)}</div>
+        <span class="id-badge" title="拖动这一行调整排序">↕ ID ${escapeHtml(p.id || String(idx+1).padStart(3,"0"))}</span>
+        <div class="name-row"><input class="edit-name" value="${escapeHtml(name)}" onchange="updateField('${jsAttr(key)}','name',this.value)" draggable="false"></div>
+        <textarea class="edit-remark" onchange="updateField('${jsAttr(key)}','remark',this.value)" draggable="false">${escapeHtml(remark || "喵喵资料暂无备注")}</textarea>
       </section>
       <section class="stack">
         <div class="time-row">
           <select class="mini-select" onchange="updateField('${jsAttr(key)}','start',this.value)">${timeOptions(s.start)}</select>
           <select class="mini-select" style="margin-top:5px" onchange="updateField('${jsAttr(key)}','end',this.value)">${timeOptions(s.end)}</select>
         </div>
-        <div class="price-row">${p.price ? `${yen(p.price)} /h` : "价格未写"}</div>
+        <div class="price-row"><input class="price-input" inputmode="numeric" value="${price || ""}" placeholder="${p.price ? Math.round(Number(p.price)) : "手填每小时价格"}" onchange="updatePrice('${jsAttr(key)}',this.value)" draggable="false"><span>/h</span></div>
       </section>
       <section>
         <div class="matrix-title">TAG</div>
@@ -337,7 +400,11 @@ button,input,select{font:inherit;outline:none}
     if(!rows.length){
       const visible = visibleProfiles();
       shiftList.innerHTML = visible.length
-        ? visible.map((p,i)=>`<article class="person-card" style="grid-template-columns:96px minmax(250px,1fr) 110px"><div class="avatar-box">${p.image?`<img src="${escapeHtml(p.image)}" alt="">`:"喵喵<br>NO IMAGE"}</div><section><span class="id-badge">ID ${escapeHtml(p.id||String(i+1).padStart(3,"0"))}</span><div class="name-row"><span class="name">${escapeHtml(p.name)}</span></div><div class="remark">${escapeHtml(p.remark||"喵喵资料暂无备注").slice(0,120)}</div></section><button class="pill-btn" type="button" onclick="addShift('${jsAttr(profileKey(p))}')">加入</button></article>`).join("")
+        ? visible.map((p,i)=>{
+            const name = baseName(p);
+            const remark = baseRemark(p) || "喵喵资料暂无备注";
+            return `<article class="person-card" style="grid-template-columns:96px minmax(250px,1fr) 110px"><div class="avatar-box">${p.image?`<img src="${escapeHtml(p.image)}" alt="">`:"喵喵<br>NO IMAGE"}</div><section><span class="id-badge">ID ${escapeHtml(p.id||String(i+1).padStart(3,"0"))}</span><div class="name-row"><span class="name">${escapeHtml(name)}</span></div><div class="remark">${escapeHtml(remark).slice(0,120)}</div></section><button class="pill-btn" type="button" onclick="addShift('${jsAttr(profileKey(p))}')">加入</button></article>`;
+          }).join("")
         : '<div class="empty">没有匹配的喵喵资料。</div>';
       return;
     }
@@ -355,6 +422,14 @@ button,input,select{font:inherit;outline:none}
     if(!p) return;
     const s = ensureShift(p);
     s[field] = value;
+    saveDay();
+    render();
+  };
+  window.updatePrice = function(key, value){
+    const p = profiles.find(x => profileKey(x) === key);
+    if(!p) return;
+    const s = ensureShift(p);
+    s.price = moneyInput(value);
     saveDay();
     render();
   };
@@ -376,6 +451,38 @@ button,input,select{font:inherit;outline:none}
     saveDay();
     render();
   };
+  window.dragStart = function(ev, key){
+    dragKey = key;
+    ev.currentTarget.classList.add("dragging");
+    if(ev.dataTransfer){
+      ev.dataTransfer.effectAllowed = "move";
+      ev.dataTransfer.setData("text/plain", key);
+    }
+  };
+  window.dragOver = function(ev){
+    ev.preventDefault();
+    if(ev.dataTransfer) ev.dataTransfer.dropEffect = "move";
+  };
+  window.dropShift = function(ev, targetKey){
+    ev.preventDefault();
+    const fromKey = dragKey || (ev.dataTransfer ? ev.dataTransfer.getData("text/plain") : "");
+    if(!fromKey || fromKey === targetKey) return;
+    const keys = selectedProfiles().map(profileKey);
+    const from = keys.indexOf(fromKey);
+    const to = keys.indexOf(targetKey);
+    if(from < 0 || to < 0) return;
+    const [moved] = keys.splice(from, 1);
+    keys.splice(to, 0, moved);
+    keys.forEach((key, idx) => {
+      if(shifts[key]) shifts[key].order = idx;
+    });
+    saveDay();
+    render();
+  };
+  window.dragEnd = function(ev){
+    dragKey = "";
+    ev.currentTarget.classList.remove("dragging");
+  };
   window.selectAllVisible = function(){
     visibleProfiles().forEach(p => ensureShift(p));
     saveDay();
@@ -393,10 +500,11 @@ button,input,select{font:inherit;outline:none}
     const text = rows.map(p=>{
       const s = ensureShift(p);
       const params = {...DEFAULT_PARAMS, ...(s.params||{})};
-      return `${p.name} ${(s.tags||[]).map(t=>`【${t}】`).join("")} ${s.status} ${s.booking}
-${s.start} ~ ${s.end}  ${p.price ? yen(p.price) + "/h" : "价格未写"}
+      const price = moneyInput(s.price) || moneyInput(p.price);
+      return `${s.name || p.name || ""} ${(s.tags||[]).map(t=>`【${t}】`).join("")} ${s.status} ${s.booking}
+${s.start} ~ ${s.end}  ${price ? yen(price) + "/h" : "价格未写"}
 心${params.mind} 身${params.body} 颜${params.face} 技${params.tech}
-${p.remark || ""}`;
+${s.remark || p.remark || ""}`;
     }).join("\n\n");
     try{await navigator.clipboard.writeText(`${d} 喵喵多娜出勤\n\n${text}`.trim());alert("已复制");}
     catch(e){prompt("复制失败，请手动复制：", text);}
