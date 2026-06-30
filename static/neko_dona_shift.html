@@ -221,9 +221,9 @@ button,input,select{font:inherit;outline:none}
 <script>
 (function(){
   const today = new Date().toISOString().slice(0,10);
-  const DONA_TAGS = ["好色","巨乳","小恶魔","辣妹","纯洁","顺从","新人","运动部","积极","清楚","双马尾","萝莉","病娇","敏感","安穏","M气质","S气质","心理病"];
+  const DONA_TAGS = ["好色","巨乳","小恶魔","辣妹","纯洁","顺从","新人","运动部","积极","清楚","双马尾","萝莉","病娇","敏感","安穏","M气质","S气质","心理病","童颜","清纯","傲娇","地雷系","长腿","校花","姐姐","妹系"];
   const STATUS_OPTIONS = ["出勤中","待机中","休息前","夜出勤"];
-  const BOOKING_OPTIONS = ["预约可","预约满","不可约"];
+  const BOOKING_OPTIONS = ["预约可","不可约"];
   const PARAM_KEYS = [["mind","心灵"],["body","身材"],["face","颜值"],["tech","技巧"]];
   const GRADES = ["S","A","B","C"];
   const DEFAULT_PARAMS = {mind:"B", body:"S", face:"A", tech:"A"};
@@ -258,9 +258,25 @@ button,input,select{font:inherit;outline:none}
   function defaultShift(p){
     return {start:"18:00", end:"23:00", tags:["新人","好色","巨乳","顺从"], status:"出勤中", booking:"预约可", params:{...DEFAULT_PARAMS}};
   }
+  function normalizeShift(s){
+    s = s || {};
+    s.start = normalizeTime(s.start || "18:00");
+    s.end = normalizeTime(s.end || "23:00");
+    s.tags = Array.isArray(s.tags) ? s.tags.slice(0,4) : [];
+    while(s.tags.length < 4) s.tags.push(DONA_TAGS[s.tags.length] || DONA_TAGS[0]);
+    if(!STATUS_OPTIONS.includes(s.status)) s.status = STATUS_OPTIONS[0];
+    if(s.booking === "预约满") s.booking = "不可约";
+    if(!BOOKING_OPTIONS.includes(s.booking)) s.booking = BOOKING_OPTIONS[0];
+    s.params = {...DEFAULT_PARAMS, ...(s.params || {})};
+    PARAM_KEYS.forEach(([param]) => {
+      if(!GRADES.includes(s.params[param])) s.params[param] = DEFAULT_PARAMS[param] || "B";
+    });
+    return s;
+  }
   function ensureShift(p){
     const key = profileKey(p);
     if(!shifts[key]) shifts[key] = defaultShift(p);
+    shifts[key] = normalizeShift(shifts[key]);
     return shifts[key];
   }
   function selectedProfiles(){

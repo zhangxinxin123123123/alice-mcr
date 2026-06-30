@@ -216,6 +216,32 @@ def first_nonempty(*values):
             return text
     return ''
 
+def split_neko_name_remark(value):
+    raw = strip_html_text(value)
+    notes = []
+
+    def take_note(match):
+        note = strip_html_text(match.group(1) or match.group(2))
+        if note:
+            notes.append(note)
+        return ' '
+
+    name = re.sub(r'（([^）]+)）|\(([^)]+)\)', take_note, raw)
+    name = re.sub(r'\s+', ' ', name).strip(' -/|｜')
+    unique_notes = []
+    for note in notes:
+        if note and note not in unique_notes:
+            unique_notes.append(note)
+    return name or raw, ' / '.join(unique_notes)
+
+def join_neko_notes(*values):
+    notes = []
+    for value in values:
+        text = strip_html_text(value)
+        if text and text not in notes:
+            notes.append(text)
+    return ' / '.join(notes)
+
 def absolute_neko_url(value):
     value = str(value or '').strip()
     if not value:
@@ -226,25 +252,64 @@ def absolute_neko_url(value):
         return urljoin(NEKO_BASE_URL + '/', value.lstrip('/'))
     return value
 
+def price_from_text(value, loose=False):
+    text = strip_html_text(value)
+    if not text:
+        return 0
+    has_hint = bool(re.search(r'¥|￥|円|日元|料金|価格|金額|定价|價格|价|費|费|price|fee|course|コース|小时|時間|hour|/h|每小时|万|w', text, re.I))
+    if not loose and not has_hint:
+        return 0
+    candidates = re.findall(r'(?:[¥￥]\s*)?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s*(?:万|w|W))?(?:\s*(?:円|日元|JPY|/h|/H|/hour|每小时|小时|時間|h))?', text)
+    for candidate in candidates:
+        raw_num = re.search(r'\d[\d,]*(?:\.\d+)?', candidate)
+        if not raw_num:
+            continue
+        numeric = float(raw_num.group(0).replace(',', ''))
+        if re.search(r'万|w', candidate, re.I):
+            price = int(round(numeric * 10000))
+        elif numeric < 10:
+            continue
+        elif numeric < 100:
+            if not (loose or has_hint):
+                continue
+            price = int(round(numeric * 1000))
+        elif numeric < 1000:
+            continue
+        else:
+            price = int(round(numeric))
+        if price >= 1000 and (has_hint or price >= 10000):
+            return price
+    return 0
+
 def neko_price(item):
-    keys = ('price', 'model_price', 'service_price', 'list_price', 'fee', 'model_fee', 'course_price')
+    keys = (
+        'price', 'model_price', 'service_price', 'list_price', 'fee', 'model_fee',
+        'course_price', 'hour_price', 'hourly_price', 'per_hour', 'price_text',
+        'model_price_text', 'model_cat', 'cat', 'category', 'model_category',
+        'girl_category', 'girl_type', 'type', 'rank', 'class'
+    )
     for key in keys:
-        price = yen_to_int(item.get(key))
+        price = price_from_text(item.get(key), loose=True)
         if price:
             return price
     for key, value in item.items():
-        if re.search(r'price|fee|料金|価格|定价|價格', str(key), re.I):
-            price = yen_to_int(value)
+        if re.search(r'price|fee|料金|価格|金額|定价|價格|category|cat|type|rank|class', str(key), re.I):
+            price = price_from_text(value, loose=True)
             if price:
                 return price
+    for key in ('model_brief', 'model_detail', 'post_excerpt', 'excerpt', 'description', 'remark', 'post_content', 'content'):
+        price = price_from_text(item.get(key))
+        if price:
+            return price
     return 0
 
 def neko_profile_from_item(item, index=0):
-    name = first_nonempty(item.get('post_title'), item.get('name'), item.get('model_name'))
-    remark = first_nonempty(
+    raw_name = first_nonempty(item.get('post_title'), item.get('name'), item.get('model_name'))
+    name, title_remark = split_neko_name_remark(raw_name)
+    remark = join_neko_notes(title_remark, first_nonempty(
         item.get('model_brief'), item.get('model_detail'), item.get('post_excerpt'),
         item.get('excerpt'), item.get('description'), item.get('remark'),
-        item.get('post_content'), item.get('content'))
+        item.get('post_content'), item.get('content')))
     image = absolute_neko_url(first_neko_image(item))
     link = absolute_neko_url(item.get('link') or item.get('url') or '')
     if not link and item.get('post_name'):
@@ -972,16 +1037,103 @@ def _subtract_intervals(base, busy):
         free = [(a,b) for a,b in nxt if b-a >= 1]
     return free
 
+def _is_package_time(v):
+    s = str(v or '')
+    return '包夜' in s or '鍖呭' in s
+
+def _clock_parts(v):
+    raw = str(v or '').strip()
+    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?", raw)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mi = int(m.group(2) or 0)
+    if mi >= 60:
+        mi = 59
+    return h, mi
+
+def _interval_minutes(start_value, end_value):
+    sp = _clock_parts(start_value)
+    ep = _clock_parts(end_value)
+    if not sp or not ep:
+        return None
+    sh, sm = sp
+    eh, em = ep
+
+    def start_minute():
+        if sh >= 24:
+            return sh * 60 + sm
+        if sh >= 12:
+            return sh * 60 + sm
+        if sh == 0:
+            return 24 * 60 + sm
+        if sh <= 3 and eh <= 5:
+            return (24 + sh) * 60 + sm
+        return (12 + sh) * 60 + sm
+
+    start = start_minute()
+    if eh >= 24:
+        end = eh * 60 + em
+    elif eh >= 12:
+        end = eh * 60 + em
+    elif eh == 0:
+        end = 24 * 60 + em
+    elif eh <= 5 and (sh >= 6 or sh >= 12 or sh <= 3):
+        end = (24 + eh) * 60 + em
+    else:
+        end = (12 + eh) * 60 + em
+    if end <= start:
+        end += 24 * 60
+    return start, end
+
+def _clock_to_minutes(v, default_end=False):
+    raw = str(v or '').strip()
+    if not raw:
+        return None
+    if _is_package_time(raw):
+        return 29 * 60 if default_end else 24 * 60
+    parts = _clock_parts(raw)
+    if not parts:
+        return None
+    h, mi = parts
+    if h == 0:
+        h = 24
+    elif h <= 3:
+        h += 24
+    elif h < 12:
+        h += 12
+    return h * 60 + mi
+
+def _parse_interval_text(text):
+    t = str(text or '').strip()
+    if not t:
+        return None
+    if _is_package_time(t):
+        return (24 * 60, 29 * 60)
+    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~銉硷綖]|鍒皘鑷?)\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
+    if not m:
+        return None
+    return _interval_minutes(m.group(1), m.group(2))
+
+def _fmt_free_minute(m, is_end=False):
+    if is_end and m >= 29 * 60:
+        return '鍖呭'
+    h = (m // 60) % 24
+    mi = m % 60
+    dh = h - 12 if 13 <= h <= 23 else h
+    return f"{dh}.{mi:02d}" if mi else str(dh)
+
 def build_chain_free_rows(c, date_str):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
     result = []
     for sft in pure_shift_rows_for_date(c, date_str):
         girl = sft.get('girl') or ''
-        base = (_clock_to_minutes(sft.get('start')), _clock_to_minutes(sft.get('end'), True))
-        if base[0] is None or base[1] is None:
+        if _is_package_time(sft.get('start')) or _is_package_time(sft.get('end')):
+            base = (24 * 60, 29 * 60)
+        else:
+            base = _interval_minutes(sft.get('start'), sft.get('end'))
+        if not base or base[0] is None or base[1] is None:
             continue
-        if base[1] <= base[0]:
-            base = (base[0], base[1] + 24 * 60)
         busy = []
         for o in c.execute("""SELECT service_time FROM orders
                             WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'""", (date_str, girl)).fetchall():

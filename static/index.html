@@ -155,7 +155,7 @@ body.role-user #stats{display:none!important}
  </div>
  <div class="card"><h2>微信格式输出</h2>
   <div class="split"><div><h3>完整版（内部用：含客户ID和名字）</h3><textarea id="chainFullOut" readonly></textarea></div><div><h3>普通版（给女孩/群里看）</h3><textarea id="chainBasicOut" readonly></textarea></div></div>
-  <h3 style="margin-top:14px">全部女孩空闲时间</h3><textarea id="chainFreeOut" readonly></textarea><div style="margin-top:8px"><button class="soft" onclick="copyChainFreeText()">复制空闲时间</button></div>
+  <h3 style="margin-top:14px">全部女孩空闲时间</h3><textarea id="chainFreeOut" readonly></textarea><div style="margin-top:8px"><button class="soft" onclick="refreshChainFreeTimes()">刷新空闲时间</button> <button class="soft" onclick="copyChainFreeText()">复制空闲时间</button></div>
  </div></section>
 
 
@@ -444,6 +444,17 @@ async function refreshChainExports(){
   chainFullOut.value=j.full||'';
   chainBasicOut.value=j.basic||'';
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
+}
+async function refreshChainFreeTimes(){
+  if(!window.chainFreeOut)return;
+  const old=chainFreeOut.value;
+  try{
+    chainFreeOut.value='正在刷新空闲时间...';
+    await loadChainPage();
+  }catch(e){
+    chainFreeOut.value=old;
+    alert('刷新空闲时间失败：'+e.message);
+  }
 }
 async function copyChainText(type){
   await refreshChainExports();
