@@ -102,8 +102,53 @@ _JS = r'''
   window.saveSettlementReports=async function(silent){ var items=rowsForSave(); if(!items.length){alert("当天没有可保存的未结算金额"); return null;} var r=await post("/api/settlements/save",{date:rdate(),items:items}); await loadReports(); renderSettlement(); if(!silent)alert("已保存实际结算："+(r.saved||items.length)+" 条"); return r; };
   window.sendDailySettlementReport=async function(){ var saved=await saveSettlementReports(true); if(!saved)return; if(!confirm("确认发送 "+rdate()+" 当日结算通报？\n老板邮箱："+(D().settlement_boss_email||bossDefault)+"\n女孩邮箱没填会自动跳过。"))return; var r=await post("/api/settlements/notify",{date:rdate()}); await loadReports(); renderSettlement(); var sg=(r.girls||[]).filter(function(x){return x.sent;}).length, sk=(r.girls||[]).length-sg, bt=r.boss&&r.boss.sent?"老板已发送":"老板邮件未发送："+((r.boss&&r.boss.reason)||"未知原因"); alert(bt+"\n女孩已发送："+sg+"\n女孩跳过/未发："+sk); };
   window.bulkSettleSettlement=async function(status){ var ids=[].slice.call(selected); if(!ids.length){alert("请先勾选要修改的日期或女孩");return;} await post("/api/orders/bulk_settle",{ids:ids,settlement_status:status}); selected.clear(); if(typeof loadAll==="function")await loadAll(); else renderSettlement(); };
-  var oldRender=window.render; if(typeof oldRender==="function"&&!oldRender.__settleWrapped){ var wrapped=function(){ var r=oldRender.apply(this,arguments); setTimeout(function(){ loadReports().then(function(){ ensureSettlement(); renderEmails(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); }); },0); return r; }; wrapped.__settleWrapped=true; window.render=wrapped; }
-  document.addEventListener("DOMContentLoaded",function(){ ensureStyle(); ensureSettlement(); ensureEmailPanel(); loadReports().then(function(){ renderEmails(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); }); });
+  window.refreshChainFreeTimes=async function(){
+    var free=document.getElementById("chainFreeOut");
+    if(!free)return;
+    var old=free.value;
+    try{
+      free.value="正在刷新空闲时间...";
+      if(typeof loadChainPage==="function") await loadChainPage();
+      else if(typeof refreshChainExports==="function") await refreshChainExports();
+    }catch(e){
+      free.value=old;
+      alert("刷新空闲时间失败："+(e&&e.message?e.message:e));
+    }
+  };
+  function ensureChainFreeRefresh(){
+    var free=document.getElementById("chainFreeOut");
+    if(!free || document.getElementById("chainFreeRefreshBtn"))return;
+    var bar=free.nextElementSibling;
+    if(!bar || bar.tagName!=="DIV"){
+      bar=document.createElement("div");
+      bar.style.marginTop="8px";
+      free.parentNode.insertBefore(bar, free.nextSibling);
+    }
+    var btn=document.createElement("button");
+    btn.id="chainFreeRefreshBtn";
+    btn.type="button";
+    btn.className="soft";
+    btn.textContent="刷新空闲时间";
+    btn.onclick=window.refreshChainFreeTimes;
+    bar.insertBefore(btn, bar.firstChild);
+    if(bar.children.length>1) bar.insertBefore(document.createTextNode(" "), bar.children[1]);
+  }
+  function wrapChainRefreshers(){
+    var save=window.saveChainOrder;
+    if(typeof save==="function"&&!save.__freeRefreshWrapped){
+      var saveWrapped=async function(){ var r=await save.apply(this,arguments); setTimeout(window.refreshChainFreeTimes,0); return r; };
+      saveWrapped.__freeRefreshWrapped=true;
+      window.saveChainOrder=saveWrapped;
+    }
+    var cancel=window.cancelChainOrder;
+    if(typeof cancel==="function"&&!cancel.__freeRefreshWrapped){
+      var cancelWrapped=async function(){ var r=await cancel.apply(this,arguments); setTimeout(window.refreshChainFreeTimes,0); return r; };
+      cancelWrapped.__freeRefreshWrapped=true;
+      window.cancelChainOrder=cancelWrapped;
+    }
+  }
+  var oldRender=window.render; if(typeof oldRender==="function"&&!oldRender.__settleWrapped){ var wrapped=function(){ var r=oldRender.apply(this,arguments); setTimeout(function(){ loadReports().then(function(){ ensureSettlement(); ensureEmailPanel(); renderEmails(); ensureChainFreeRefresh(); wrapChainRefreshers(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); }); },0); return r; }; wrapped.__settleWrapped=true; window.render=wrapped; }
+  document.addEventListener("DOMContentLoaded",function(){ ensureStyle(); ensureSettlement(); ensureEmailPanel(); ensureChainFreeRefresh(); wrapChainRefreshers(); loadReports().then(function(){ renderEmails(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); }); });
 })();
 '''
 
@@ -147,6 +192,126 @@ def _install(module):
         return
     app._actual_settle_patch = True
     from flask import Response, jsonify, request
+    import re as _re
+
+    def _is_package_time(v):
+        s = str(v or "")
+        return "包夜" in s or "鍖呭" in s
+
+    def _clock_parts(v):
+        raw = str(v or "").strip()
+        m = _re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?", raw)
+        if not m:
+            return None
+        h = int(m.group(1))
+        mi = int(m.group(2) or 0)
+        return h, min(mi, 59)
+
+    def _interval_minutes(start_value, end_value):
+        sp = _clock_parts(start_value)
+        ep = _clock_parts(end_value)
+        if not sp or not ep:
+            return None
+        sh, sm = sp
+        eh, em = ep
+
+        if sh >= 24:
+            start = sh * 60 + sm
+        elif sh >= 12:
+            start = sh * 60 + sm
+        elif sh == 0:
+            start = 24 * 60 + sm
+        elif sh <= 3 and eh <= 5:
+            start = (24 + sh) * 60 + sm
+        else:
+            start = (12 + sh) * 60 + sm
+
+        if eh >= 24:
+            end = eh * 60 + em
+        elif eh >= 12:
+            end = eh * 60 + em
+        elif eh == 0:
+            end = 24 * 60 + em
+        elif eh <= 5 and (sh >= 6 or sh >= 12 or sh <= 3):
+            end = (24 + eh) * 60 + em
+        else:
+            end = (12 + eh) * 60 + em
+        if end <= start:
+            end += 24 * 60
+        return start, end
+
+    def _patched_parse_interval_text(text):
+        t = str(text or "").strip()
+        if not t:
+            return None
+        if _is_package_time(t):
+            return (24 * 60, 29 * 60)
+        m = _re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~ー－到至]\s*)(\d{1,2}(?:[:.]\d{1,2})?)", t)
+        if not m:
+            m = _re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*[-~]\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
+        if not m:
+            return None
+        return _interval_minutes(m.group(1), m.group(2))
+
+    def _patched_clock_to_minutes(v, default_end=False):
+        raw = str(v or "").strip()
+        if not raw:
+            return None
+        if _is_package_time(raw):
+            return 29 * 60 if default_end else 24 * 60
+        parts = _clock_parts(raw)
+        if not parts:
+            return None
+        h, mi = parts
+        if h == 0:
+            h = 24
+        elif h <= 3:
+            h += 24
+        elif h < 12:
+            h += 12
+        return h * 60 + mi
+
+    def _patched_fmt_free_minute(m, is_end=False):
+        if is_end and m >= 29 * 60:
+            return "包夜"
+        h = (m // 60) % 24
+        mi = m % 60
+        dh = h - 12 if 13 <= h <= 23 else h
+        return f"{dh}.{mi:02d}" if mi else str(dh)
+
+    old_build_chain_free_rows = getattr(module, "build_chain_free_rows", None)
+    module._clock_to_minutes = _patched_clock_to_minutes
+    module._parse_interval_text = _patched_parse_interval_text
+    module._fmt_free_minute = _patched_fmt_free_minute
+    if callable(old_build_chain_free_rows):
+        def _patched_build_chain_free_rows(c, date_str):
+            result = []
+            for sft in module.pure_shift_rows_for_date(c, date_str):
+                girl = sft.get("girl") or ""
+                if _is_package_time(sft.get("start")) or _is_package_time(sft.get("end")):
+                    base = (24 * 60, 29 * 60)
+                else:
+                    base = _interval_minutes(sft.get("start"), sft.get("end"))
+                if not base:
+                    continue
+                busy = []
+                for o in c.execute("""SELECT service_time FROM orders
+                                    WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'') NOT IN ('取消','鍙栨秷')""", (date_str, girl)).fetchall():
+                    itv = _patched_parse_interval_text(o["service_time"])
+                    if itv:
+                        busy.append(itv)
+                free = module._subtract_intervals(base, busy)
+                if not free:
+                    continue
+                segments = "".join([f"{_patched_fmt_free_minute(a)}-{_patched_fmt_free_minute(b, True)}空" for a, b in free])
+                result.append({"girl": girl, "segments": segments, "text": f"{girl}{segments}"})
+            try:
+                dt = module.datetime.strptime(date_str, "%Y-%m-%d")
+                header = f"{dt.month:02d}{dt.day:02d}出勤"
+            except Exception:
+                header = f"{date_str}出勤"
+            return {"header": header, "lines": result, "text": header + ("\n" + "\n".join(x["text"] for x in result) if result else "") + "\n\nhttps://ailisi99.com/"}
+        module.build_chain_free_rows = _patched_build_chain_free_rows
 
     def schema():
         with conn() as c:
