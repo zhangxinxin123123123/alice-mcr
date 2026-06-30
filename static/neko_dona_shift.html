@@ -378,6 +378,7 @@ button,input,select{font:inherit;outline:none}
         tags: (s.tags || []).slice(0,4),
         status: s.status,
         booking: s.booking,
+        params: {...DEFAULT_PARAMS, ...(s.params || {})},
       };
     });
   }
@@ -594,6 +595,41 @@ ${s.remark || p.remark || ""}`;
     ctx.textBaseline = "alphabetic";
     return w;
   }
+  function drawGlowPill(ctx, text, x, y, fill, stroke, color, glow){
+    ctx.save();
+    ctx.shadowColor = glow || stroke;
+    ctx.shadowBlur = 18;
+    const w = drawPill(ctx, text, x, y, fill, stroke, color);
+    ctx.restore();
+    return w;
+  }
+  function drawParamBadge(ctx, label, grade, x, y){
+    const g = String(grade || "B");
+    const w = 148;
+    const grad = ctx.createLinearGradient(x, y, x + w, y + 42);
+    grad.addColorStop(0, "rgba(33,247,255,.24)");
+    grad.addColorStop(1, "rgba(255,47,154,.20)");
+    ctx.save();
+    ctx.shadowColor = g === "S" ? "#ffd447" : "#21f7ff";
+    ctx.shadowBlur = g === "S" ? 18 : 12;
+    roundRect(ctx, x, y, w, 42, 12);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = g === "S" ? "#ffd447" : "#21f7ff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "#dfffff";
+    ctx.font = "800 18px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x + 14, y + 22);
+    ctx.fillStyle = g === "S" ? "#ffe55d" : "#ffffff";
+    ctx.font = "900 25px 'Microsoft YaHei', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(g, x + w - 14, y + 22);
+    ctx.restore();
+    return w;
+  }
   function loadCanvasImage(src){
     return new Promise(resolve => {
       if(!src) return resolve(null);
@@ -702,20 +738,24 @@ ${s.remark || p.remark || ""}`;
     ctx.fillStyle = "#ffe55d";
     ctx.font = "900 28px 'Microsoft YaHei', sans-serif";
     ctx.fillText(d, 50, 170);
-    drawPill(ctx, `${rows.length} 人出勤`, width - 230, 58, "#1b0b2b", "#21f7ff", "#dfffff");
+    drawGlowPill(ctx, `${rows.length} 人出勤`, width - 260, 58, "#1b0b2b", "#21f7ff", "#dfffff", "#21f7ff");
 
     let y = 220;
     rows.forEach((row, idx) => {
       const cardX = 38;
       const cardW = width - 76;
-      const cardH = 178;
+      const cardH = 246;
       const cg = ctx.createLinearGradient(cardX, y, cardX + cardW, y + cardH);
       cg.addColorStop(0, "rgba(255,47,154,.30)");
       cg.addColorStop(.45, "rgba(25,12,38,.96)");
       cg.addColorStop(1, "rgba(8,9,24,.98)");
+      ctx.save();
+      ctx.shadowColor = "rgba(255,47,154,.45)";
+      ctx.shadowBlur = 16;
       roundRect(ctx, cardX, y, cardW, cardH, 18);
       ctx.fillStyle = cg;
       ctx.fill();
+      ctx.restore();
       ctx.strokeStyle = "#ff2f9a";
       ctx.lineWidth = 3;
       ctx.stroke();
@@ -725,14 +765,18 @@ ${s.remark || p.remark || ""}`;
 
       const imgX = cardX + 24;
       const imgY = y + 22;
-      const imgSize = 132;
+      const imgSize = 180;
       if(!drawCoverImage(ctx, images[idx], imgX, imgY, imgSize, imgSize, 16)){
         drawAvatarFallback(ctx, imgX, imgY, imgSize, imgSize, row.name);
       }
+      ctx.save();
+      ctx.shadowColor = "#21f7ff";
+      ctx.shadowBlur = 16;
       ctx.strokeStyle = "#21f7ff";
       ctx.lineWidth = 3;
       roundRect(ctx, imgX, imgY, imgSize, imgSize, 16);
       ctx.stroke();
+      ctx.restore();
 
       const textX = imgX + imgSize + 26;
       ctx.fillStyle = "#21f7ff";
@@ -742,33 +786,48 @@ ${s.remark || p.remark || ""}`;
       ctx.shadowColor = "#ff2f9a";
       ctx.shadowBlur = 8;
       ctx.font = "900 36px 'Microsoft YaHei', sans-serif";
-      drawText(ctx, row.name, textX, y + 78, 330, 38, 1);
+      drawText(ctx, row.name, textX, y + 78, 390, 38, 1);
       ctx.shadowBlur = 0;
       ctx.fillStyle = "#f7b8d7";
       ctx.font = "700 22px 'Microsoft YaHei', sans-serif";
-      drawText(ctx, row.remark || "欢迎预约", textX, y + 116, 390, 28, 2);
+      drawText(ctx, row.remark || "欢迎预约", textX, y + 116, 410, 28, 2);
 
-      const rightX = width - 342;
+      const rightX = width - 366;
       ctx.fillStyle = "#dfffff";
       ctx.font = "900 27px 'Microsoft YaHei', sans-serif";
       ctx.fillText(`${row.start} ~ ${row.end}`, rightX, y + 50);
       ctx.fillStyle = "#ffe55d";
       ctx.font = "900 26px 'Microsoft YaHei', sans-serif";
       ctx.fillText(row.price ? `${yen(row.price)} /h` : "价格咨询", rightX, y + 88);
-      const statusW = drawPill(ctx, row.status || "出勤中", rightX, y + 112, "#073044", "#21f7ff", "#dfffff");
-      drawPill(ctx, row.booking || "预约可", rightX + statusW + 10, y + 112, "#3b092d", "#ff2f9a", "#ffd2e7");
+      const statusW = drawGlowPill(ctx, row.status || "出勤中", rightX, y + 112, "#073044", "#21f7ff", "#dfffff", "#21f7ff");
+      drawGlowPill(ctx, row.booking || "预约可", rightX + statusW + 10, y + 112, "#3b092d", "#ff2f9a", "#ffd2e7", "#ff2f9a");
 
       let tx = textX;
-      let ty = y + 136;
+      let ty = y + 158;
       (row.tags || []).slice(0,4).forEach(tag => {
-        const w = drawPill(ctx, tag, tx, ty, "rgba(255,47,154,.18)", "#ff2f9a", "#ffffff");
+        const w = drawGlowPill(ctx, tag, tx, ty, "rgba(255,47,154,.22)", "#ff2f9a", "#ffffff", "#ff2f9a");
         tx += w + 8;
         if(tx > rightX - 120){
           tx = textX;
           ty += 40;
         }
       });
-      y += cardH + 22;
+
+      const params = {...DEFAULT_PARAMS, ...(row.params || {})};
+      const paramX = rightX;
+      const paramY = y + 164;
+      ctx.fillStyle = "#21f7ff";
+      ctx.font = "900 18px 'Microsoft YaHei', sans-serif";
+      ctx.shadowColor = "#21f7ff";
+      ctx.shadowBlur = 10;
+      ctx.fillText("属性 PARAMETER", paramX, paramY);
+      ctx.shadowBlur = 0;
+      PARAM_KEYS.forEach(([param,label], i) => {
+        const px = paramX + (i % 2) * 158;
+        const py = paramY + 14 + Math.floor(i / 2) * 50;
+        drawParamBadge(ctx, label, params[param], px, py);
+      });
+      y += cardH + 24;
     });
     ctx.fillStyle = "#69faff";
     ctx.font = "800 20px 'Microsoft YaHei', sans-serif";
@@ -785,8 +844,8 @@ ${s.remark || p.remark || ""}`;
     }
     statusLine.textContent = "正在生成客人图...";
     const d = shiftDate.value || today;
-    const width = 900;
-    const height = 260 + rows.length * 200 + 76;
+    const width = 1080;
+    const height = 300 + rows.length * 270 + 76;
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
