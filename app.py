@@ -191,15 +191,28 @@ def normalize_avatar_name(s):
     return s
 
 def first_neko_image(item):
-    pics = item.get('model_pics') or item.get('pics') or []
+    pics = item.get('model_pics') or item.get('pics') or item.get('images') or item.get('photos') or []
     if isinstance(pics, list) and pics:
         first = pics[0]
         if isinstance(first, dict):
-            for k in ('url','src','full','thumbnail','thumb'):
+            for k in ('url','src','full','large','medium','thumbnail','thumb'):
                 if first.get(k): return str(first.get(k))
         elif first:
             return str(first)
-    return str(item.get('thumbnail') or item.get('thumb') or '')
+    for key in ('thumbnail','thumb','image','cover','avatar','photo','pic','featured_image','model_avatar','model_photo'):
+        value = item.get(key)
+        if isinstance(value, dict):
+            for k in ('url','src','full','large','medium','thumbnail','thumb'):
+                if value.get(k): return str(value.get(k))
+        elif value:
+            return str(value)
+    embedded = item.get('_embedded') if isinstance(item.get('_embedded'), dict) else {}
+    media = embedded.get('wp:featuredmedia') if embedded else None
+    if isinstance(media, list) and media:
+        first = media[0] if isinstance(media[0], dict) else {}
+        for key in ('source_url','link'):
+            if first.get(key): return str(first.get(key))
+    return ''
 
 def strip_html_text(value):
     value = re.sub(r'<[^>]+>', ' ', str(value or ''))
@@ -323,22 +336,51 @@ def neko_profile_from_item(item, index=0):
         'link': link,
     }
 
+def extract_neko_items(data):
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    for key in ('girls', 'models', 'items', 'posts', 'list', 'rows', 'results'):
+        value = data.get(key)
+        if isinstance(value, list):
+            return value
+    nested = data.get('data')
+    if isinstance(nested, list):
+        return nested
+    if isinstance(nested, dict):
+        return extract_neko_items(nested)
+    return []
+
 def fetch_neko_girls():
+    errors = []
     urls = [
         NEKO_BASE_URL + '/simple-api/girls?_cb=' + str(int(datetime.now().timestamp())),
         NEKO_BASE_URL + '/simple-api/girls',
+        NEKO_BASE_URL + '/simple-api/models?_cb=' + str(int(datetime.now().timestamp())),
+        NEKO_BASE_URL + '/simple-api/models',
+        NEKO_BASE_URL + '/simple-api/home?_cb=' + str(int(datetime.now().timestamp())),
+        NEKO_BASE_URL + '/simple-api/home',
+        NEKO_BASE_URL + '/wp-json/wp/v2/posts?per_page=100&_embed=1',
     ]
     for url in urls:
         try:
             text, ctype = http_text(url)
             if 'json' not in ctype and not text.lstrip().startswith(('[','{')):
+                errors.append({'url': url, 'error': 'not json: ' + ctype})
                 continue
             data = json.loads(text)
-            if isinstance(data, list):
-                return data, 'simple-api'
-        except Exception:
+            items = extract_neko_items(data)
+            if items:
+                fetch_neko_girls.last_errors = []
+                return items, url.replace(NEKO_BASE_URL, '').split('?')[0].strip('/') or 'neko-api'
+            errors.append({'url': url, 'error': 'empty list'})
+        except Exception as e:
+            errors.append({'url': url, 'error': str(e)})
             continue
+    fetch_neko_girls.last_errors = errors[-5:]
     return NEKO_SEED_GIRLS, 'seed'
+fetch_neko_girls.last_errors = []
 
 def match_neko_girl(girl_name, alias, neko_items):
     wants = [normalize_avatar_name(girl_name), normalize_avatar_name(alias)]
@@ -394,6 +436,25 @@ def cache_avatar(girl_name, neko_name, src_url):
                      source_url=excluded.source_url, updated_at=CURRENT_TIMESTAMP""",
                   (girl_name, neko_name, rel, src_url))
     return rel
+
+def cached_neko_image(girl_name, neko_name, src_url):
+    src_url = absolute_neko_url(src_url)
+    if not src_url:
+        return ''
+    try:
+        init_db()
+        with conn() as c:
+            row = c.execute("SELECT avatar_url,source_url FROM girl_avatar_cache WHERE girl_name=?", (girl_name,)).fetchone()
+        if row and row['avatar_url'] and row['source_url'] == src_url:
+            local_path = APP_DIR / str(row['avatar_url']).lstrip('/').replace('/', os.sep)
+            if local_path.exists():
+                return row['avatar_url']
+    except Exception:
+        pass
+    try:
+        return cache_avatar(girl_name, neko_name or girl_name, src_url)
+    except Exception:
+        return src_url
 
 def yen_to_int(s):
     s=str(s or '').strip().replace('（','').replace('）','').replace('(','').replace(')','').replace(',','').replace('¥','').replace('円','')
@@ -1785,6 +1846,7 @@ def api_neko_avatars_sync():
 
 @app.route('/api/neko_profiles', methods=['GET'])
 def api_neko_profiles():
+    init_db()
     try:
         neko_items, source = fetch_neko_girls()
     except Exception as e:
@@ -1793,8 +1855,17 @@ def api_neko_profiles():
     for idx, item in enumerate(neko_items):
         p = neko_profile_from_item(item, idx)
         if p.get('name'):
+            source_image = p.get('image') or ''
+            local_image = cached_neko_image(p['name'], p['name'], source_image)
+            if local_image:
+                p['source_image'] = source_image
+                p['image'] = local_image
             profiles.append(p)
-    return jsonify(ok=True, source=source, source_count=len(neko_items), profiles=profiles)
+    notice = ''
+    errors = getattr(fetch_neko_girls, 'last_errors', []) or []
+    if source == 'seed':
+        notice = '喵喵实时接口暂时读取失败，当前显示内置旧名单；新女孩需要等喵喵接口恢复或提供新的公开接口。'
+    return jsonify(ok=True, source=source, source_count=len(neko_items), profiles=profiles, notice=notice, errors=errors)
 
 def time_to_min(t):
     m = re.match(r"^(\d{1,2})(?::|\.)(\d{2})$", str(t or '').strip()) or re.match(r"^(\d{1,2})$", str(t or '').strip())

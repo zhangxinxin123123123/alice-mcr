@@ -577,10 +577,15 @@ ${s.remark || p.remark || ""}`;
     lines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
     return lines.length * lineHeight;
   }
-  function drawPill(ctx, text, x, y, fill, stroke, color){
+  function pillWidth(ctx, text, maxWidth=210){
     const label = String(text || "");
     ctx.font = "800 22px 'Microsoft YaHei', sans-serif";
-    const w = Math.min(210, Math.max(74, ctx.measureText(label).width + 34));
+    maxWidth = Math.max(74, Number(maxWidth) || 210);
+    return Math.min(maxWidth, Math.max(74, ctx.measureText(label).width + 34));
+  }
+  function drawPill(ctx, text, x, y, fill, stroke, color, maxWidth=210){
+    const label = String(text || "");
+    const w = pillWidth(ctx, label, maxWidth);
     roundRect(ctx, x, y, w, 36, 18);
     ctx.fillStyle = fill;
     ctx.fill();
@@ -590,18 +595,28 @@ ${s.remark || p.remark || ""}`;
     ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(label, x + w / 2, y + 18);
+    ctx.fillText(label, x + w / 2, y + 18, w - 18);
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     return w;
   }
-  function drawGlowPill(ctx, text, x, y, fill, stroke, color, glow){
+  function drawGlowPill(ctx, text, x, y, fill, stroke, color, glow, maxWidth=210){
     ctx.save();
     ctx.shadowColor = glow || stroke;
     ctx.shadowBlur = 18;
-    const w = drawPill(ctx, text, x, y, fill, stroke, color);
+    const w = drawPill(ctx, text, x, y, fill, stroke, color, maxWidth);
     ctx.restore();
     return w;
+  }
+  function drawPanelFrame(ctx, x, y, w, h, stroke, fill){
+    ctx.save();
+    roundRect(ctx, x, y, w, h, 14);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
   }
   function drawParamBadge(ctx, label, grade, x, y){
     const g = String(grade || "B");
@@ -685,7 +700,13 @@ ${s.remark || p.remark || ""}`;
     ctx.textBaseline = "alphabetic";
   }
   function canvasToBlob(canvas){
-    return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    return new Promise(resolve => {
+      try{
+        canvas.toBlob(resolve, "image/png");
+      }catch(e){
+        resolve(null);
+      }
+    });
   }
   function downloadBlob(blob, filename){
     if(!blob) return;
@@ -744,7 +765,7 @@ ${s.remark || p.remark || ""}`;
     rows.forEach((row, idx) => {
       const cardX = 38;
       const cardW = width - 76;
-      const cardH = 246;
+      const cardH = 310;
       const cg = ctx.createLinearGradient(cardX, y, cardX + cardW, y + cardH);
       cg.addColorStop(0, "rgba(255,47,154,.30)");
       cg.addColorStop(.45, "rgba(25,12,38,.96)");
@@ -763,9 +784,23 @@ ${s.remark || p.remark || ""}`;
       roundRect(ctx, cardX, y, 12, cardH, 6);
       ctx.fill();
 
+      ctx.save();
+      roundRect(ctx, cardX + 14, y + 10, cardW - 28, cardH - 20, 14);
+      ctx.clip();
+
       const imgX = cardX + 24;
       const imgY = y + 22;
-      const imgSize = 180;
+      const imgSize = 176;
+      const innerRight = cardX + cardW - 24;
+      const paramPanelW = 340;
+      const paramX = innerRight - paramPanelW;
+      const textX = imgX + imgSize + 26;
+      const textW = Math.max(280, paramX - textX - 24);
+      const tagPanelY = y + 166;
+      const tagPanelH = 126;
+      const paramPanelY = tagPanelY;
+      const paramPanelH = tagPanelH;
+
       if(!drawCoverImage(ctx, images[idx], imgX, imgY, imgSize, imgSize, 16)){
         drawAvatarFallback(ctx, imgX, imgY, imgSize, imgSize, row.name);
       }
@@ -778,7 +813,6 @@ ${s.remark || p.remark || ""}`;
       ctx.stroke();
       ctx.restore();
 
-      const textX = imgX + imgSize + 26;
       ctx.fillStyle = "#21f7ff";
       ctx.font = "900 18px 'Microsoft YaHei', sans-serif";
       ctx.fillText(`ID ${String(idx + 1).padStart(3,"0")}`, textX, y + 34);
@@ -786,47 +820,54 @@ ${s.remark || p.remark || ""}`;
       ctx.shadowColor = "#ff2f9a";
       ctx.shadowBlur = 8;
       ctx.font = "900 36px 'Microsoft YaHei', sans-serif";
-      drawText(ctx, row.name, textX, y + 78, 390, 38, 1);
+      drawText(ctx, row.name, textX, y + 78, textW, 38, 1);
       ctx.shadowBlur = 0;
       ctx.fillStyle = "#f7b8d7";
       ctx.font = "700 22px 'Microsoft YaHei', sans-serif";
-      drawText(ctx, row.remark || "欢迎预约", textX, y + 116, 410, 28, 2);
+      drawText(ctx, row.remark || "欢迎预约", textX, y + 116, textW, 28, 2);
 
-      const rightX = width - 366;
+      const rightX = paramX;
       ctx.fillStyle = "#dfffff";
       ctx.font = "900 27px 'Microsoft YaHei', sans-serif";
-      ctx.fillText(`${row.start} ~ ${row.end}`, rightX, y + 50);
+      ctx.fillText(`${row.start} ~ ${row.end}`, rightX, y + 50, paramPanelW);
       ctx.fillStyle = "#ffe55d";
       ctx.font = "900 26px 'Microsoft YaHei', sans-serif";
-      ctx.fillText(row.price ? `${yen(row.price)} /h` : "价格咨询", rightX, y + 88);
-      const statusW = drawGlowPill(ctx, row.status || "出勤中", rightX, y + 112, "#073044", "#21f7ff", "#dfffff", "#21f7ff");
-      drawGlowPill(ctx, row.booking || "预约可", rightX + statusW + 10, y + 112, "#3b092d", "#ff2f9a", "#ffd2e7", "#ff2f9a");
+      ctx.fillText(row.price ? `${yen(row.price)} /h` : "价格咨询", rightX, y + 88, paramPanelW);
+      const statusW = drawGlowPill(ctx, row.status || "出勤中", rightX, y + 112, "#073044", "#21f7ff", "#dfffff", "#21f7ff", 150);
+      drawGlowPill(ctx, row.booking || "预约可", rightX + statusW + 10, y + 112, "#3b092d", "#ff2f9a", "#ffd2e7", "#ff2f9a", paramPanelW - statusW - 10);
 
-      let tx = textX;
-      let ty = y + 158;
+      drawPanelFrame(ctx, textX, tagPanelY, textW, tagPanelH, "rgba(255,47,154,.55)", "rgba(255,47,154,.10)");
+      drawPanelFrame(ctx, paramX, paramPanelY, paramPanelW, paramPanelH, "rgba(33,247,255,.60)", "rgba(33,247,255,.08)");
+
+      let tx = textX + 12;
+      let ty = tagPanelY + 14;
+      const tagMaxRight = textX + textW - 12;
       (row.tags || []).slice(0,4).forEach(tag => {
-        const w = drawGlowPill(ctx, tag, tx, ty, "rgba(255,47,154,.22)", "#ff2f9a", "#ffffff", "#ff2f9a");
-        tx += w + 8;
-        if(tx > rightX - 120){
-          tx = textX;
-          ty += 40;
+        const maxTagW = Math.min(162, tagMaxRight - tx);
+        const plannedW = pillWidth(ctx, tag, 162);
+        if(tx + plannedW > tagMaxRight && tx > textX + 12){
+          tx = textX + 12;
+          ty += 42;
         }
+        if(ty + 36 > tagPanelY + tagPanelH - 8) return;
+        const w = drawGlowPill(ctx, tag, tx, ty, "rgba(255,47,154,.22)", "#ff2f9a", "#ffffff", "#ff2f9a", Math.max(74, maxTagW));
+        tx += w + 8;
       });
 
       const params = {...DEFAULT_PARAMS, ...(row.params || {})};
-      const paramX = rightX;
-      const paramY = y + 164;
+      const paramY = paramPanelY + 18;
       ctx.fillStyle = "#21f7ff";
       ctx.font = "900 18px 'Microsoft YaHei', sans-serif";
       ctx.shadowColor = "#21f7ff";
       ctx.shadowBlur = 10;
-      ctx.fillText("属性 PARAMETER", paramX, paramY);
+      ctx.fillText("属性 PARAMETER", paramX + 12, paramY);
       ctx.shadowBlur = 0;
       PARAM_KEYS.forEach(([param,label], i) => {
-        const px = paramX + (i % 2) * 158;
-        const py = paramY + 14 + Math.floor(i / 2) * 50;
+        const px = paramX + 12 + (i % 2) * 158;
+        const py = paramY + 14 + Math.floor(i / 2) * 48;
         drawParamBadge(ctx, label, params[param], px, py);
       });
+      ctx.restore();
       y += cardH + 24;
     });
     ctx.fillStyle = "#69faff";
@@ -844,8 +885,8 @@ ${s.remark || p.remark || ""}`;
     }
     statusLine.textContent = "正在生成客人图...";
     const d = shiftDate.value || today;
-    const width = 1080;
-    const height = 300 + rows.length * 270 + 76;
+    const width = 1240;
+    const height = 300 + rows.length * 334 + 76;
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -889,7 +930,8 @@ ${s.remark || p.remark || ""}`;
       const data = await r.json();
       if(!data.ok) throw new Error(data.error || "读取失败");
       profiles = data.profiles || [];
-      statusLine.textContent = `已读取 ${profiles.length} 个喵喵资料｜来源 ${data.source || ""}`;
+      const notice = data.notice ? `｜${data.notice}` : "";
+      statusLine.textContent = `已读取 ${profiles.length} 个喵喵资料｜来源 ${data.source || ""}${notice}`;
       render();
     }catch(e){
       console.error(e);
