@@ -28,7 +28,9 @@ _JS = r'''
   function reportOf(date,girl){ return (D().settlement_reports||[]).find(function(x){ return clean(x.report_date)===clean(date) && clean(x.girl_name)===clean(girl); }); }
   function key(date,girl){ return date + "||" + girl; }
   function formulaDefault(total, nonCash){ return Number(nonCash||0) ? "理论 " + money(total) + " - 非现金 " + money(nonCash) + " = " + money(Number(total||0)-Number(nonCash||0)) : "理论 " + money(total); }
-  function val(row, field, fallback){ var k=key(row.date,row.girl); if(drafts[k] && drafts[k][field] !== undefined) return drafts[k][field]; var r=reportOf(row.date,row.girl); if(r && r[field] !== undefined && r[field] !== null && String(r[field]) !== "") return r[field]; return fallback; }
+  function idKey(ids){ return (Array.isArray(ids)?ids:String(ids||"").split(",")).map(Number).filter(Boolean).sort(function(a,b){return a-b;}).join(","); }
+  function reportMatchesRow(r,row){ return !!(r && idKey(r.order_ids) && idKey(r.order_ids)===idKey(row.ids)); }
+  function val(row, field, fallback){ var k=key(row.date,row.girl); if(drafts[k] && drafts[k][field] !== undefined) return drafts[k][field]; var r=reportOf(row.date,row.girl); if(reportMatchesRow(r,row) && r[field] !== undefined && r[field] !== null && String(r[field]) !== "") return r[field]; return fallback; }
   function actual(row){ return Number(val(row,"actual_settlement",Number(row.total||0)-Number(row.nonCash||0))||0); }
   function formula(row){ return String(val(row,"formula_text",formulaDefault(row.total,row.nonCash))||""); }
   async function post(url, body){
@@ -50,12 +52,12 @@ _JS = r'''
   function ensureStyle(){
     if(document.getElementById("aliceSettleStyle")) return;
     var s=document.createElement("style"); s.id="aliceSettleStyle";
-    s.textContent=".settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}@media(max-width:760px){.settle-email-grid{grid-template-columns:1fr}}";
+    s.textContent=".settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}@media(max-width:760px){.settle-email-grid{grid-template-columns:1fr}}";
     document.head.appendChild(s);
   }
   function ensureSettlement(){
     var sec=document.getElementById("settlement"); if(!sec || document.getElementById("settlePatchRoot")) return;
-    sec.innerHTML='<div class="card" id="settlePatchRoot"><h2>金额结算</h2><p class="note">按通报日期汇总未结算订单。结算公式和实际结算都可以编辑保存；实际结算就是今天真实给老板的钱。女孩邮箱没填会自动跳过。</p><div class="form"><input id="settleReportDate" type="date"><input id="settleGirlQ" placeholder="筛选女孩"><button class="primary" onclick="saveSettlementReports()">保存实际结算</button><button class="primary" onclick="sendDailySettlementReport()">当日结算通报</button><button class="soft" onclick="clearSettlementPick()">清空勾选</button><button class="primary" onclick="bulkSettleSettlement(\'已结算\')">勾选改已结算</button><button class="soft" onclick="bulkSettleSettlement(\'未结算\')">勾选改未结算</button></div><div id="settlementTable"></div></div>';
+    sec.innerHTML='<div class="card" id="settlePatchRoot"><h2>金额结算</h2><p class="note">按通报日期汇总未结算订单。结算公式和实际结算都可以编辑保存；实际结算就是今天真实给老板的钱。已结算订单不会再计入实际结算。</p><div class="form"><input id="settleReportDate" type="date"><input id="settleGirlQ" placeholder="筛选女孩"><button class="primary" onclick="saveSettlementReports()">保存实际结算</button><button class="primary" onclick="sendDailySettlementReport()">当日结算通报</button><button class="soft" onclick="clearSettlementPick()">清空勾选</button><button class="primary" onclick="bulkSettleSettlement(\'已结算\')">勾选改已结算</button><button class="soft" onclick="bulkSettleSettlement(\'未结算\')">勾选改未结算</button></div><div id="settlementTable"></div><div id="settleAllSummary"></div></div>';
     var d=document.getElementById("settleReportDate"); if(d&&!d.value)d.value=today(); if(d)d.onchange=renderSettlement;
     var q=document.getElementById("settleGirlQ"); if(q)q.oninput=renderSettlement;
   }
@@ -72,37 +74,65 @@ _JS = r'''
     box.querySelectorAll(".save-girl-email").forEach(function(b){ b.onclick=async function(){ var id=b.getAttribute("data-id"), email=(document.getElementById("girlEmail_"+id)||{}).value||""; await post("/api/girls/email",{id:id,name:b.getAttribute("data-name"),email:email}); var g=(D().girls||[]).find(function(x){return Number(x.id)===Number(id);}); if(g)g.email=email; await loadReports(); renderEmails(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); alert("女孩邮箱已保存"); }; });
   }
   window.renderGirlEmailManager = renderEmails;
+  function isSettledOrder(o){ return clean((o||{}).settlement_status||"未结算")==="已结算"; }
+  function selectedAll(ids){ ids=(ids||[]).map(Number).filter(Boolean); return ids.length&&ids.every(function(id){return selected.has(Number(id));}); }
+  function addSettlementOrder(map,o){
+    var girl=o.girl_name||"未填写女孩", day=o.order_date||"", amt=Number(o.store_profit||0), pm=clean(o.payment_method||"现金"), non=pm&&pm!=="现金"?amt:0;
+    map[girl]=map[girl]||{girl:girl,total:0,nonCash:0,count:0,ids:[],dates:{}};
+    map[girl].total+=amt; map[girl].nonCash+=non; map[girl].count++; map[girl].ids.push(Number(o.id));
+    map[girl].dates[day]=map[girl].dates[day]||{date:day,girl:girl,total:0,nonCash:0,count:0,ids:[]};
+    map[girl].dates[day].total+=amt; map[girl].dates[day].nonCash+=non; map[girl].dates[day].count++; map[girl].dates[day].ids.push(Number(o.id));
+  }
   function groups(){
     var date=rdate(), q=clean((document.getElementById("settleGirlQ")||{}).value).toLowerCase(), map={};
-    (D().orders||[]).filter(function(o){ return (o.settlement_status||"未结算")!=="已结算" && (!date || o.order_date===date) && (!q || clean(o.girl_name).toLowerCase().indexOf(q)>=0); }).forEach(function(o){
-      var girl=o.girl_name||"未填写女孩", day=o.order_date||date, amt=Number(o.store_profit||0), pm=clean(o.payment_method||"现金"), non=pm&&pm!=="现金"?amt:0;
-      map[girl]=map[girl]||{girl:girl,total:0,nonCash:0,count:0,ids:[],dates:{}};
-      map[girl].total+=amt; map[girl].nonCash+=non; map[girl].count++; map[girl].ids.push(Number(o.id));
-      map[girl].dates[day]=map[girl].dates[day]||{date:day,girl:girl,total:0,nonCash:0,count:0,ids:[]};
-      map[girl].dates[day].total+=amt; map[girl].dates[day].nonCash+=non; map[girl].dates[day].count++; map[girl].dates[day].ids.push(Number(o.id));
-    });
+    (D().orders||[]).filter(function(o){ return !isSettledOrder(o) && (!date || o.order_date===date) && (!q || clean(o.girl_name).toLowerCase().indexOf(q)>=0); }).forEach(function(o){ addSettlementOrder(map,o); });
     return Object.values(map).sort(function(a,b){return b.total-a.total;});
+  }
+  function allUnsettledGroups(){
+    var q=clean((document.getElementById("settleGirlQ")||{}).value).toLowerCase(), map={};
+    (D().orders||[]).filter(function(o){ return !isSettledOrder(o) && (!q || clean(o.girl_name).toLowerCase().indexOf(q)>=0); }).forEach(function(o){ addSettlementOrder(map,o); });
+    return Object.values(map).sort(function(a,b){return b.total-a.total;});
+  }
+  function rangeLabel(dates){
+    var ds=Object.keys(dates||{}).filter(Boolean).sort();
+    if(!ds.length) return "";
+    return ds[0] === ds[ds.length-1] ? ds[0] : ds[0]+" 至 "+ds[ds.length-1];
   }
   function rowsForSave(){ var out=[]; groups().forEach(function(g){ Object.values(g.dates).forEach(function(r){ out.push({girl_name:g.girl,theoretical_amount:Number(r.total||0),actual_settlement:actual(r),formula_text:formula(r),order_ids:r.ids,girl_email:girlEmail(g.girl)}); }); }); return out; }
   window.setSettlementDraft=function(date,girl,field,value){ var k=key(date,girl); drafts[k]=drafts[k]||{}; drafts[k][field]=field==="actual_settlement"?Number(value||0):value; };
-  window.toggleSettlementIds=function(ids,checked){ ids.forEach(function(id){ checked?selected.add(Number(id)):selected.delete(Number(id)); }); renderSettlement(); };
+  window.toggleSettlementIds=function(ids,checked){ ids.map(Number).filter(Boolean).forEach(function(id){ checked?selected.add(id):selected.delete(id); }); renderSettlement(); };
   window.clearSettlementPick=function(){ selected.clear(); renderSettlement(); };
+  function renderAllUnsettledSummary(){
+    var box=document.getElementById("settleAllSummary"); if(!box)return;
+    var rows=allUnsettledGroups(), total=0, actualTotal=0, count=0;
+    var html='<div class="settle-summary-head"><h3>女孩全部未结算总额</h3><span class="note">不按通报日期过滤，已结算订单不会计入。</span></div><div class="table"><table><thead><tr><th>女孩</th><th>未结算总额</th><th>实际应结</th><th>未结算单数</th><th>日期数</th><th>日期范围</th><th>选择</th></tr></thead><tbody>';
+    rows.forEach(function(g){
+      var real=Number(g.total||0)-Number(g.nonCash||0), all=selectedAll(g.ids);
+      total+=Number(g.total||0); actualTotal+=real; count+=Number(g.count||0);
+      html+='<tr class="'+(all?'settle-picked':'')+'"><td>'+esc(g.girl)+(all?'<span class="settle-state">已勾选</span>':'')+'</td><td><b>'+money(g.total)+'</b></td><td><b>'+money(real)+'</b></td><td>'+g.count+'</td><td>'+Object.keys(g.dates||{}).length+'</td><td>'+esc(rangeLabel(g.dates))+'</td><td><input class="check-settle" type="checkbox" '+(all?'checked':'')+' data-ids="'+g.ids.join(",")+'"> 全选全部未结算</td></tr>';
+    });
+    if(!rows.length) html+='<tr><td colspan="7">暂无全部未结算金额</td></tr>';
+    html+='<tr><td><b>全部女孩合计</b></td><td><b>'+money(total)+'</b></td><td><b>'+money(actualTotal)+'</b></td><td>'+count+'</td><td colspan="3"></td></tr></tbody></table></div>';
+    box.innerHTML=html;
+  }
   window.renderSettlement=function(){
     ensureStyle(); ensureSettlement(); var box=document.getElementById("settlementTable"); if(!box)return;
-    var gs=groups(), theory=0, real=0, out='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算单数</th><th>理论结算</th><th>结算公式</th><th>实际结算</th><th>邮箱</th><th>选择</th></tr></thead><tbody>';
-    gs.forEach(function(g){ var k=encodeURIComponent(g.girl), dr=Object.values(g.dates).sort(function(a,b){return clean(b.date).localeCompare(clean(a.date));}), ga=dr.reduce(function(s,r){return s+actual(r);},0), all=g.ids.length&&g.ids.every(function(id){return selected.has(Number(id));}); theory+=Number(g.total||0); real+=ga;
-      out+='<tr><td><button class="soft open-settle" data-open="'+esc(k)+'">'+(opened[k]?"收起":"展开")+'</button></td><td>'+esc(g.girl)+'</td><td>'+g.count+'</td><td><b>'+money(g.total)+'</b></td><td><small>'+esc(dr.map(formula).join("；"))+'</small></td><td><b>'+money(ga)+'</b></td><td>'+esc(girlEmail(g.girl)||"未填写")+'</td><td><input class="check-settle" type="checkbox" '+(all?"checked":"")+' data-ids="'+g.ids.join(",")+'"> 全选该女孩</td></tr>';
-      if(opened[k]) dr.forEach(function(r){ var ck=r.ids.length&&r.ids.every(function(id){return selected.has(Number(id));}); out+='<tr><td></td><td style="padding-left:28px">'+esc(g.girl)+'</td><td>'+esc(r.date)+'｜'+r.count+'单</td><td>'+money(r.total)+'</td><td><input class="edit-settle" data-date="'+esc(r.date)+'" data-girl="'+esc(g.girl)+'" data-field="formula_text" style="min-width:220px" value="'+esc(formula(r))+'"></td><td><input class="edit-settle" data-date="'+esc(r.date)+'" data-girl="'+esc(g.girl)+'" data-field="actual_settlement" style="width:120px" value="'+actual(r)+'"></td><td>'+esc(girlEmail(g.girl)||"未填写")+'</td><td><input class="check-settle" type="checkbox" '+(ck?"checked":"")+' data-ids="'+r.ids.join(",")+'"> 选择这一天</td></tr>'; });
+    var gs=groups(), theory=0, real=0, out='<div class="settle-pick-hint">已勾选 '+selected.size+' 单；勾选行会变灰，点“勾选改已结算”后会从未结算统计里移除。</div><div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算单数</th><th>理论结算</th><th>结算公式</th><th>实际结算</th><th>邮箱</th><th>选择</th></tr></thead><tbody>';
+    gs.forEach(function(g){ var k=encodeURIComponent(g.girl), dr=Object.values(g.dates).sort(function(a,b){return clean(b.date).localeCompare(clean(a.date));}), ga=dr.reduce(function(s,r){return s+actual(r);},0), all=selectedAll(g.ids); theory+=Number(g.total||0); real+=ga;
+      out+='<tr class="'+(all?'settle-picked':'')+'"><td><button class="soft open-settle" data-open="'+esc(k)+'">'+(opened[k]?"收起":"展开")+'</button></td><td>'+esc(g.girl)+(all?'<span class="settle-state">已勾选</span>':'')+'</td><td>'+g.count+'</td><td><b>'+money(g.total)+'</b></td><td><small>'+esc(dr.map(formula).join("；"))+'</small></td><td><b>'+money(ga)+'</b></td><td>'+esc(girlEmail(g.girl)||"未填写")+'</td><td><input class="check-settle" type="checkbox" '+(all?"checked":"")+' data-ids="'+g.ids.join(",")+'"> 全选该女孩</td></tr>';
+      if(opened[k]) dr.forEach(function(r){ var ck=selectedAll(r.ids); out+='<tr class="'+(ck?'settle-picked':'')+'"><td></td><td style="padding-left:28px">'+esc(g.girl)+(ck?'<span class="settle-state">已勾选</span>':'')+'</td><td>'+esc(r.date)+'｜'+r.count+'单</td><td>'+money(r.total)+'</td><td><input class="edit-settle" data-date="'+esc(r.date)+'" data-girl="'+esc(g.girl)+'" data-field="formula_text" style="min-width:220px" value="'+esc(formula(r))+'"></td><td><input class="edit-settle" data-date="'+esc(r.date)+'" data-girl="'+esc(g.girl)+'" data-field="actual_settlement" style="width:120px" value="'+actual(r)+'"></td><td>'+esc(girlEmail(g.girl)||"未填写")+'</td><td><input class="check-settle" type="checkbox" '+(ck?"checked":"")+' data-ids="'+r.ids.join(",")+'"> 选择这一天</td></tr>'; });
     });
     if(!gs.length) out+='<tr><td colspan="8">暂无未结算金额</td></tr>';
     out+='<tr><td colspan="3"><b>'+esc(rdate())+' 当日合计</b></td><td><b>'+money(theory)+'</b></td><td></td><td><b>'+money(real)+'</b></td><td colspan="2">老板邮箱：'+esc(D().settlement_boss_email||bossDefault)+'</td></tr></tbody></table></div>'; box.innerHTML=out;
-    box.querySelectorAll(".open-settle").forEach(function(b){ b.onclick=function(){ var k=b.getAttribute("data-open"); opened[k]=!opened[k]; renderSettlement(); }; });
-    box.querySelectorAll(".check-settle").forEach(function(c){ c.onchange=function(){ toggleSettlementIds(clean(c.getAttribute("data-ids")).split(",").filter(Boolean), c.checked); }; });
-    box.querySelectorAll(".edit-settle").forEach(function(e){ e.onchange=function(){ setSettlementDraft(e.getAttribute("data-date"),e.getAttribute("data-girl"),e.getAttribute("data-field"),e.value); if(e.getAttribute("data-field")==="actual_settlement")renderSettlement(); }; });
+    renderAllUnsettledSummary();
+    var root=document.getElementById("settlePatchRoot")||box;
+    root.querySelectorAll(".open-settle").forEach(function(b){ b.onclick=function(){ var k=b.getAttribute("data-open"); opened[k]=!opened[k]; renderSettlement(); }; });
+    root.querySelectorAll(".check-settle").forEach(function(c){ c.onchange=function(){ toggleSettlementIds(clean(c.getAttribute("data-ids")).split(",").filter(Boolean), c.checked); }; });
+    root.querySelectorAll(".edit-settle").forEach(function(e){ e.onchange=function(){ setSettlementDraft(e.getAttribute("data-date"),e.getAttribute("data-girl"),e.getAttribute("data-field"),e.value); if(e.getAttribute("data-field")==="actual_settlement")renderSettlement(); }; });
   };
   window.saveSettlementReports=async function(silent){ var items=rowsForSave(); if(!items.length){alert("当天没有可保存的未结算金额"); return null;} var r=await post("/api/settlements/save",{date:rdate(),items:items}); await loadReports(); renderSettlement(); if(!silent)alert("已保存实际结算："+(r.saved||items.length)+" 条"); return r; };
   window.sendDailySettlementReport=async function(){ var saved=await saveSettlementReports(true); if(!saved)return; if(!confirm("确认发送 "+rdate()+" 当日结算通报？\n老板邮箱："+(D().settlement_boss_email||bossDefault)+"\n女孩邮箱没填会自动跳过。"))return; var r=await post("/api/settlements/notify",{date:rdate()}); await loadReports(); renderSettlement(); var sg=(r.girls||[]).filter(function(x){return x.sent;}).length, sk=(r.girls||[]).length-sg, bt=r.boss&&r.boss.sent?"老板已发送":"老板邮件未发送："+((r.boss&&r.boss.reason)||"未知原因"); alert(bt+"\n女孩已发送："+sg+"\n女孩跳过/未发："+sk); };
-  window.bulkSettleSettlement=async function(status){ var ids=[].slice.call(selected); if(!ids.length){alert("请先勾选要修改的日期或女孩");return;} await post("/api/orders/bulk_settle",{ids:ids,settlement_status:status}); selected.clear(); if(typeof loadAll==="function")await loadAll(); else renderSettlement(); };
+  window.bulkSettleSettlement=async function(status){ var ids=[].slice.call(selected).map(Number).filter(Boolean); if(!ids.length){alert("请先勾选要修改的日期或女孩");return;} var idset=new Set(ids); await post("/api/orders/bulk_settle",{ids:ids,settlement_status:status}); (D().orders||[]).forEach(function(o){ if(idset.has(Number(o.id))) o.settlement_status=status; }); selected.clear(); if(typeof loadAll==="function")await loadAll(); await loadReports(); renderSettlement(); alert("勾选订单已改为"+status+"："+ids.length+"单"); };
   function durationLabel(seconds){
     seconds=Math.max(0,Number(seconds||0));
     var h=Math.floor(seconds/3600), m=Math.floor((seconds%3600)/60), s=Math.floor(seconds%60);
@@ -640,7 +670,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260629"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260701"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
