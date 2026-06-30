@@ -23,6 +23,9 @@ _JS = r'''
   function money(n){ try { return yen(n); } catch(e) { return "¥" + Math.round(Number(n||0)).toLocaleString(); } }
   function clean(v){ return String(v == null ? "" : v).trim(); }
   function esc(v){ return clean(v).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]; }); }
+  function js(v){ return JSON.stringify(clean(v)); }
+  function isBoss(){ return !!(auth && auth.role === "boss"); }
+  function roleName(role){ return role==="boss" ? "老板" : (role==="admin" ? "管理员" : "普通用户"); }
   function rdate(){ var e=document.getElementById("settleReportDate"); return (e && e.value) || today(); }
   function girlEmail(name){ var g=(D().girls||[]).find(function(x){ return clean(x.name)===clean(name); }); return (g && g.email) || ""; }
   function reportOf(date,girl){ return (D().settlement_reports||[]).find(function(x){ return clean(x.report_date)===clean(date) && clean(x.girl_name)===clean(girl); }); }
@@ -52,7 +55,7 @@ _JS = r'''
   function ensureStyle(){
     if(document.getElementById("aliceSettleStyle")) return;
     var s=document.createElement("style"); s.id="aliceSettleStyle";
-    s.textContent=".settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}@media(max-width:760px){.settle-email-grid{grid-template-columns:1fr}}";
+    s.textContent=".settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}.login-alert-row{background:#fff1f2!important;color:#9f1239!important}.login-alert-badge{display:inline-block;border:1px solid #fb7185;border-radius:999px;background:#ffe4e6;color:#be123c;padding:2px 8px;font-weight:900}.user-admin-form{display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;align-items:center;margin:12px 0}.user-offline{color:#6b7280}.user-online{color:#15803d;font-weight:900}@media(max-width:760px){.settle-email-grid,.user-admin-form{grid-template-columns:1fr}}";
     document.head.appendChild(s);
   }
   function ensureSettlement(){
@@ -148,11 +151,16 @@ _JS = r'''
     return s+"秒";
   }
   function ensureLoginAudit(){
+    if(!isBoss()){
+      var oldBtn=document.getElementById("loginAuditNav"); if(oldBtn)oldBtn.remove();
+      var oldSec=document.getElementById("loginAudit"); if(oldSec)oldSec.remove();
+      return;
+    }
     var nav=document.querySelector(".nav");
     if(nav&&!document.getElementById("loginAuditNav")){
       var btn=document.createElement("button");
       btn.id="loginAuditNav";
-      btn.className="admin-only";
+      btn.className="boss-only";
       btn.type="button";
       btn.textContent="🔐 登录检测";
       btn.onclick=function(){ if(typeof show==="function")show("loginAudit",btn); setTimeout(loadLoginAudit,50); };
@@ -163,7 +171,7 @@ _JS = r'''
       var sec=document.createElement("section");
       sec.id="loginAudit";
       sec.className="panel";
-      sec.innerHTML='<div class="card"><h2>登录检测</h2><p class="note">查看每天有哪些 IP 登录、使用什么权限、登录了多久。只有管理员可以查看。</p><div class="form"><input id="loginAuditDate" type="date"><button class="soft" onclick="setLoginAuditToday()">今天</button><button class="primary" onclick="loadLoginAudit()">刷新登录记录</button></div><div id="loginAuditSummary" class="note"></div><div id="loginAuditTable"></div></div>';
+      sec.innerHTML='<div class="card"><h2>登录检测</h2><p class="note">老板专用：查看 IP、权限、在线时长、密码错误警报，并管理管理员/普通用户。</p><div class="form"><input id="loginAuditDate" type="date"><button class="soft" onclick="setLoginAuditToday()">今天</button><button class="primary" onclick="loadLoginAudit()">刷新登录记录</button></div><div id="loginAuditSummary" class="note"></div><div id="loginAuditTable"></div><h2 style="margin-top:18px">账号管理</h2><div class="user-admin-form"><input id="newUserName" placeholder="新用户名"><select id="newUserRole"><option value="admin">管理员</option><option value="user">普通用户</option></select><input id="newUserPass" placeholder="新密码"><button class="primary" onclick="createManagedUser()">新增账号</button></div><div id="userAdminTable"></div></div>';
       main.appendChild(sec);
       var d=document.getElementById("loginAuditDate");
       if(d&&!d.value)d.value=today();
@@ -172,7 +180,7 @@ _JS = r'''
   window.setLoginAuditToday=function(){ var d=document.getElementById("loginAuditDate"); if(d)d.value=today(); loadLoginAudit(); };
   window.loadLoginAudit=async function(){
     ensureLoginAudit();
-    if(!auth||auth.role!=="admin"){alert("只有管理员可以查看登录检测");return;}
+    if(!isBoss()){alert("只有老板可以查看登录检测");return;}
     var d=document.getElementById("loginAuditDate");
     var day=(d&&d.value)||today();
     var table=document.getElementById("loginAuditTable"), summary=document.getElementById("loginAuditSummary");
@@ -181,19 +189,75 @@ _JS = r'''
     var j=await r.json().catch(function(){return {ok:false,error:"服务器返回不是JSON"};});
     if(!r.ok||j.ok===false){ if(table)table.innerHTML='<p class="note">读取失败：'+esc(j.error||r.status)+'</p>'; return; }
     var rows=j.sessions||[], s=j.summary||{};
-    if(summary)summary.innerHTML='日期：<b>'+esc(day)+'</b>｜登录次数：<b>'+Number(s.total||0)+'</b>｜账号数：<b>'+Number(s.users||0)+'</b>｜IP数：<b>'+Number(s.ips||0)+'</b>｜在线中：<b>'+Number(s.active||0)+'</b>';
-    var html='<div class="table"><table><thead><tr><th>登录时间</th><th>账号</th><th>权限</th><th>IP</th><th>登录多久</th><th>最后活跃</th><th>退出时间</th><th>设备</th><th>状态</th></tr></thead><tbody>';
+    if(summary)summary.innerHTML='日期：<b>'+esc(day)+'</b>｜记录：<b>'+Number(s.total||0)+'</b>｜账号数：<b>'+Number(s.users||0)+'</b>｜IP数：<b>'+Number(s.ips||0)+'</b>｜在线中：<b>'+Number(s.active||0)+'</b>｜密码警报：<b class="login-alert-badge">'+Number(s.alerts||0)+'</b>';
+    var html='<div class="table"><table><thead><tr><th>登录时间</th><th>账号</th><th>权限</th><th>IP</th><th>登录多久</th><th>最后活跃</th><th>退出时间</th><th>设备</th><th>状态</th><th>操作</th></tr></thead><tbody>';
     rows.forEach(function(x){
-      html+='<tr><td>'+esc(x.login_at||"")+'</td><td>'+esc(x.username||"")+'</td><td>'+esc(x.role_label||x.role||"")+'</td><td>'+esc(x.ip||"")+'</td><td><b>'+durationLabel(x.duration_seconds)+'</b></td><td>'+esc(x.last_seen_at||"")+'</td><td>'+esc(x.logout_at||"")+'</td><td style="max-width:360px;white-space:normal">'+esc(x.user_agent||"")+'</td><td>'+esc(x.status||"")+'</td></tr>';
+      var alert=x.is_alert||x.status==="password_alert";
+      var active=x.status==="active"&&!x.logout_at;
+      html+='<tr class="'+(alert?'login-alert-row':'')+'"><td>'+esc(x.login_at||"")+'</td><td>'+esc(x.username||"")+'</td><td>'+esc(x.role_label||x.role||"")+'</td><td>'+esc(x.ip||"")+'</td><td><b>'+durationLabel(x.duration_seconds)+'</b></td><td>'+esc(x.last_seen_at||"")+'</td><td>'+esc(x.logout_at||"")+'</td><td style="max-width:300px;white-space:normal">'+esc(x.user_agent||"")+'</td><td>'+(alert?'<span class="login-alert-badge">密码错3次</span>':esc(x.status_label||x.status||""))+'</td><td>'+(active?'<button class="soft" onclick="logoutSessionByUser('+js(x.username)+')">强制下线</button>':'')+'</td></tr>';
     });
-    html+=(rows.length?'':'<tr><td colspan="9">这一天还没有登录记录</td></tr>')+'</tbody></table></div>';
+    html+=(rows.length?'':'<tr><td colspan="10">这一天还没有登录记录</td></tr>')+'</tbody></table></div>';
     if(table)table.innerHTML=html;
+    await loadUserAdmin();
+  };
+  window.loadUserAdmin=async function(){
+    if(!isBoss())return;
+    var box=document.getElementById("userAdminTable"); if(box)box.innerHTML='<p class="note">正在读取账号...</p>';
+    var r=await fetch("/api/users?v="+Date.now(),{cache:"no-store",headers:H()});
+    var j=await r.json().catch(function(){return {ok:false,error:"服务器返回不是JSON"};});
+    if(!r.ok||j.ok===false){ if(box)box.innerHTML='<p class="note">账号读取失败：'+esc(j.error||r.status)+'</p>'; return; }
+    renderUserAdmin(j.users||[]);
+  };
+  function renderUserAdmin(users){
+    var box=document.getElementById("userAdminTable"); if(!box)return;
+    var html='<div class="table"><table><thead><tr><th>账号</th><th>权限</th><th>状态</th><th>在线</th><th>IP</th><th>在线时间</th><th>新密码</th><th>管理</th></tr></thead><tbody>';
+    users.forEach(function(u){
+      var boss=u.role==="boss", online=Number(u.active_sessions||0)>0;
+      html+='<tr data-username="'+esc(u.username)+'"><td><b>'+esc(u.username)+'</b></td><td>'+(boss?'<b>老板</b>':'<select class="managed-role"><option value="admin" '+(u.role==="admin"?"selected":"")+'>管理员</option><option value="user" '+(u.role==="user"?"selected":"")+'>普通用户</option></select>')+'</td><td>'+(boss?'保护账号':'<select class="managed-active"><option value="1" '+(u.is_active?"selected":"")+'>启用</option><option value="0" '+(!u.is_active?"selected":"")+'>禁用</option></select>')+'</td><td class="'+(online?'user-online':'user-offline')+'">'+(online?'在线':'离线')+'</td><td>'+esc(u.ip||"")+'</td><td>'+durationLabel(u.online_seconds||0)+'</td><td>'+(boss?'':'<input class="managed-pass" type="password" placeholder="不改请留空">')+'</td><td>'+(boss?'默认老板账号不可删除':'<button class="soft save-managed-user">保存</button> <button class="soft logout-managed-user">强制下线</button> <button class="danger delete-managed-user">删除账号</button>')+'</td></tr>';
+    });
+    html+=(users.length?'':'<tr><td colspan="8">还没有账号</td></tr>')+'</tbody></table></div>';
+    box.innerHTML=html;
+    box.querySelectorAll(".save-managed-user").forEach(function(b){ b.onclick=function(){ saveManagedUser(b.closest("tr")); }; });
+    box.querySelectorAll(".logout-managed-user").forEach(function(b){ b.onclick=function(){ logoutManagedUser(b.closest("tr").getAttribute("data-username")); }; });
+    box.querySelectorAll(".delete-managed-user").forEach(function(b){ b.onclick=function(){ deleteManagedUser(b.closest("tr").getAttribute("data-username")); }; });
+  }
+  window.createManagedUser=async function(){
+    var username=clean((document.getElementById("newUserName")||{}).value), role=(document.getElementById("newUserRole")||{}).value||"user", password=(document.getElementById("newUserPass")||{}).value||"";
+    if(!username||!password){alert("请填写用户名和密码");return;}
+    await post("/api/users/save",{username:username,role:role,password:password,is_active:1});
+    document.getElementById("newUserName").value=""; document.getElementById("newUserPass").value="";
+    await loadUserAdmin(); alert("账号已新增");
+  };
+  window.saveManagedUser=async function(row){
+    var username=row.getAttribute("data-username"), role=(row.querySelector(".managed-role")||{}).value||"user", active=Number((row.querySelector(".managed-active")||{}).value||1), password=(row.querySelector(".managed-pass")||{}).value||"";
+    await post("/api/users/save",{username:username,role:role,password:password,is_active:active});
+    await loadUserAdmin(); alert("账号已保存");
+  };
+  window.logoutManagedUser=async function(username){
+    await post("/api/users/logout",{username:username});
+    await loadLoginAudit(); alert("已强制下线："+username);
+  };
+  window.logoutSessionByUser=window.logoutManagedUser;
+  window.deleteManagedUser=async function(username){
+    if(!confirm("确认删除账号 "+username+"？删除后该账号会被强制下线。"))return;
+    await post("/api/users/delete",{username:username});
+    await loadLoginAudit(); alert("账号已删除："+username);
   };
   function patchLoginSession(){
     if(window.__loginAuditAuthPatched)return;
     window.__loginAuditAuthPatched=true;
     var oldAuthHeaders=window.authHeaders;
     window.authHeaders=function(){ var h=oldAuthHeaders?oldAuthHeaders():{}; try{ if(auth&&auth.session_token)h["X-Alice-Session"]=auth.session_token; if(auth&&auth.username)h["X-Alice-User"]=auth.username; }catch(e){} return h; };
+    var oldApplyRole=window.applyRole;
+    window.applyRole=function(){
+      if(oldApplyRole)oldApplyRole();
+      try{
+        document.body.classList.toggle("role-boss", isBoss());
+        var badge=document.getElementById("roleBadge");
+        if(auth&&badge)badge.textContent=auth.role==="boss"?"老板模式":(auth.role==="admin"?"管理员模式":"普通用户模式");
+        ensureLoginAudit();
+      }catch(e){}
+    };
     window.doLogin=async function(){
       var r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
       var j=await r.json().catch(function(){return {ok:false,error:"登录失败"};});
@@ -207,11 +271,24 @@ _JS = r'''
       try{ if(auth&&auth.session_token){ await fetch("/api/login/logout",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({session_token:auth.session_token})}); } }catch(e){}
       localStorage.removeItem("alice_auth"); auth=null; location.reload();
     };
+    var oldApi=window.api;
+    if(typeof oldApi==="function"&&!oldApi.__sessionGuarded){
+      var guarded=async function(url, body){
+        try{return await oldApi(url, body);}
+        catch(e){
+          if(e&&String(e.message||"").indexOf("重新登录")>=0){ localStorage.removeItem("alice_auth"); auth=null; alert(e.message); location.reload(); return; }
+          throw e;
+        }
+      };
+      guarded.__sessionGuarded=true;
+      window.api=guarded;
+    }
+    try{ window.applyRole(); }catch(e){}
   }
   function wrapLoginAuditShow(){
     var oldShow=window.show;
     if(typeof oldShow==="function"&&!oldShow.__loginAuditWrapped){
-      var showWrapped=function(id,btn){ var r=oldShow.apply(this,arguments); if(id==="loginAudit")setTimeout(loadLoginAudit,50); return r; };
+      var showWrapped=function(id,btn){ if(id==="loginAudit"&&!isBoss()){alert("只有老板可以查看登录检测");return;} var r=oldShow.apply(this,arguments); if(id==="loginAudit")setTimeout(loadLoginAudit,50); return r; };
       showWrapped.__loginAuditWrapped=true;
       window.show=showWrapped;
     }
@@ -438,7 +515,7 @@ def _install(module):
     def _role_label(role, label=""):
         if label:
             return label
-        return "管理员" if role == "admin" else ("普通用户" if role == "user" else role)
+        return "老板" if role == "boss" else ("管理员" if role == "admin" else ("普通用户" if role == "user" else role))
 
     def _seconds_between(start, end):
         try:
@@ -486,6 +563,29 @@ def _install(module):
             )""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_login_sessions_day ON login_sessions(login_at, username, ip)")
             c.execute("CREATE INDEX IF NOT EXISTS idx_login_sessions_token ON login_sessions(session_token)")
+            c.execute("""CREATE TABLE IF NOT EXISTS app_users(
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'user',
+                label TEXT DEFAULT '',
+                is_active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            defaults = {
+                "Star": {"password": "9941", "role": "boss", "label": "老板"},
+                "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
+                "user": {"password": "user123", "role": "user", "label": "普通用户"},
+            }
+            try:
+                defaults.update(getattr(module, "USERS", {}) or {})
+                defaults["Star"] = {"password": "9941", "role": "boss", "label": "老板"}
+            except Exception:
+                pass
+            for username, info in defaults.items():
+                c.execute("""INSERT OR IGNORE INTO app_users(username,password,role,label,is_active)
+                             VALUES(?,?,?,?,1)""",
+                          (username, str(info.get("password") or ""), str(info.get("role") or "user"), _role_label(str(info.get("role") or "user"), str(info.get("label") or ""))))
 
     old_init = getattr(module, "init_db", None)
     if callable(old_init):
@@ -505,22 +605,62 @@ def _install(module):
         except Exception:
             return ""
 
+    def _app_user(c, username):
+        return c.execute("SELECT * FROM app_users WHERE username=?", (username,)).fetchone()
+
+    def _boss_required():
+        role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
+        if role != "boss":
+            return jsonify(ok=False, error="只有老板可以操作"), 403
+        token = (request.headers.get("X-Alice-Session") or "").strip()
+        if not token:
+            return jsonify(ok=False, error="登录已失效，请重新登录"), 401
+        with conn() as c:
+            row = c.execute("""SELECT username,role,status,logout_at FROM login_sessions WHERE session_token=?""", (token,)).fetchone()
+            if not row or row["role"] != "boss" or row["status"] != "active" or row["logout_at"]:
+                return jsonify(ok=False, error="只有老板可以操作"), 403
+        return None
+
+    def _status_label(status):
+        return {
+            "active": "在线",
+            "logout": "已退出",
+            "forced_logout": "老板强制下线",
+            "replaced": "被新登录替换",
+            "deleted": "账号已删除",
+            "password_error": "密码错误",
+            "password_alert": "密码错误警报",
+        }.get(status or "", status or "")
+
     old_login_view = app.view_functions.get("api_login")
     if callable(old_login_view) and not getattr(old_login_view, "_login_audit_wrapped", False):
         def _login_audit_login(*args, **kwargs):
+            schema()
             d = request.get_json(silent=True) or {}
             username = str(d.get("username") or "").strip()
             password = str(d.get("password") or "").strip()
-            users = getattr(module, "USERS", {}) or {}
-            info = users.get(username)
-            if not info or info.get("password") != password:
-                return old_login_view(*args, **kwargs)
-            schema()
-            role = str(info.get("role") or "")
-            label = _role_label(role, str(info.get("label") or ""))
-            token = secrets.token_urlsafe(24)
             now = _now_jst()
             with conn() as c:
+                info = _app_user(c, username)
+                if not info or int(info["is_active"] or 0) != 1 or str(info["password"] or "") != password:
+                    day = now[:10]
+                    failures = c.execute("""SELECT COUNT(*) FROM login_sessions
+                                            WHERE username=? AND ip=? AND substr(login_at,1,10)=?
+                                              AND status IN ('password_error','password_alert')""",
+                                         (username, _client_ip(), day)).fetchone()[0] + 1
+                    status = "password_alert" if failures >= 3 else "password_error"
+                    role = str(info["role"] if info else "")
+                    label = _role_label(role, str(info["label"] if info else ""))
+                    c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,logout_at,status)
+                                 VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                              (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), "", now, now, now, status))
+                    msg = "密码错误已达三次，已记录登录警报" if status == "password_alert" else "用户名或密码错误"
+                    return jsonify(ok=False, error=msg, alert=(status == "password_alert")), 401
+                role = str(info["role"] or "")
+                label = _role_label(role, str(info["label"] or ""))
+                token = secrets.token_urlsafe(24)
+                c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='replaced',updated_at=CURRENT_TIMESTAMP
+                             WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
                 c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,status)
                              VALUES(?,?,?,?,?,?,?,?,?)""",
                           (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), token, now, now, "active"))
@@ -532,16 +672,29 @@ def _install(module):
     def _login_audit_touch():
         if not request.path.startswith("/api/") or request.path in ("/api/login", "/api/login/logout"):
             return None
-        token = (request.headers.get("X-Alice-Session") or "").strip()
-        if not token:
+        public_api = {"/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
+        if request.path in public_api:
             return None
+        token = (request.headers.get("X-Alice-Session") or "").strip()
+        role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
+        username = (request.headers.get("X-Alice-User") or "").strip()
+        if role in ("boss", "admin", "user") and not token:
+            return jsonify(ok=False, error="登录已失效，请重新登录"), 401
         try:
             now = _now_jst()
             with conn() as c:
+                row = c.execute("""SELECT username,role,status,logout_at FROM login_sessions WHERE session_token=?""", (token,)).fetchone()
+                if role in ("boss", "admin", "user") and (not row or row["status"] != "active" or row["logout_at"]):
+                    return jsonify(ok=False, error="账号已在其他地方登录或被下线，请重新登录"), 401
+                if row and role and row["role"] != role:
+                    return jsonify(ok=False, error="登录权限不一致，请重新登录"), 401
+                if row and username and row["username"] != username:
+                    return jsonify(ok=False, error="登录身份不一致，请重新登录"), 401
                 c.execute("""UPDATE login_sessions SET last_seen_at=?,status='active',updated_at=CURRENT_TIMESTAMP
                              WHERE session_token=? AND COALESCE(logout_at,'')=''""", (now, token))
         except Exception:
-            pass
+            if role in ("boss", "admin", "user"):
+                return jsonify(ok=False, error="登录检测失败，请重新登录"), 401
         return None
 
     @app.route("/api/login/logout", methods=["POST"])
@@ -560,8 +713,8 @@ def _install(module):
     def _login_audit_list():
         schema()
         role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
-        if role != "admin":
-            return jsonify(ok=False, error="only admin can view login audit"), 403
+        if role != "boss":
+            return jsonify(ok=False, error="只有老板可以查看登录检测"), 403
         day = str(request.args.get("date") or _now_jst()[:10]).strip()[:10]
         with conn() as c:
             data = rows(c.execute("""SELECT id,username,role,role_label,ip,user_agent,login_at,last_seen_at,logout_at,status
@@ -572,13 +725,117 @@ def _install(module):
         for row in data:
             end = row.get("logout_at") or (now if row.get("status") == "active" else row.get("last_seen_at")) or now
             row["duration_seconds"] = _seconds_between(row.get("login_at") or end, end)
+            row["is_alert"] = row.get("status") == "password_alert"
+            row["status_label"] = _status_label(row.get("status"))
         summary = {
             "total": len(data),
             "users": len(set(x.get("username") or "" for x in data if x.get("username"))),
             "ips": len(set(x.get("ip") or "" for x in data if x.get("ip"))),
             "active": len([x for x in data if x.get("status") == "active" and not x.get("logout_at")]),
+            "alerts": len([x for x in data if x.get("status") == "password_alert"]),
         }
         return jsonify(ok=True, date=day, sessions=data, summary=summary)
+
+    @app.route("/api/users", methods=["GET"])
+    def _users_list():
+        schema()
+        denied = _boss_required()
+        if denied:
+            return denied
+        now = _now_jst()
+        with conn() as c:
+            users = rows(c.execute("""SELECT username,role,label,is_active,created_at,updated_at
+                                      FROM app_users
+                                      ORDER BY CASE role WHEN 'boss' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, username COLLATE NOCASE""").fetchall())
+            active_rows = rows(c.execute("""SELECT username,ip,login_at,last_seen_at,COUNT(*) AS active_sessions
+                                            FROM login_sessions
+                                            WHERE status='active' AND COALESCE(logout_at,'')=''
+                                            GROUP BY username
+                                            ORDER BY MAX(last_seen_at) DESC""").fetchall())
+        active_map = {r["username"]: r for r in active_rows}
+        for u in users:
+            a = active_map.get(u["username"]) or {}
+            u["role_label"] = _role_label(u.get("role"), u.get("label"))
+            u["is_active"] = bool(u.get("is_active"))
+            u["active_sessions"] = int(a.get("active_sessions") or 0)
+            u["ip"] = a.get("ip") or ""
+            u["login_at"] = a.get("login_at") or ""
+            u["last_seen_at"] = a.get("last_seen_at") or ""
+            u["online_seconds"] = _seconds_between(a.get("login_at") or now, now) if a else 0
+        return jsonify(ok=True, users=users)
+
+    @app.route("/api/users/save", methods=["POST"])
+    def _users_save():
+        schema()
+        denied = _boss_required()
+        if denied:
+            return denied
+        d = request.json or {}
+        username = str(d.get("username") or "").strip()
+        password = str(d.get("password") or "")
+        role = str(d.get("role") or "user").strip()
+        is_active = 1 if str(d.get("is_active", 1)) not in ("0", "false", "False") else 0
+        if not username:
+            return jsonify(ok=False, error="缺少用户名"), 400
+        if role not in ("admin", "user"):
+            return jsonify(ok=False, error="老板只能管理管理员和普通用户"), 400
+        with conn() as c:
+            old = _app_user(c, username)
+            if old and old["role"] == "boss":
+                return jsonify(ok=False, error="默认老板账号不可在这里修改"), 400
+            if old:
+                if password:
+                    c.execute("""UPDATE app_users SET password=?,role=?,label=?,is_active=?,updated_at=CURRENT_TIMESTAMP
+                                 WHERE username=?""", (password, role, _role_label(role), is_active, username))
+                else:
+                    c.execute("""UPDATE app_users SET role=?,label=?,is_active=?,updated_at=CURRENT_TIMESTAMP
+                                 WHERE username=?""", (role, _role_label(role), is_active, username))
+            else:
+                if not password:
+                    return jsonify(ok=False, error="新增账号必须填写密码"), 400
+                c.execute("""INSERT INTO app_users(username,password,role,label,is_active)
+                             VALUES(?,?,?,?,?)""", (username, password, role, _role_label(role), is_active))
+            if not is_active:
+                now = _now_jst()
+                c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='forced_logout',updated_at=CURRENT_TIMESTAMP
+                             WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
+        return jsonify(ok=True)
+
+    @app.route("/api/users/logout", methods=["POST"])
+    def _users_logout():
+        schema()
+        denied = _boss_required()
+        if denied:
+            return denied
+        username = str((request.json or {}).get("username") or "").strip()
+        if not username:
+            return jsonify(ok=False, error="缺少用户名"), 400
+        now = _now_jst()
+        with conn() as c:
+            c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='forced_logout',updated_at=CURRENT_TIMESTAMP
+                         WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
+        return jsonify(ok=True)
+
+    @app.route("/api/users/delete", methods=["POST"])
+    def _users_delete():
+        schema()
+        denied = _boss_required()
+        if denied:
+            return denied
+        username = str((request.json or {}).get("username") or "").strip()
+        if not username:
+            return jsonify(ok=False, error="缺少用户名"), 400
+        with conn() as c:
+            old = _app_user(c, username)
+            if not old:
+                return jsonify(ok=True)
+            if old["role"] == "boss":
+                return jsonify(ok=False, error="默认老板账号不可删除"), 400
+            now = _now_jst()
+            c.execute("DELETE FROM app_users WHERE username=?", (username,))
+            c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='deleted',updated_at=CURRENT_TIMESTAMP
+                         WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
+        return jsonify(ok=True)
 
     @app.route("/api/settlements", methods=["GET"])
     def _settlements_get():
@@ -677,7 +934,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260701b"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260701c"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:

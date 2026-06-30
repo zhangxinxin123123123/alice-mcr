@@ -18,6 +18,7 @@ app.config['JSON_AS_ASCII'] = False
 
 # 固定登录账号：需要改账号密码就在这里改
 USERS = {
+    "Star": {"password": "9941", "role": "boss", "label": "老板"},
     "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
@@ -131,7 +132,7 @@ def require_login_for_api():
     path = request.path
     if path.startswith('/static/') or path in PUBLIC_PATHS:
         return None
-    if path.startswith('/api/') and current_role() not in ('admin','user'):
+    if path.startswith('/api/') and current_role() not in ('boss','admin','user'):
         return jsonify(ok=False, error='请先登录'), 401
     return None
 
