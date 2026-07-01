@@ -1597,14 +1597,43 @@ def api_orders_bulk_delete():
 @app.route('/api/orders/bulk_settle', methods=['POST'])
 def api_orders_bulk_settle():
     d = request.json or {}
-    ids = [int(x) for x in (d.get('ids') or [])]
+    ids = []
+    seen_ids = set()
+    for x in (d.get('ids') or []):
+        try:
+            oid = int(x)
+        except Exception:
+            continue
+        if oid > 0 and oid not in seen_ids:
+            seen_ids.add(oid)
+            ids.append(oid)
     status = d.get('settlement_status') or '已结算'
     if not ids:
         return jsonify(ok=False, error='没有选择订单'), 400
     q = ','.join(['?'] * len(ids))
     with conn() as c:
-        c.execute(f"UPDATE orders SET settlement_status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN ({q})", [status] + ids)
-    return jsonify(ok=True, updated=len(ids), settlement_status=status)
+        before = rows(c.execute(f"SELECT id,order_date,settlement_status FROM orders WHERE id IN ({q})", ids).fetchall())
+        existing_ids = [int(r['id']) for r in before]
+        if existing_ids:
+            q2 = ','.join(['?'] * len(existing_ids))
+            cur = c.execute(f"UPDATE orders SET settlement_status=?, updated_at=CURRENT_TIMESTAMP WHERE id IN ({q2})", [status] + existing_ids)
+            if status == '已结算':
+                dates = sorted(set(str(r['order_date'] or '') for r in before if r.get('order_date')))
+                selected = set(existing_ids)
+                for report_date in dates:
+                    for r in rows(c.execute("SELECT id,order_ids FROM settlement_reports WHERE report_date=?", (report_date,)).fetchall()):
+                        report_ids = set()
+                        for part in str(r.get('order_ids') or '').split(','):
+                            try:
+                                report_ids.add(int(part))
+                            except Exception:
+                                pass
+                        if report_ids & selected:
+                            c.execute("DELETE FROM settlement_reports WHERE id=?", (r['id'],))
+            updated = cur.rowcount if cur.rowcount is not None else len(existing_ids)
+        else:
+            updated = 0
+    return jsonify(ok=True, updated=updated, updated_ids=existing_ids, settlement_status=status)
 
 
 

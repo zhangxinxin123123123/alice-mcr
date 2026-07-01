@@ -967,7 +967,7 @@ function renderSettlement(){
 }
 function toggleSettlementIds(ids,checked){ids.forEach(id=>checked?settlementSelected.add(Number(id)):settlementSelected.delete(Number(id)));renderSettlement();}
 function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
-async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要修改的日期或女孩');return;} await api('/api/orders/bulk_settle',{ids,settlement_status:status}); settlementSelected.clear(); await loadAll();}
+async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要修改的日期或女孩');return;} const r=await api('/api/orders/bulk_settle',{ids,settlement_status:status}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status=status}); settlementSelected.clear(); renderSettlement(); await loadAll();}
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function jsArg(v){return JSON.stringify(String(v??''));}
