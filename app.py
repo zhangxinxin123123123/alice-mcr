@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from pathlib import Path
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 from flask import Flask, request, jsonify, send_from_directory
 APP_DIR=Path(__file__).resolve().parent
@@ -173,6 +173,12 @@ def http_text(url, timeout=18):
         enc = r.headers.get_content_charset() or 'utf-8'
         return raw.decode(enc, 'replace'), r.headers.get_content_type()
 
+def opener_text(opener, url, timeout=25):
+    with opener.open(url, timeout=timeout) as r:
+        raw = r.read()
+        enc = r.headers.get_content_charset() or 'utf-8'
+        return raw.decode(enc, 'replace'), r.geturl()
+
 def http_bytes(url, timeout=25):
     req = Request(url, headers={
         'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
@@ -222,6 +228,10 @@ def strip_html_text(value):
     value = re.sub(r'&lt;', '<', value)
     value = re.sub(r'&gt;', '>', value)
     return re.sub(r'\s+', ' ', value).strip()
+
+def html_unescape(value):
+    import html
+    return html.unescape(str(value or '')).replace('\\/', '/')
 
 def first_nonempty(*values):
     for value in values:
@@ -273,6 +283,9 @@ def price_from_text(value, loose=False):
     has_hint = bool(re.search(r'¥|￥|円|日元|料金|価格|金額|定价|價格|价|費|费|price|fee|course|コース|小时|時間|hour|/h|每小时|万|w', text, re.I))
     if not loose and not has_hint:
         return 0
+    course = re.search(r'(?:\d{2,3}\s*(?:/|分|min|分钟|m)\s*)[^\d¥￥]{0,12}(?:[¥￥]\s*)?(\d{4,6})(?:\s*(?:円|日元|JPY))?', text, re.I)
+    if course:
+        return int(course.group(1))
     candidates = re.findall(r'(?:[¥￥]\s*)?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s*(?:万|w|W))?(?:\s*(?:円|日元|JPY|/h|/H|/hour|每小时|小时|時間|h))?', text)
     for candidate in candidates:
         raw_num = re.search(r'\d[\d,]*(?:\.\d+)?', candidate)
@@ -284,7 +297,7 @@ def price_from_text(value, loose=False):
         elif numeric < 10:
             continue
         elif numeric < 100:
-            if not (loose or has_hint):
+            if not loose:
                 continue
             price = int(round(numeric * 1000))
         elif numeric < 1000:
@@ -353,8 +366,194 @@ def extract_neko_items(data):
         return extract_neko_items(nested)
     return []
 
-def fetch_neko_girls():
+def neko_admin_credentials(username=None, password=None):
+    user = str(username or os.environ.get('ALICE_NEKO_ADMIN_USER') or os.environ.get('NEKO_ADMIN_USER') or '').strip()
+    pwd = str(password or os.environ.get('ALICE_NEKO_ADMIN_PASSWORD') or os.environ.get('NEKO_ADMIN_PASS') or os.environ.get('NEKO_ADMIN_PASSWORD') or '').strip()
+    return user, pwd
+
+def leading_zero_bits(data):
+    n = 0
+    for b in data:
+        if b == 0:
+            n += 8
+            continue
+        if b < 0x02: n += 7
+        elif b < 0x04: n += 6
+        elif b < 0x08: n += 5
+        elif b < 0x10: n += 4
+        elif b < 0x20: n += 3
+        elif b < 0x40: n += 2
+        elif b < 0x80: n += 1
+        break
+    return n
+
+def solve_neko_pow(nonce, bits):
+    counter = 0
+    while True:
+        digest = hashlib.sha256((str(nonce) + ':' + str(counter)).encode('utf-8')).digest()
+        if leading_zero_bits(digest) >= int(bits or 0):
+            return str(counter)
+        counter += 1
+
+def parse_input_attrs(tag):
+    attrs = {}
+    for m in re.finditer(r'([A-Za-z0-9_\-\[\]]+)\s*=\s*([\'"])(.*?)\2', str(tag or ''), re.S):
+        attrs[m.group(1)] = html_unescape(m.group(3))
+    return attrs
+
+def neko_admin_login(username=None, password=None):
+    import base64
+    import http.cookiejar
+    from urllib.request import build_opener, HTTPCookieProcessor
+    user, pwd = neko_admin_credentials(username, password)
+    if not user or not pwd:
+        raise ValueError('未配置喵喵后台账号密码')
+    jar = http.cookiejar.CookieJar()
+    opener = build_opener(HTTPCookieProcessor(jar))
+    opener.addheaders = [
+        ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36'),
+        ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
+        ('Referer', NEKO_BASE_URL + '/wp-login.php'),
+    ]
+    login_url = NEKO_BASE_URL + '/wp-login.php?redirect_to=' + quote(NEKO_BASE_URL + '/wp-admin/') + '&reauth=1'
+    login_html, _ = opener_text(opener, login_url, timeout=30)
+    data = {
+        'log': user,
+        'pwd': pwd,
+        'wp-submit': '登录',
+        'redirect_to': NEKO_BASE_URL + '/wp-admin/',
+        'testcookie': '1',
+        'rememberme': 'forever',
+    }
+    for tag in re.findall(r'<input\b[^>]*>', login_html, re.I | re.S):
+        attrs = parse_input_attrs(tag)
+        name = attrs.get('name') or ''
+        if name.startswith('pow_challenge['):
+            idx = re.search(r'\[(\d+)\]', name)
+            challenge = attrs.get('value') or ''
+            if not idx or not challenge:
+                continue
+            prefix = challenge.split('.', 1)[0]
+            padded = prefix + ('=' * ((4 - len(prefix) % 4) % 4))
+            decoded = base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8', 'ignore')
+            parts = decoded.split(':')
+            if len(parts) >= 3:
+                data[name] = challenge
+                data['pow_solution[' + idx.group(1) + ']'] = solve_neko_pow(parts[0], int(parts[-1]))
+    body = urlencode(data).encode('utf-8')
+    req = Request(NEKO_BASE_URL + '/wp-login.php', data=body, method='POST', headers={
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': login_url,
+    })
+    opener.open(req, timeout=30).read()
+    admin_html, admin_url = opener_text(opener, NEKO_BASE_URL + '/wp-admin/', timeout=30)
+    if 'wpbody-content' not in admin_html and 'wp-admin-bar' not in admin_html:
+        err = ''
+        m = re.search(r'<div[^>]+id=["\']login_error["\'][^>]*>(.*?)</div>', admin_html, re.S | re.I)
+        if m:
+            err = strip_html_text(html_unescape(m.group(1)))
+        raise ValueError(err or '喵喵后台登录失败')
+    return opener
+
+def acf_value_from_edit(edit_html, data_name):
+    m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
+    if not m:
+        return ''
+    next_m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\']', edit_html[m.end():], re.S | re.I)
+    block = edit_html[m.start():m.end() + (next_m.start() if next_m else 5000)]
+    ta = re.search(r'<textarea\b[^>]*>(.*?)</textarea>', block, re.S | re.I)
+    if ta:
+        return html_unescape(ta.group(1)).strip()
+    inp = re.search(r'<input\b[^>]*\bvalue=(["\'])(.*?)\1', block, re.S | re.I)
+    if inp:
+        return html_unescape(inp.group(2)).strip()
+    return ''
+
+def neko_admin_image_urls(edit_html):
+    urls = []
+    seen = set()
+    pattern = r'https?:\\?/\\?/[^"\'<>\s]+?(?:\.jpg|\.jpeg|\.png|\.webp|\.gif)(?:\?[^"\'<>\s]*)?'
+    for raw in re.findall(pattern, edit_html, re.I):
+        url = html_unescape(raw).replace('\\/', '/')
+        if '/wp-content/uploads/' not in url:
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+def neko_admin_item_from_edit(opener, post_id, title, edit_url):
+    edit_html, final_url = opener_text(opener, edit_url, timeout=35)
+    title_value = ''
+    m = re.search(r'<input\b[^>]+id=["\']title["\'][^>]*\bvalue=(["\'])(.*?)\1', edit_html, re.S | re.I)
+    if m:
+        title_value = html_unescape(m.group(2)).strip()
+    images = neko_admin_image_urls(edit_html)
+    model_brief = acf_value_from_edit(edit_html, 'model_brief')
+    model_detail = acf_value_from_edit(edit_html, 'model_detail')
+    link = ''
+    pm = re.search(r'<span[^>]+id=["\']sample-permalink["\'][^>]*>.*?<a[^>]+href=(["\'])(.*?)\1', edit_html, re.S | re.I)
+    if pm:
+        link = html_unescape(pm.group(2))
+    return {
+        'id': str(post_id),
+        'post_title': title_value or title,
+        'name': title_value or title,
+        'model_brief': model_brief,
+        'model_detail': model_detail,
+        'thumbnail': images[0] if images else '',
+        'model_pics': images,
+        'link': link,
+        'source': 'wp-admin',
+    }
+
+def fetch_neko_admin_girls(username=None, password=None, max_pages=8):
+    opener = neko_admin_login(username, password)
+    items, seen = [], set()
+    for page in range(1, max_pages + 1):
+        url = NEKO_BASE_URL + '/wp-admin/edit.php?post_type=model&post_status=publish&posts_per_page=100&paged=' + str(page)
+        html, _ = opener_text(opener, url, timeout=35)
+        page_rows = []
+        for m in re.finditer(r'<tr[^>]+id=["\']post-(\d+)["\'][^>]*>(.*?)</tr>', html, re.S | re.I):
+            post_id = m.group(1)
+            if post_id in seen:
+                continue
+            row = m.group(2)
+            tm = re.search(r'class=["\']row-title["\'][^>]*>(.*?)</a>', row, re.S | re.I)
+            title = strip_html_text(html_unescape(tm.group(1))) if tm else ''
+            if not title or title == '今日出勤' or '出勤' in title:
+                continue
+            em = re.search(r'href=(["\'])([^"\']*post\.php\?post=' + re.escape(post_id) + r'[^"\']*)\1', row, re.S | re.I)
+            edit_url = html_unescape(em.group(2)).replace('&amp;', '&') if em else (NEKO_BASE_URL + '/wp-admin/post.php?post=' + post_id + '&action=edit')
+            edit_url = urljoin(NEKO_BASE_URL + '/wp-admin/', edit_url)
+            seen.add(post_id)
+            page_rows.append((post_id, title, edit_url))
+        if not page_rows:
+            break
+        for post_id, title, edit_url in page_rows:
+            try:
+                item = neko_admin_item_from_edit(opener, post_id, title, edit_url)
+                if item.get('post_title') and first_neko_image(item):
+                    items.append(item)
+            except Exception:
+                items.append({'id': post_id, 'post_title': title, 'name': title, 'link': edit_url, 'source': 'wp-admin'})
+    if not items:
+        raise ValueError('喵喵后台已发布女孩列表为空')
+    return items
+
+def fetch_neko_girls(username=None, password=None):
     errors = []
+    admin_user, admin_pass = neko_admin_credentials(username, password)
+    if admin_user and admin_pass:
+        try:
+            items = fetch_neko_admin_girls(admin_user, admin_pass)
+            if items:
+                fetch_neko_girls.last_errors = []
+                return items, 'wp-admin:model'
+            errors.append({'url': 'wp-admin:model', 'error': 'empty list'})
+        except Exception as e:
+            errors.append({'url': 'wp-admin:model', 'error': str(e)})
     urls = [
         NEKO_BASE_URL + '/simple-api/girls?_cb=' + str(int(datetime.now().timestamp())),
         NEKO_BASE_URL + '/simple-api/girls',
@@ -1824,7 +2023,7 @@ def api_neko_avatars_sync():
             names = [r['name'] for r in c.execute("SELECT name FROM girls ORDER BY id DESC").fetchall()]
         alias_map = {r['name']:(r['girl_alias'] if 'girl_alias' in r.keys() else '') for r in c.execute("SELECT name,girl_alias FROM girls").fetchall()}
     try:
-        neko_items, source = fetch_neko_girls()
+        neko_items, source = fetch_neko_girls(d.get('neko_user'), d.get('neko_password'))
     except Exception as e:
         return jsonify(ok=False, error=str(e), results=[], missing=names), 502
     results, missing, errors = [], [], []
@@ -1845,11 +2044,12 @@ def api_neko_avatars_sync():
                    missing=missing, errors=errors,
                    avatars={r['girl_name']:r for r in results})
 
-@app.route('/api/neko_profiles', methods=['GET'])
+@app.route('/api/neko_profiles', methods=['GET','POST'])
 def api_neko_profiles():
     init_db()
+    d = (request.json or {}) if request.method == 'POST' else {}
     try:
-        neko_items, source = fetch_neko_girls()
+        neko_items, source = fetch_neko_girls(d.get('neko_user'), d.get('neko_password'))
     except Exception as e:
         return jsonify(ok=False, error=str(e), source='', profiles=[]), 502
     profiles = []

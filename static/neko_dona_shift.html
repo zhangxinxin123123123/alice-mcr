@@ -219,6 +219,7 @@ button,input,select{font:inherit;outline:none}
     <input id="shiftDate" class="field date-field" type="date">
     <input id="searchInput" class="field" placeholder="搜索喵喵名字 / 备注" oninput="render()">
     <button class="neon-btn" type="button" onclick="loadNekoProfiles()">刷新喵喵资料</button>
+    <button class="small-btn primary" type="button" onclick="loadNekoProfilesFromAdmin()">后台读取女孩</button>
     <button class="small-btn primary" type="button" onclick="selectAllVisible()">全部加入出勤</button>
     <button class="small-btn" type="button" onclick="clearDay()">清空当日</button>
     <button class="small-btn" type="button" onclick="copyShiftText()">复制通报</button>
@@ -255,7 +256,7 @@ button,input,select{font:inherit;outline:none}
 
   function authHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
-    return auth ? {"X-Alice-Role":auth.role} : {};
+    return auth ? {"X-Alice-Role":auth.role,"X-Alice-User":auth.username||"","X-Alice-Session":auth.session_token||""} : {};
   }
   function escapeHtml(v){return String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
   function jsAttr(v){
@@ -923,10 +924,23 @@ ${s.remark || p.remark || ""}`;
     }
     downloadBlob(customerImageBlob, customerImageFilename || `neko-shift-${shiftDate.value || today}.png`);
   };
-  window.loadNekoProfiles = async function(){
+  window.loadNekoProfilesFromAdmin = async function(){
+    const nekoUser = prompt("喵喵后台用户名");
+    if(nekoUser === null) return;
+    const nekoPassword = prompt("喵喵后台密码");
+    if(nekoPassword === null) return;
+    await loadNekoProfiles({neko_user:nekoUser, neko_password:nekoPassword});
+  };
+  window.loadNekoProfiles = async function(adminAuth){
     statusLine.textContent = "正在读取喵喵资料...";
     try{
-      const r = await fetch("/api/neko_profiles?v=" + Date.now(), {cache:"no-store", headers:authHeaders()});
+      const usePost = adminAuth && adminAuth.neko_user && adminAuth.neko_password;
+      const r = await fetch("/api/neko_profiles?v=" + Date.now(), {
+        method: usePost ? "POST" : "GET",
+        cache:"no-store",
+        headers: usePost ? {"Content-Type":"application/json", ...authHeaders()} : authHeaders(),
+        body: usePost ? JSON.stringify(adminAuth) : undefined
+      });
       const data = await r.json();
       if(!data.ok) throw new Error(data.error || "读取失败");
       profiles = data.profiles || [];

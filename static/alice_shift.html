@@ -299,6 +299,7 @@ th{background:#fff0f7}
     </div>
     <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
+      <button class="soft" onclick="syncNekoAvatarsFromAdmin()">后台更新头像</button>
       <span class="avatar-status" id="avatarStatus"></span>
       <span class="count">出勤人数：<span id="shiftCount">0</span></span>
       <button class="soft" onclick="clearAll()">清空全部</button>
@@ -437,7 +438,7 @@ th{background:#fff0f7}
   }
   function apiHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
-    return {"Content-Type":"application/json", ...(auth ? {"X-Alice-Role":auth.role} : {})};
+    return {"Content-Type":"application/json", ...(auth ? {"X-Alice-Role":auth.role,"X-Alice-User":auth.username||"","X-Alice-Session":auth.session_token||""} : {})};
   }
 
   function currentShiftNames(){
@@ -480,7 +481,14 @@ th{background:#fff0f7}
     return `<div class="shift-avatar"><span class="shift-avatar-fallback">${avatarInitial(name)}</span></div>`;
   }
 
-  window.syncNekoAvatars = async function(){
+  window.syncNekoAvatarsFromAdmin = async function(){
+    const nekoUser = prompt("喵喵后台用户名");
+    if(nekoUser === null) return;
+    const nekoPassword = prompt("喵喵后台密码");
+    if(nekoPassword === null) return;
+    await syncNekoAvatars({neko_user:nekoUser, neko_password:nekoPassword});
+  };
+  window.syncNekoAvatars = async function(adminAuth){
     const names = currentShiftNames();
     if(!names.length){ alert("当前没有可更新头像的女孩"); return; }
     avatarStatus.textContent = "正在更新头像...";
@@ -488,7 +496,7 @@ th{background:#fff0f7}
       const r = await fetch('/api/neko_avatars/sync', {
         method:'POST',
         headers:apiHeaders(),
-        body:JSON.stringify({date:shiftDate.value || today, names})
+        body:JSON.stringify({date:shiftDate.value || today, names, ...(adminAuth || {})})
       });
       const data = await r.json();
       if(!data.ok) throw new Error(data.error || "更新失败");
