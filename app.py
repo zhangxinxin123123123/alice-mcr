@@ -1676,33 +1676,43 @@ def api_settlements_save():
             saved += 1
     return jsonify(ok=True, saved=saved)
 
-def send_plain_email(to_addrs, subject, body, display_name='Alice MCR'):
+def send_plain_email(to_addrs, subject, body, display_name='Alice MCR', smtp=None):
     to_addrs = [x for x in to_addrs if x]
     if not to_addrs:
         return {'sent': False, 'reason': 'no recipients'}
-    host = os.environ.get('SMTP_HOST') or os.environ.get('ALICE_SMTP_HOST')
-    user = os.environ.get('SMTP_USER') or os.environ.get('ALICE_SMTP_USER')
-    password = os.environ.get('SMTP_PASSWORD') or os.environ.get('ALICE_SMTP_PASSWORD')
-    sender = os.environ.get('SMTP_FROM') or os.environ.get('ALICE_SMTP_FROM') or user
-    port = int(os.environ.get('SMTP_PORT') or os.environ.get('ALICE_SMTP_PORT') or 587)
+    smtp = smtp if isinstance(smtp, dict) else {}
+    host = str(smtp.get('host') or os.environ.get('SMTP_HOST') or os.environ.get('ALICE_SMTP_HOST') or '').strip()
+    user = str(smtp.get('user') or os.environ.get('SMTP_USER') or os.environ.get('ALICE_SMTP_USER') or '').strip()
+    password = str(smtp.get('password') or os.environ.get('SMTP_PASSWORD') or os.environ.get('ALICE_SMTP_PASSWORD') or '')
+    sender = str(smtp.get('from') or os.environ.get('SMTP_FROM') or os.environ.get('ALICE_SMTP_FROM') or user or '').strip()
+    try:
+        port = int(str(smtp.get('port') or os.environ.get('SMTP_PORT') or os.environ.get('ALICE_SMTP_PORT') or 587).strip())
+    except Exception:
+        port = 587
     if not host or not sender or not password:
         return {'sent': False, 'reason': 'SMTP not configured', 'to': to_addrs, 'subject': subject, 'body': body}
     msg = MIMEText(body, 'plain', 'utf-8')
     msg['Subject'] = subject
     msg['From'] = formataddr((display_name, sender))
     msg['To'] = ', '.join(to_addrs)
-    with smtplib.SMTP(host, port, timeout=20) as smtp:
-        smtp.starttls()
-        if user:
-            smtp.login(user, password)
-        smtp.sendmail(sender, to_addrs, msg.as_string())
-    return {'sent': True, 'to': to_addrs}
+    try:
+        cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        with cls(host, port, timeout=20) as mailer:
+            if port != 465:
+                mailer.starttls()
+            if user:
+                mailer.login(user, password)
+            mailer.sendmail(sender, to_addrs, msg.as_string())
+        return {'sent': True, 'to': to_addrs}
+    except Exception as exc:
+        return {'sent': False, 'reason': str(exc), 'to': to_addrs, 'subject': subject}
 
 @app.route('/api/settlements/notify', methods=['POST'])
 def api_settlements_notify():
     init_db()
     d = request.json or {}
     report_date = str(d.get('date') or date.today()).strip()
+    smtp = d.get('smtp') if isinstance(d.get('smtp'), dict) else None
     with conn() as c:
         source = settlement_source_rows(c, report_date)
         saved = saved_settlement_map(c, report_date)
@@ -1720,7 +1730,7 @@ def api_settlements_notify():
         boss_lines = [f"当日结算通报 {report_date}", ""]
         for r in reports:
             boss_lines.append(f"{r['girl_name']}：今日理论 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。公式：{r['formula_text'] or ''}")
-        boss_result = send_plain_email([BOSS_EMAIL], f"当日结算通报 {report_date}", "\n".join(boss_lines))
+        boss_result = send_plain_email([BOSS_EMAIL], f"当日结算通报 {report_date}", "\n".join(boss_lines), smtp=smtp)
         girl_results = []
         now = datetime.now().isoformat(timespec='seconds')
         if boss_result.get('sent'):
@@ -1731,7 +1741,7 @@ def api_settlements_notify():
                 girl_results.append({'girl_name': r['girl_name'], 'sent': False, 'reason': 'no email'})
                 continue
             body = f"{r['girl_name']}，今日家教费：理论 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。"
-            result = send_plain_email([girl_email], f"家教费结算 {report_date}", body, '家教费结算')
+            result = send_plain_email([girl_email], f"家教费结算 {report_date}", body, '家教费结算', smtp)
             result['girl_name'] = r['girl_name']
             girl_results.append(result)
             if result.get('sent'):

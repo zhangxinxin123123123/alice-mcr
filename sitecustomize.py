@@ -60,7 +60,7 @@ _JS = r'''
   }
   function ensureSettlement(){
     var sec=document.getElementById("settlement"); if(!sec || document.getElementById("settlePatchRoot")) return;
-    sec.innerHTML='<div class="card" id="settlePatchRoot"><h2>金额结算</h2><p class="note">按通报日期汇总未结算订单。结算公式和实际结算都可以编辑保存；实际结算就是今天真实给老板的钱。已结算订单不会再计入实际结算。</p><div class="form"><input id="settleReportDate" type="date"><input id="settleGirlQ" placeholder="筛选女孩"><button class="primary" onclick="window.saveSettlementReports()">保存实际结算</button><button class="primary" onclick="window.sendDailySettlementReport()">当日结算通报</button><button class="soft" onclick="window.clearSettlementPick()">清空勾选</button><button class="primary" onclick="window.bulkSettleSettlement(\'已结算\')">勾选改已结算</button><button class="soft" onclick="window.bulkSettleSettlement(\'未结算\')">勾选改未结算</button></div><div id="settlementTable"></div><div id="settleAllSummary"></div></div>';
+    sec.innerHTML='<div class="card" id="settlePatchRoot"><h2>金额结算</h2><p class="note">按通报日期汇总未结算订单。结算公式和实际结算都可以编辑保存；实际结算就是今天真实给老板的钱。已结算订单不会再计入实际结算。</p><div class="form"><input id="settleReportDate" type="date"><input id="settleGirlQ" placeholder="筛选女孩"><button class="primary" onclick="window.saveSettlementReports()">保存实际结算</button><button class="primary" onclick="window.sendDailySettlementReport()">当日结算通报</button><button class="soft" onclick="window.clearSettlementPick()">清空勾选</button><button class="primary" onclick="window.bulkSettleSettlement(\'已结算\')">勾选改已结算</button><button class="soft" onclick="window.bulkSettleSettlement(\'未结算\')">勾选改未结算</button></div><div class="form settle-smtp-form"><input id="settleSmtpHost" placeholder="SMTP服务器，如 smtp.gmail.com"><input id="settleSmtpPort" placeholder="端口 587/465" value="587"><input id="settleSmtpUser" placeholder="邮箱账号"><input id="settleSmtpFrom" placeholder="发件邮箱，不填用账号"><input id="settleSmtpPass" type="password" placeholder="邮箱授权码/密码"><span class="note">临时发信参数，只随本次通报发送，不保存到服务器。</span></div><div id="settlementTable"></div><div id="settleAllSummary"></div></div>';
     var d=document.getElementById("settleReportDate"); if(d&&!d.value)d.value=today(); if(d)d.onchange=renderSettlement;
     var q=document.getElementById("settleGirlQ"); if(q)q.oninput=renderSettlement;
   }
@@ -141,7 +141,8 @@ _JS = r'''
     root.querySelectorAll(".edit-settle").forEach(function(e){ e.onchange=function(){ setSettlementDraft(e.getAttribute("data-date"),e.getAttribute("data-girl"),e.getAttribute("data-field"),e.value); if(e.getAttribute("data-field")==="actual_settlement")renderSettlement(); }; });
   };
   window.saveSettlementReports=async function(silent){ var items=rowsForSave(); if(!items.length){alert("当天没有可保存的未结算金额"); return null;} var r=await post("/api/settlements/save",{date:rdate(),items:items}); await loadReports(); renderSettlement(); if(!silent)alert("已保存实际结算："+(r.saved||items.length)+" 条"); return r; };
-  window.sendDailySettlementReport=async function(){ var saved=await saveSettlementReports(true); if(!saved)return; if(!confirm("确认发送 "+rdate()+" 当日结算通报？\n老板邮箱："+(D().settlement_boss_email||bossDefault)+"\n女孩邮箱没填会自动跳过。"))return; var r=await post("/api/settlements/notify",{date:rdate()}); await loadReports(); renderSettlement(); var sg=(r.girls||[]).filter(function(x){return x.sent;}).length, sk=(r.girls||[]).length-sg, bt=r.boss&&r.boss.sent?"老板已发送":"老板邮件未发送："+((r.boss&&r.boss.reason)||"未知原因"); alert(bt+"\n女孩已发送："+sg+"\n女孩跳过/未发："+sk); };
+  function settlementSmtpPayload(){ var host=clean((document.getElementById("settleSmtpHost")||{}).value), port=clean((document.getElementById("settleSmtpPort")||{}).value)||"587", user=clean((document.getElementById("settleSmtpUser")||{}).value), from=clean((document.getElementById("settleSmtpFrom")||{}).value), password=(document.getElementById("settleSmtpPass")||{}).value||""; if(!host&&!user&&!password&&!from)return null; return {host:host,port:port,user:user,from:from,password:password}; }
+  window.sendDailySettlementReport=async function(){ var saved=await saveSettlementReports(true); if(!saved)return; var smtp=settlementSmtpPayload(); if(smtp&&(!smtp.host||!smtp.password||!(smtp.from||smtp.user))){alert("临时发信参数请至少填写 SMTP服务器、邮箱账号/发件邮箱、授权码/密码");return;} if(!confirm("确认发送 "+rdate()+" 当日结算通报？\n老板邮箱："+(D().settlement_boss_email||bossDefault)+"\n女孩邮箱没填会自动跳过。"+(smtp?"\n本次使用页面填写的临时SMTP参数。":"")))return; var body={date:rdate()}; if(smtp)body.smtp=smtp; var r=await post("/api/settlements/notify",body); if(document.getElementById("settleSmtpPass"))document.getElementById("settleSmtpPass").value=""; await loadReports(); renderSettlement(); var sg=(r.girls||[]).filter(function(x){return x.sent;}).length, sk=(r.girls||[]).length-sg, bt=r.boss&&r.boss.sent?"老板已发送":"老板邮件未发送："+((r.boss&&r.boss.reason)||"未知原因"); alert(bt+"\n女孩已发送："+sg+"\n女孩跳过/未发："+sk); };
   window.bulkSettleSettlement=async function(status){ var ids=checkedSettlementIds(); if(!ids.length){alert("请先勾选要修改的日期或女孩");return;} var idset=new Set(ids); await post("/api/orders/bulk_settle",{ids:ids,settlement_status:status}); (D().orders||[]).forEach(function(o){ if(idset.has(Number(o.id))) o.settlement_status=status; }); selected.clear(); if(typeof loadAll==="function")await loadAll(); await loadReports(); renderSettlement(); alert("勾选订单已改为"+status+"："+ids.length+"单"); };
   function durationLabel(seconds){
     seconds=Math.max(0,Number(seconds||0));
@@ -353,29 +354,36 @@ def _yen(value):
     except Exception:
         return "¥0"
 
-def _send_email(to_addr, subject, body):
+def _send_email(to_addr, subject, body, smtp=None):
     to_addr = (to_addr or "").strip()
     if not to_addr:
         return {"sent": False, "reason": "missing recipient"}
-    host = _smtp_value("SMTP_HOST")
-    user = _smtp_value("SMTP_USER")
-    password = _smtp_value("SMTP_PASSWORD")
-    from_addr = _smtp_value("SMTP_FROM", user)
-    port = int(_smtp_value("SMTP_PORT", "587") or 587)
+    smtp = smtp if isinstance(smtp, dict) else {}
+    host = str(smtp.get("host") or _smtp_value("SMTP_HOST") or "").strip()
+    user = str(smtp.get("user") or _smtp_value("SMTP_USER") or "").strip()
+    password = str(smtp.get("password") or _smtp_value("SMTP_PASSWORD") or "")
+    from_addr = str(smtp.get("from") or _smtp_value("SMTP_FROM", user) or user or "").strip()
+    try:
+        port = int(str(smtp.get("port") or _smtp_value("SMTP_PORT", "587") or 587).strip())
+    except Exception:
+        port = 587
     if not host or not from_addr or not password:
         return {"sent": False, "reason": "SMTP not configured", "to": to_addr, "subject": subject, "preview": body}
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = formataddr(("Alice MCR", from_addr))
     msg["To"] = to_addr
-    cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
-    with cls(host, port, timeout=20) as smtp:
-        if port != 465:
-            smtp.starttls()
-        if user:
-            smtp.login(user, password)
-        smtp.sendmail(from_addr, [to_addr], msg.as_string())
-    return {"sent": True, "to": to_addr, "subject": subject}
+    try:
+        cls = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
+        with cls(host, port, timeout=20) as mailer:
+            if port != 465:
+                mailer.starttls()
+            if user:
+                mailer.login(user, password)
+            mailer.sendmail(from_addr, [to_addr], msg.as_string())
+        return {"sent": True, "to": to_addr, "subject": subject}
+    except Exception as exc:
+        return {"sent": False, "reason": str(exc), "to": to_addr, "subject": subject}
 
 def _install(module):
     app = getattr(module, "app", None)
@@ -867,6 +875,7 @@ def _install(module):
         schema()
         d = request.json or {}
         report_date = str(d.get("date") or d.get("report_date") or "").strip()
+        smtp = d.get("smtp") if isinstance(d.get("smtp"), dict) else None
         if not report_date:
             return jsonify(ok=False, error="请先选择通报日期"), 400
         saved = 0
@@ -907,7 +916,7 @@ def _install(module):
         lines = [f"当日结算通报 {report_date}", f"今日理论 {_yen(total_theory)}，实给 {_yen(total_actual)}。", ""]
         for r in rs:
             lines.append(f"{r['girl_name']}：今日理论 {_yen(r['theoretical_amount'])}，实给 {_yen(r['actual_settlement'])}。公式：{r.get('formula_text') or '未填写'}")
-        boss = _send_email(BOSS_EMAIL, f"当日结算通报 {report_date}", "\n".join(lines))
+        boss = _send_email(BOSS_EMAIL, f"当日结算通报 {report_date}", "\n".join(lines), smtp)
         girls = []
         with conn() as c:
             for r in rs:
@@ -916,7 +925,7 @@ def _install(module):
                     girls.append({"girl": r["girl_name"], "sent": False, "reason": "no email"})
                     continue
                 body = f"{r['girl_name']}，今日家教费：理论 {_yen(r['theoretical_amount'])}，实给 {_yen(r['actual_settlement'])}。"
-                result = _send_email(to_addr, f"家教费结算 {report_date}", body)
+                result = _send_email(to_addr, f"家教费结算 {report_date}", body, smtp)
                 result["girl"] = r["girl_name"]
                 girls.append(result)
                 if result.get("sent"):
@@ -952,7 +961,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260701d"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260701e"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
