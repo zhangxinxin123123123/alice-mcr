@@ -106,7 +106,7 @@ _JS = r'''
   window.toggleSettlementIds=function(ids,checked){ ids.map(Number).filter(Boolean).forEach(function(id){ checked?selected.add(id):selected.delete(id); }); renderSettlement(); };
   window.clearSettlementPick=function(){ selected.clear(); renderSettlement(); };
   function checkedSettlementIds(){
-    var ids=new Set([].slice.call(selected).map(Number).filter(Boolean));
+    var ids=new Set(Array.from(selected).map(Number).filter(Boolean));
     document.querySelectorAll("#settlePatchRoot .check-settle:checked").forEach(function(c){
       clean(c.getAttribute("data-ids")).split(",").map(Number).filter(Boolean).forEach(function(id){ ids.add(id); });
     });
@@ -961,7 +961,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260702a"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260702b"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
