@@ -66,6 +66,7 @@ button{cursor:pointer;font-weight:900}
 .primary{border:0;background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}
 .soft{background:white}
 .danger{border:0;background:var(--danger);color:white}
+.mode-btn.active{border:0;background:linear-gradient(135deg,#0bbff2,#63dff7);color:white}
 .note{font-size:calc(13px * var(--poster-scale));opacity:.82;line-height:1.6}
 .count{
   font-size:16px;
@@ -73,7 +74,7 @@ button{cursor:pointer;font-weight:900}
   color:#e75ca2;
 }
 .preview{
-  width:300px;
+  width:298px;
   min-height:600px;
   margin:0 auto;
   background:
@@ -88,6 +89,18 @@ button{cursor:pointer;font-weight:900}
   position:relative;
   box-shadow:0 12px 30px #0002;
 }
+.preview.mode-default{
+  padding:58px 22px 35px;
+  background:
+    radial-gradient(circle at 22% 8%, rgba(255,255,255,.94) 0 7%, transparent 8%),
+    radial-gradient(circle at 78% 13%, rgba(255,255,255,.76) 0 8%, transparent 9%),
+    radial-gradient(circle at 52% 95%, rgba(255,255,255,.74) 0 18%, transparent 19%),
+    linear-gradient(180deg,#dbeeff 0%,#f2fbff 48%,#d5eeff 100%);
+  background-size:cover;
+  background-position:center;
+  box-shadow:0 12px 30px rgba(0,80,130,.18);
+  font-family:"M PLUS Rounded 1c","Zen Maru Gothic","Microsoft YaHei",sans-serif;
+}
 .preview-title{
   text-align:left;
   font-size:calc(14px * var(--poster-scale));
@@ -98,6 +111,16 @@ button{cursor:pointer;font-weight:900}
   letter-spacing:.02em;
   margin-bottom:2px;
 }
+.preview.mode-default .preview-title{
+  text-align:center;
+  font-size:24px;
+  line-height:1.15;
+  font-weight:900;
+  color:#0bbff2;
+  -webkit-text-stroke:1px #fff;
+  text-shadow:0 2px 4px rgba(0,120,180,.35);
+  margin-bottom:4px;
+}
 .preview-sub{
   text-align:left;
   margin:0 0 8px;
@@ -106,12 +129,21 @@ button{cursor:pointer;font-weight:900}
   font-weight:900;
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffff99;
 }
+.preview.mode-default .preview-sub{
+  text-align:center;
+  font-size:13px;
+  font-weight:800;
+  color:#168dcc;
+  margin-bottom:10px;
+  text-shadow:none;
+}
 .shift-list{
   display:flex;
   flex-direction:column;
   gap:8px;
   align-items:stretch;
 }
+.preview.mode-default .shift-list{gap:0}
 
 .shift-card{
   width:100%;
@@ -123,10 +155,20 @@ button{cursor:pointer;font-weight:900}
   box-shadow:none;
   position:relative;
 }
+.preview.mode-default .shift-card{
+  padding:7px 0;
+  border-bottom:1px dashed rgba(57,150,190,.35);
+}
 .shift-card-inner{
   display:flex;
   gap:8px;
   align-items:flex-start;
+}
+.preview.mode-default .shift-card-inner{
+  display:grid;
+  grid-template-columns:64px minmax(0,1fr);
+  column-gap:12px;
+  align-items:center;
 }
 .shift-avatar{
   flex:0 0 calc(44px * var(--poster-scale));
@@ -141,6 +183,14 @@ button{cursor:pointer;font-weight:900}
   align-items:center;
   justify-content:center;
 }
+.preview.mode-default .shift-avatar{
+  flex:0 0 58px;
+  width:58px;
+  height:58px;
+  border:2px solid #fff;
+  box-shadow:0 3px 8px rgba(0,0,0,.14);
+  background:rgba(255,255,255,.88);
+}
 .shift-avatar img{
   width:100%;
   height:100%;
@@ -153,6 +203,11 @@ button{cursor:pointer;font-weight:900}
   font-weight:900;
   text-shadow:none;
 }
+.preview.mode-default .shift-avatar-fallback{
+  color:#159dd2;
+  font-size:17px;
+  -webkit-text-stroke:.4px #fff;
+}
 .shift-copy{min-width:0;flex:1}
 .shift-name{
   font-size:calc(13px * var(--poster-scale));
@@ -161,6 +216,15 @@ button{cursor:pointer;font-weight:900}
   color:var(--poster-text);
   padding-right:0;
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.preview.mode-default .shift-name{
+  font-size:20px;
+  line-height:1.1;
+  color:#00a8dc;
+  -webkit-text-stroke:.8px #fff;
+  text-shadow:0 2px 3px rgba(0,120,180,.3);
+  margin-bottom:4px;
+  overflow-wrap:anywhere;
 }
 .shift-row{
   margin-top:2px;
@@ -180,8 +244,19 @@ button{cursor:pointer;font-weight:900}
   color:var(--poster-text);
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
+.preview.mode-default .time-price-line{
+  align-items:flex-end;
+  gap:6px;
+  font-size:14px;
+  line-height:1.1;
+  color:#00bde9;
+  -webkit-text-stroke:.45px #fff;
+  text-shadow:0 1px 2px rgba(0,120,180,.25);
+}
+.preview.mode-default .time-price-line span:last-child{white-space:nowrap}
 .price{font-size:calc(13px * var(--poster-scale));font-weight:900;color:var(--poster-text)}
 .tag-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.preview.mode-default .tag-wrap{margin:0 0 4px}
 .tag{
   display:inline-block;
   padding:2px 5px;
@@ -191,6 +266,16 @@ button{cursor:pointer;font-weight:900}
   color:#e75ca2;
   font-size:calc(12px * var(--poster-scale));
   font-weight:900;
+}
+.preview.mode-default .tag{
+  padding:4px 7px;
+  border-radius:999px;
+  background:#ffeaf7;
+  color:#ff4dad;
+  border:1.5px solid #ff8ed0;
+  box-shadow:0 1px 2px rgba(255,90,180,.25);
+  font-size:11px;
+  line-height:1;
 }
 .gold-tag{
   display:inline-block;
@@ -205,6 +290,17 @@ button{cursor:pointer;font-weight:900}
   box-shadow:0 0 12px #ffd95e88;
   animation:goldFlow 3s linear infinite;
 }
+.preview.mode-default .gold-tag{
+  padding:4px 7px;
+  border-radius:999px;
+  background:#fff8d9;
+  color:#a97800;
+  border:1.5px solid #e6bd35;
+  box-shadow:0 1px 2px rgba(210,150,0,.22);
+  font-size:11px;
+  line-height:1;
+  animation:none;
+}
 @keyframes goldFlow{
   0%{background-position:0% 50%}
   100%{background-position:100% 50%}
@@ -218,6 +314,10 @@ button{cursor:pointer;font-weight:900}
   font-size:16px;
   font-weight:900;
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
+}
+.preview.mode-default .empty{
+  color:#168dcc;
+  text-shadow:none;
 }
 .table{
   overflow:auto;border:2px solid var(--line);border-radius:18px;background:white;
@@ -269,12 +369,14 @@ th{background:#fff0f7}
     <h2>出勤录入</h2>
     <p class="note">当前列表只显示选定日期；女孩价格强制读取女孩表“定价”，没有定价显示 0；编辑用弹框修改，截图实时同步。</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <button class="soft" onclick="setPresetBg('pink')">粉色学院背景</button>
-      <button class="soft" onclick="setPresetBg('night')">夜色背景</button>
-      <button class="soft" onclick="setPresetBg('gold')">金色背景</button>
-      <button class="soft" onclick="setPresetBg('blue')">蓝色清爽背景</button>
-      <button class="soft" onclick="setPresetBg('clear')">清除背景</button>
-      <input type="file" id="bgUpload" accept="image/*" style="max-width:220px">
+      <button class="soft mode-btn" id="defaultUiBtn" onclick="setPreviewMode('default')">默认UI</button>
+      <button class="soft mode-btn" id="customUiBtn" onclick="setPreviewMode('custom')">自定义UI</button>
+      <button class="soft custom-only" onclick="setPresetBg('pink')" hidden>粉色学院背景</button>
+      <button class="soft custom-only" onclick="setPresetBg('night')" hidden>夜色背景</button>
+      <button class="soft custom-only" onclick="setPresetBg('gold')" hidden>金色背景</button>
+      <button class="soft custom-only" onclick="setPresetBg('blue')" hidden>蓝色清爽背景</button>
+      <button class="soft custom-only" onclick="setPresetBg('clear')" hidden>清除背景</button>
+      <input class="custom-only" type="file" id="bgUpload" accept="image/*" style="max-width:220px" hidden>
     </div>
     <div class="toolbar">
       <input id="shiftDate" type="date">
@@ -284,13 +386,13 @@ th{background:#fff0f7}
 </div>
       <select id="startSelect"></select>
       <select id="endSelect"></select>
-      <label style="font-size:12px;font-weight:900">字体大小 <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小"></label>
-      <label style="font-size:12px;font-weight:900">字体颜色 <input id="fontColorInput" type="color" value="#00d9ff" title="字体颜色"></label>
-      <button class="soft" onclick="setPresetTextColor('cyan')">青色字</button>
-      <button class="soft" onclick="setPresetTextColor('pink')">粉色字</button>
-      <button class="soft" onclick="setPresetTextColor('white')">白色字</button>
-      <button class="soft" onclick="setPresetTextColor('gold')">金色字</button>
-      <label style="font-size:12px;font-weight:900">背景缩放 <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放"></label>
+      <label class="custom-only" style="font-size:12px;font-weight:900" hidden>字体大小 <input id="fontSizeRange" type="range" min="14" max="36" value="20" title="字体大小"></label>
+      <label class="custom-only" style="font-size:12px;font-weight:900" hidden>字体颜色 <input id="fontColorInput" type="color" value="#00d9ff" title="字体颜色"></label>
+      <button class="soft custom-only" onclick="setPresetTextColor('cyan')" hidden>青色字</button>
+      <button class="soft custom-only" onclick="setPresetTextColor('pink')" hidden>粉色字</button>
+      <button class="soft custom-only" onclick="setPresetTextColor('white')" hidden>白色字</button>
+      <button class="soft custom-only" onclick="setPresetTextColor('gold')" hidden>金色字</button>
+      <label class="custom-only" style="font-size:12px;font-weight:900" hidden>背景缩放 <input id="bgSizeRange" type="range" min="80" max="180" value="100" title="背景缩放"></label>
       <select id="priceSelect"></select>
       <input id="tagInput" placeholder="普通TAG，空格分隔 例：新人 可预约 会喝酒" value="">
       <input id="goldTagInput" placeholder="金色TAG，空格分隔 例：TOP 回归 王牌">
@@ -304,7 +406,7 @@ th{background:#fff0f7}
       <span class="count">出勤人数：<span id="shiftCount">0</span></span>
       <button class="soft" onclick="clearAll()">清空全部</button>
       <button class="soft" onclick="scrollToPreview()">定位截图区</button>
-      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">一键截图</button>
+      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">复制图片</button>
       <button class="soft" onclick="loadGirls()">刷新女孩表</button>
     </div>
   </div>
@@ -344,9 +446,9 @@ th{background:#fff0f7}
     </div>
   </div>
 
-  <div class="preview" id="previewBox">
+  <div class="preview mode-default" id="previewBox">
     <div class="preview-title"><span id="posterTitle"></span></div>
-    <div class="preview-sub"><span id="previewDateText"></span> ｜ 出勤人数 <span id="previewCount">0</span></div>
+    <div class="preview-sub"><span id="previewDateText">出勤人数：</span><span id="previewCount">0</span></div>
     <div class="shift-list" id="shiftList"></div>
   </div>
 </div>
@@ -359,6 +461,7 @@ th{background:#fff0f7}
   let girlAvatars = {};
   let selectedGirl = "";
   let editingShiftId = null;
+  let previewMode = "default";
 
   window.yen = function(n){ return "¥" + Math.round(Number(n||0)).toLocaleString(); };
 
@@ -428,13 +531,40 @@ th{background:#fff0f7}
     priceSelect.innerHTML = priceOptions(p);
   }
 
+  function syncPreviewModeControls(){
+    const custom = previewMode === "custom";
+    previewBox.classList.toggle("mode-default", !custom);
+    previewBox.classList.toggle("mode-custom", custom);
+    document.querySelectorAll(".custom-only").forEach(el => { el.hidden = !custom; });
+    document.getElementById("defaultUiBtn")?.classList.toggle("active", !custom);
+    document.getElementById("customUiBtn")?.classList.toggle("active", custom);
+  }
+
   function applyPreviewStyle(){
+    syncPreviewModeControls();
+    if(previewMode !== "custom"){
+      document.documentElement.style.setProperty("--poster-scale", "1");
+      document.documentElement.style.setProperty("--poster-text", "#0bbff2");
+      previewBox.style.backgroundSize = "cover";
+      return;
+    }
     const scale = Number(fontSizeRange?.value || 20) / 20;
     const bg = Number(bgSizeRange?.value || 100);
     const textColor = fontColorInput?.value || "#00d9ff";
     document.documentElement.style.setProperty("--poster-scale", String(scale));
     document.documentElement.style.setProperty("--poster-text", textColor);
     previewBox.style.backgroundSize = bg + "% auto";
+  }
+
+  window.setPreviewMode = function(mode){
+    previewMode = mode === "custom" ? "custom" : "default";
+    render();
+  };
+
+  function activateCustomPreview(){
+    if(previewMode === "custom") return;
+    previewMode = "custom";
+    syncPreviewModeControls();
   }
   function apiHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
@@ -641,14 +771,15 @@ th{background:#fff0f7}
   function renderPreview(){
     const d = shiftDate.value || today;
     const rows = rowsForDate();
-    posterTitle.textContent = `${d.replaceAll("-","").slice(4)}${weekdayCN(d)}出勤`;
-    previewDateText.textContent = "";
+    const titleDate = d.replaceAll("-","").slice(4);
+    posterTitle.textContent = previewMode === "custom" ? `${titleDate}${weekdayCN(d)}出勤` : `${titleDate} ${weekdayCN(d)}出勤`;
+    previewDateText.textContent = previewMode === "custom" ? "出勤人数 " : "出勤人数：";
     previewCount.textContent = rows.length;
     shiftCount.textContent = rows.length;
     if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
     shiftList.innerHTML = rows.map(s=>{
       const p = getGirlPrice(s.girl);
-      const priceText = p > 0 ? `<span>${yen(p)} /h</span>` : `<span>¥0</span>`;
+      const priceText = p > 0 ? `<span>${yen(p)}${previewMode === "custom" ? " /h" : "/h"}</span>` : `<span>¥0</span>`;
       return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
     }).join("");
   }
@@ -704,12 +835,14 @@ th{background:#fff0f7}
   };
 
   window.setPresetTextColor = function(type){
+    activateCustomPreview();
     const colors = {cyan:"#00d9ff", pink:"#ff5ca8", white:"#ffffff", gold:"#ffe17a"};
     if(fontColorInput && colors[type]) fontColorInput.value = colors[type];
     applyPreviewStyle();
   };
 
   window.setPresetBg = function(type){
+    activateCustomPreview();
     const bgs = {
       pink:"linear-gradient(135deg,rgba(255,210,235,.72),rgba(235,220,255,.72)), radial-gradient(circle at 50% 35%,#ffffff55 0 18%,transparent 19%), linear-gradient(160deg,#ff9ccc,#d9c8ff)",
       night:"linear-gradient(135deg,rgba(20,10,30,.68),rgba(45,15,60,.55)), radial-gradient(circle at 70% 18%,#ffffff77 0 8%,transparent 9%), linear-gradient(160deg,#1a0d2d,#5b1a55,#111827)",
@@ -720,16 +853,38 @@ th{background:#fff0f7}
     else previewBox.style.setProperty("--poster-bg", bgs[type]);
   };
 
+  function canvasToBlob(canvas){
+    return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  }
+
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function copyImageBlob(blob){
+    if(!navigator.clipboard || !window.ClipboardItem) return false;
+    await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
+    return true;
+  }
+
   window.captureShift = async function(){
     try{
       applyPreviewStyle();
       const canvas = await html2canvas(previewBox,{backgroundColor:null,scale:3,useCORS:true});
-      canvas.toBlob(blob=>{
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "alice_shift.png"; a.click(); URL.revokeObjectURL(url);
-      },"image/png");
-    }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许下载。"); }
+      const blob = await canvasToBlob(canvas);
+      if(!blob) throw new Error("图片生成失败");
+      const copied = await copyImageBlob(blob).catch(()=>false);
+      if(copied) alert("已复制出勤图片");
+      else{
+        downloadBlob(blob, "alice_shift.png");
+        alert("当前浏览器不支持直接复制图片，已下载PNG。");
+      }
+    }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许复制或下载。"); }
   };
 
   function weekdayCN(dateStr){
@@ -766,19 +921,21 @@ th{background:#fff0f7}
   shiftDate.addEventListener("change", ()=>loadPureShifts(true));
 
   window.addEventListener("DOMContentLoaded", async()=>{
+    syncPreviewModeControls();
     await loadGirls();
     girlSearch.addEventListener("input", e=>{ selectedGirl = e.target.value; renderGirlSuggest(e.target.value); refreshPriceBySelectedGirl(); });
     girlSearch.addEventListener("focus", ()=>renderGirlSuggest(girlSearch.value));
     bgUpload.addEventListener("change", e=>{
       const file = e.target.files && e.target.files[0];
       if(!file) return;
+      activateCustomPreview();
       const reader = new FileReader();
       reader.onload = ev => { previewBox.style.setProperty("--poster-bg", `url("${ev.target.result}")`); applyPreviewStyle(); };
       reader.readAsDataURL(file);
     });
-    fontSizeRange.addEventListener("input", render);
-    fontColorInput.addEventListener("input", render);
-    bgSizeRange.addEventListener("input", applyPreviewStyle);
+    fontSizeRange.addEventListener("input", ()=>{ activateCustomPreview(); render(); });
+    fontColorInput.addEventListener("input", ()=>{ activateCustomPreview(); render(); });
+    bgSizeRange.addEventListener("input", ()=>{ activateCustomPreview(); applyPreviewStyle(); });
     document.addEventListener("click", e=>{
       if(!e.target.closest("#girlSuggest") && e.target.id !== "girlSearch") girlSuggest.style.display="none";
       if(e.target === editModalMask) closeEditModal();
