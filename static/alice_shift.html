@@ -90,17 +90,47 @@ button{cursor:pointer;font-weight:900}
   box-shadow:0 12px 30px #0002;
 }
 .preview.mode-default{
-  padding:58px 22px 35px;
+  padding:58px 18px 34px;
   background:
-    radial-gradient(circle at 22% 8%, rgba(255,255,255,.94) 0 7%, transparent 8%),
-    radial-gradient(circle at 78% 13%, rgba(255,255,255,.76) 0 8%, transparent 9%),
-    radial-gradient(circle at 52% 95%, rgba(255,255,255,.74) 0 18%, transparent 19%),
-    linear-gradient(180deg,#dbeeff 0%,#f2fbff 48%,#d5eeff 100%);
-  background-size:cover;
+    linear-gradient(90deg,rgba(126,162,203,.72) 0 16px,transparent 16px calc(100% - 16px),rgba(126,162,203,.72) calc(100% - 16px)),
+    linear-gradient(180deg,rgba(126,162,203,.72) 0 16px,transparent 16px calc(100% - 16px),rgba(126,162,203,.72) calc(100% - 16px)),
+    repeating-linear-gradient(45deg,rgba(95,132,179,.18) 0 10px,rgba(255,255,255,.38) 10px 20px),
+    radial-gradient(circle at 50% 20%,rgba(255,255,255,.92),rgba(255,250,239,.9) 56%,rgba(248,235,211,.86)),
+    linear-gradient(180deg,#d7e7f8,#f8efe1);
+  background-size:cover,cover,28px 28px,cover,cover;
   background-position:center;
-  box-shadow:0 12px 30px rgba(0,80,130,.18);
+  border:4px double rgba(179,132,58,.8);
+  box-shadow:0 12px 30px rgba(93,67,35,.22), inset 0 0 0 12px rgba(255,255,255,.55), inset 0 0 0 14px rgba(179,132,58,.42);
   font-family:"M PLUS Rounded 1c","Zen Maru Gothic","Microsoft YaHei",sans-serif;
 }
+.preview.mode-default::before{
+  content:"";
+  position:absolute;
+  inset:20px 20px 26px;
+  border:1.5px solid rgba(179,132,58,.55);
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 7% 8%,rgba(180,59,94,.5) 0 9px,transparent 10px),
+    radial-gradient(circle at 93% 91%,rgba(180,59,94,.45) 0 12px,transparent 13px),
+    linear-gradient(135deg,transparent 0 42px,rgba(126,162,203,.28) 43px 70px,transparent 71px),
+    linear-gradient(315deg,transparent 0 44px,rgba(126,162,203,.24) 45px 76px,transparent 77px),
+    rgba(255,252,244,.76);
+  box-shadow:inset 0 0 0 8px rgba(255,255,255,.46);
+  pointer-events:none;
+}
+.preview.mode-default::after{
+  content:"♠   ♥   ♦   ♣";
+  position:absolute;
+  left:38px;
+  right:38px;
+  bottom:14px;
+  text-align:center;
+  color:rgba(157,111,47,.62);
+  font-size:14px;
+  letter-spacing:4px;
+  pointer-events:none;
+}
+.preview.mode-default > *{position:relative;z-index:1}
 .preview-title{
   text-align:left;
   font-size:calc(14px * var(--poster-scale));
@@ -113,13 +143,25 @@ button{cursor:pointer;font-weight:900}
 }
 .preview.mode-default .preview-title{
   text-align:center;
-  font-size:24px;
+  font-size:21px;
   line-height:1.15;
   font-weight:900;
-  color:#0bbff2;
-  -webkit-text-stroke:1px #fff;
-  text-shadow:0 2px 4px rgba(0,120,180,.35);
-  margin-bottom:4px;
+  color:#426f9f;
+  -webkit-text-stroke:.45px #fff;
+  text-shadow:0 1px 0 #fff,0 2px 4px rgba(132,91,35,.32);
+  margin-bottom:2px;
+  padding:0 8px;
+}
+.preview.mode-default .preview-title::before,
+.preview.mode-default .preview-title::after{
+  content:"";
+  display:inline-block;
+  width:28px;
+  height:12px;
+  margin:0 5px 2px;
+  border-radius:10px 3px 10px 3px;
+  background:linear-gradient(135deg,#8fb4dd,#e7f2ff 48%,#b88a48 50%,#6f9cc8);
+  vertical-align:middle;
 }
 .preview-sub{
   text-align:left;
@@ -131,10 +173,10 @@ button{cursor:pointer;font-weight:900}
 }
 .preview.mode-default .preview-sub{
   text-align:center;
-  font-size:13px;
+  font-size:12px;
   font-weight:800;
-  color:#168dcc;
-  margin-bottom:10px;
+  color:#9b6d2f;
+  margin-bottom:9px;
   text-shadow:none;
 }
 .shift-list{
@@ -143,7 +185,10 @@ button{cursor:pointer;font-weight:900}
   gap:8px;
   align-items:stretch;
 }
-.preview.mode-default .shift-list{gap:0}
+.preview.mode-default .shift-list{
+  gap:5px;
+  padding:0 2px;
+}
 
 .shift-card{
   width:100%;
@@ -156,8 +201,11 @@ button{cursor:pointer;font-weight:900}
   position:relative;
 }
 .preview.mode-default .shift-card{
-  padding:7px 0;
-  border-bottom:1px dashed rgba(57,150,190,.35);
+  padding:5px 7px;
+  border:1px solid rgba(184,138,72,.45);
+  border-radius:12px;
+  background:linear-gradient(90deg,rgba(255,255,255,.82),rgba(255,249,238,.74));
+  box-shadow:0 2px 7px rgba(96,65,35,.12);
 }
 .shift-card-inner{
   display:flex;
@@ -166,8 +214,8 @@ button{cursor:pointer;font-weight:900}
 }
 .preview.mode-default .shift-card-inner{
   display:grid;
-  grid-template-columns:64px minmax(0,1fr);
-  column-gap:12px;
+  grid-template-columns:50px minmax(0,1fr);
+  column-gap:8px;
   align-items:center;
 }
 .shift-avatar{
@@ -184,12 +232,13 @@ button{cursor:pointer;font-weight:900}
   justify-content:center;
 }
 .preview.mode-default .shift-avatar{
-  flex:0 0 58px;
-  width:58px;
-  height:58px;
-  border:2px solid #fff;
-  box-shadow:0 3px 8px rgba(0,0,0,.14);
-  background:rgba(255,255,255,.88);
+  flex:0 0 46px;
+  width:46px;
+  height:46px;
+  border:2px solid #fff7e7;
+  box-shadow:0 2px 0 rgba(184,138,72,.58),0 4px 9px rgba(45,72,100,.22);
+  background:linear-gradient(135deg,#fff,#dcecff);
+  outline:1.5px solid rgba(184,138,72,.65);
 }
 .shift-avatar img{
   width:100%;
@@ -204,9 +253,9 @@ button{cursor:pointer;font-weight:900}
   text-shadow:none;
 }
 .preview.mode-default .shift-avatar-fallback{
-  color:#159dd2;
-  font-size:17px;
-  -webkit-text-stroke:.4px #fff;
+  color:#426f9f;
+  font-size:14px;
+  -webkit-text-stroke:.25px #fff;
 }
 .shift-copy{min-width:0;flex:1}
 .shift-name{
@@ -218,12 +267,12 @@ button{cursor:pointer;font-weight:900}
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
 .preview.mode-default .shift-name{
-  font-size:20px;
+  font-size:15px;
   line-height:1.1;
-  color:#00a8dc;
-  -webkit-text-stroke:.8px #fff;
-  text-shadow:0 2px 3px rgba(0,120,180,.3);
-  margin-bottom:4px;
+  color:#426f9f;
+  -webkit-text-stroke:.25px #fff;
+  text-shadow:0 1px 0 #fff,0 1px 3px rgba(61,88,125,.28);
+  margin-bottom:3px;
   overflow-wrap:anywhere;
 }
 .shift-row{
@@ -247,11 +296,11 @@ button{cursor:pointer;font-weight:900}
 .preview.mode-default .time-price-line{
   align-items:flex-end;
   gap:6px;
-  font-size:14px;
+  font-size:12px;
   line-height:1.1;
-  color:#00bde9;
-  -webkit-text-stroke:.45px #fff;
-  text-shadow:0 1px 2px rgba(0,120,180,.25);
+  color:#70512e;
+  -webkit-text-stroke:0;
+  text-shadow:none;
 }
 .preview.mode-default .time-price-line span:last-child{white-space:nowrap}
 .price{font-size:calc(13px * var(--poster-scale));font-weight:900;color:var(--poster-text)}
@@ -268,13 +317,13 @@ button{cursor:pointer;font-weight:900}
   font-weight:900;
 }
 .preview.mode-default .tag{
-  padding:4px 7px;
+  padding:3px 6px;
   border-radius:999px;
-  background:#ffeaf7;
-  color:#ff4dad;
-  border:1.5px solid #ff8ed0;
-  box-shadow:0 1px 2px rgba(255,90,180,.25);
-  font-size:11px;
+  background:#fff7fb;
+  color:#aa496f;
+  border:1px solid rgba(184,87,126,.38);
+  box-shadow:0 1px 2px rgba(184,87,126,.16);
+  font-size:10px;
   line-height:1;
 }
 .gold-tag{
@@ -291,13 +340,13 @@ button{cursor:pointer;font-weight:900}
   animation:goldFlow 3s linear infinite;
 }
 .preview.mode-default .gold-tag{
-  padding:4px 7px;
+  padding:3px 6px;
   border-radius:999px;
-  background:#fff8d9;
-  color:#a97800;
-  border:1.5px solid #e6bd35;
+  background:linear-gradient(135deg,#fff8d9,#e9c878);
+  color:#77501e;
+  border:1px solid #d3a64e;
   box-shadow:0 1px 2px rgba(210,150,0,.22);
-  font-size:11px;
+  font-size:10px;
   line-height:1;
   animation:none;
 }
@@ -316,7 +365,7 @@ button{cursor:pointer;font-weight:900}
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
 .preview.mode-default .empty{
-  color:#168dcc;
+  color:#426f9f;
   text-shadow:none;
 }
 .table{
@@ -400,6 +449,7 @@ th{background:#fff0f7}
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
     <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="primary" onclick="syncAliceAvatars()">从爱丽丝更新头像</button>
       <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
       <button class="soft" onclick="syncNekoAvatarsFromAdmin()">后台更新头像</button>
       <span class="avatar-status" id="avatarStatus"></span>
@@ -611,6 +661,52 @@ th{background:#fff0f7}
     return `<div class="shift-avatar"><span class="shift-avatar-fallback">${avatarInitial(name)}</span></div>`;
   }
 
+  async function maybeAutoSyncAliceAvatars(){
+    if(!rowsForDate().length) return;
+    const names = currentShiftNames();
+    if(!names.length) return;
+    const key = "alice_shift_alice_avatar_sync_" + today;
+    if(localStorage.getItem(key) === "done") return;
+    try{
+      const ok = await syncAliceAvatars({silent:true});
+      if(ok) localStorage.setItem(key, "done");
+    }catch(e){
+      console.warn("auto sync alice avatars failed", e);
+    }
+  }
+
+  window.syncAliceAvatars = async function(options){
+    options = options || {};
+    const names = currentShiftNames();
+    if(!names.length){ if(!options.silent) alert("当前没有可更新头像的女孩"); return false; }
+    if(!options.silent) avatarStatus.textContent = "正在从爱丽丝更新头像...";
+    try{
+      const r = await fetch('/api/alice_avatars/sync', {
+        method:'POST',
+        headers:apiHeaders(),
+        body:JSON.stringify({date:shiftDate.value || today, names})
+      });
+      const data = await r.json();
+      if(!data.ok) throw new Error(data.error || "更新失败");
+      Object.assign(girlAvatars, data.avatars || {});
+      render();
+      const ok = (data.results || []).length;
+      const miss = (data.missing || []).length;
+      const err = (data.errors || []).length;
+      if(!options.silent || ok){
+        avatarStatus.textContent = `爱丽丝头像已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
+      }
+      return ok > 0 || miss === 0;
+    }catch(e){
+      console.error(e);
+      if(!options.silent){
+        avatarStatus.textContent = "爱丽丝头像更新失败";
+        alert(e.message || "爱丽丝头像更新失败");
+      }
+      return false;
+    }
+  };
+
   window.syncNekoAvatarsFromAdmin = async function(){
     const nekoUser = prompt("喵喵后台用户名");
     if(nekoUser === null) return;
@@ -661,6 +757,7 @@ th{background:#fff0f7}
     window.girlTagMemory = data.girl_tags || {};
     await loadGirlAvatars().catch(e => console.warn("load avatars failed", e));
     render();
+    maybeAutoSyncAliceAvatars();
   }
 
   async function saveShiftToDb(shift){

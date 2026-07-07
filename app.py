@@ -11,6 +11,7 @@ APP_DIR=Path(__file__).resolve().parent
 DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db' if Path('/var/data').exists() else str(APP_DIR/'alice_academy_mcr.db')))
 BOSS_EMAIL=os.environ.get('ALICE_BOSS_EMAIL','xinxinzhang330@gmail.com')
 NEKO_BASE_URL=os.environ.get('ALICE_NEKO_BASE_URL','https://neko-miaomiao.com').rstrip('/')
+ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rstrip('/')
 AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
@@ -162,6 +163,16 @@ NEKO_SEED_GIRLS = [
     {"name":"琴烟（三点粉纯欲校花）","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2025/08/20250813_GUrU-ZNbEAA0aQd-1.thumb.jpg"},
 ]
 
+ALICE_SEED_GIRLS = [
+    {"name":"新人女孩葵（aoi）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2026/06/20260605_%E5%9B%BE%E7%89%87_20260606055218.thumb.jpg"},
+    {"name":"新人女孩德莉莎（少女系-模特系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2026/05/20260531_997.thumb.jpg"},
+    {"name":"小野猫（服务系-巨乳系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2025/11/20251107_IMAGE-2025-11-07-100825.thumb.jpg"},
+    {"name":"新人女孩妮卡（萝莉系-嫩系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2025/08/20250825_images-1.thumb.jpg"},
+    {"name":"新人女孩瑞贝卡（模特系-嫩系-女神系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2025/07/20250731_GwqhSc6bgAALaaa.thumb.jpg"},
+    {"name":"新人女孩夏弥（嫩系-身材系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2025/06/20250628_%E5%9B%BE%E7%89%87_20250628001448.thumb.jpg"},
+    {"name":"新人女孩绘梨衣（颜值系-可爱系）", "thumbnail":"https://ailisi99.com/wp-content/uploads/2025/04/20250702_GulmDEcXoAAzTL5.thumb.jpg"},
+]
+
 def http_text(url, timeout=18):
     req = Request(url, headers={
         'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
@@ -179,11 +190,11 @@ def opener_text(opener, url, timeout=25):
         enc = r.headers.get_content_charset() or 'utf-8'
         return raw.decode(enc, 'replace'), r.geturl()
 
-def http_bytes(url, timeout=25):
+def http_bytes(url, timeout=25, referer=None):
     req = Request(url, headers={
         'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
         'Accept':'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-        'Referer':NEKO_BASE_URL + '/',
+        'Referer':referer or (NEKO_BASE_URL + '/'),
     })
     with urlopen(req, timeout=timeout) as r:
         return r.read(), r.headers.get_content_type() or ''
@@ -275,6 +286,111 @@ def absolute_neko_url(value):
     if value.startswith('/'):
         return urljoin(NEKO_BASE_URL + '/', value.lstrip('/'))
     return value
+
+def absolute_alice_url(value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    if value.startswith('//'):
+        return 'https:' + value
+    if value.startswith('/'):
+        return urljoin(ALICE_BASE_URL + '/', value.lstrip('/'))
+    return value
+
+def clean_alice_card_name(text):
+    text = strip_html_text(text)
+    if not text:
+        return ''
+    if re.search(r'今日出勤|招聘|活动|制度|价格与玩法|SYSTEM|LINE|電話|电话|OPEN|Copyright|店家公告|联系方式|推荐酒店', text, re.I):
+        return ''
+    text = re.sub(r'^(?:sss级|ss级|s级|a级)\s*', '', text, flags=re.I)
+    text = re.sub(r'^(?:一|一个)?小时\s*\d{4,6}\s*', '', text)
+    text = re.sub(r'^\d{4,6}\s*(?:/h|円|日元)?\s*', '', text, flags=re.I)
+    text = re.split(r'\s+\d{1,3}\s*歳|\s+\d{1,3}\s*岁', text, maxsplit=1)[0]
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def extract_alice_items_from_html(page_html):
+    items = []
+    seen = set()
+    for block in re.findall(r'<a\b[^>]*class=["\'][^"\']*(?:cbox|__lazyloop_0)[^"\']*["\'][^>]*>.*?</a>', page_html, re.S | re.I):
+        text = strip_html_text(html_unescape(block))
+        name = clean_alice_card_name(text)
+        if not name:
+            continue
+        img = ''
+        im = re.search(r'<img\b[^>]*(?:data-original|data-src|src)=(["\'])(.*?)\1', block, re.S | re.I)
+        if im:
+            img = absolute_alice_url(html_unescape(im.group(2)))
+        if not img or img.startswith('data:') or '/wp-content/uploads/' not in img:
+            continue
+        key = normalize_avatar_name(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({'name': name, 'post_title': name, 'thumbnail': img, 'link': ALICE_BASE_URL + '/', 'source': 'alice-html'})
+    return items
+
+def fetch_alice_girls():
+    errors = []
+    urls = [
+        ALICE_BASE_URL + '/',
+        ALICE_BASE_URL + '/?rest_route=/wp/v2/model&per_page=100&_embed=1',
+        ALICE_BASE_URL + '/wp-json/wp/v2/model?per_page=100&_embed=1',
+    ]
+    for url in urls:
+        try:
+            req = Request(url, headers={
+                'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+                'Accept':'application/json,text/html,*/*',
+                'Referer':ALICE_BASE_URL + '/',
+            })
+            with urlopen(req, timeout=25) as r:
+                raw = r.read()
+                ctype = r.headers.get_content_type() or ''
+                text = raw.decode(r.headers.get_content_charset() or 'utf-8', 'replace')
+            items = []
+            if 'json' in ctype or text.lstrip().startswith(('[','{')):
+                try:
+                    data = json.loads(text)
+                    for idx, item in enumerate(extract_neko_items(data)):
+                        name = first_nonempty(item.get('post_title'), item.get('name'), item.get('model_name'))
+                        img = absolute_alice_url(first_neko_image(item))
+                        if name and img:
+                            items.append({'name': name, 'post_title': name, 'thumbnail': img, 'link': absolute_alice_url(item.get('link') or item.get('url') or ''), 'source': 'alice-json'})
+                except Exception as e:
+                    errors.append({'url': url, 'error': 'json parse: ' + str(e)})
+            else:
+                items = extract_alice_items_from_html(text)
+            if items:
+                fetch_alice_girls.last_errors = []
+                return items, url.replace(ALICE_BASE_URL, '').strip('/') or 'home'
+            errors.append({'url': url, 'error': 'empty or protected'})
+        except Exception as e:
+            errors.append({'url': url, 'error': str(e)})
+    fetch_alice_girls.last_errors = errors[-5:]
+    return ALICE_SEED_GIRLS, 'seed'
+fetch_alice_girls.last_errors = []
+
+def match_alice_girl(girl_name, alias, alice_items):
+    wants = [normalize_avatar_name(girl_name), normalize_avatar_name(alias)]
+    wants = [w for w in wants if w]
+    best = None
+    best_score = 0
+    for item in alice_items:
+        source_name = item.get('post_title') or item.get('name') or item.get('model_name') or ''
+        n = normalize_avatar_name(source_name)
+        if not n:
+            continue
+        score = 0
+        for w in wants:
+            if w == n:
+                score = max(score, 110)
+            elif len(w) >= 2 and (w in n or n in w):
+                score = max(score, 85 + min(len(w), len(n)))
+        if score > best_score:
+            best, best_score = item, score
+    return best if best_score >= 85 else None
 
 def price_from_text(value, loose=False):
     text = strip_html_text(value)
@@ -614,14 +730,14 @@ def avatar_file_for(girl_name, src_url, content_type=''):
     key = hashlib.sha1((girl_name + '|' + src_url).encode('utf-8')).hexdigest()[:16]
     return AVATAR_DIR / (key + ext)
 
-def cache_avatar(girl_name, neko_name, src_url):
+def cache_avatar(girl_name, neko_name, src_url, referer=None):
     if not src_url:
         return ''
     if src_url.startswith('//'):
         src_url = 'https:' + src_url
     elif src_url.startswith('/'):
         src_url = urljoin(NEKO_BASE_URL + '/', src_url.lstrip('/'))
-    data, content_type = http_bytes(src_url)
+    data, content_type = http_bytes(src_url, referer=referer)
     if not data or len(data) < 500:
         raise ValueError('image is empty')
     AVATAR_DIR.mkdir(parents=True, exist_ok=True)
@@ -2043,6 +2159,45 @@ def api_girl_avatars():
         else:
             data = rows(c.execute("SELECT * FROM girl_avatar_cache ORDER BY updated_at DESC").fetchall())
     return jsonify(ok=True, avatars={r['girl_name']:r for r in data}, rows=data)
+
+@app.route('/api/alice_avatars/sync', methods=['POST'])
+def api_alice_avatars_sync():
+    init_db()
+    d = request.json or {}
+    names = [str(x or '').strip() for x in (d.get('names') or []) if str(x or '').strip()]
+    date_str = d.get('date') or str(date.today())
+    with conn() as c:
+        if not names:
+            names = []
+            seen = set()
+            for r in pure_shift_rows_for_date(c, date_str):
+                n = str(r.get('girl') or '').strip()
+                if n and n not in seen:
+                    seen.add(n); names.append(n)
+        if not names:
+            names = [r['name'] for r in c.execute("SELECT name FROM girls ORDER BY id DESC").fetchall()]
+        alias_map = {r['name']:(r['girl_alias'] if 'girl_alias' in r.keys() else '') for r in c.execute("SELECT name,girl_alias FROM girls").fetchall()}
+    try:
+        alice_items, source = fetch_alice_girls()
+    except Exception as e:
+        return jsonify(ok=False, error=str(e), results=[], missing=names), 502
+    results, missing, errors = [], [], []
+    for name in names:
+        try:
+            item = match_alice_girl(name, alias_map.get(name,''), alice_items)
+            if not item:
+                missing.append(name); continue
+            alice_name = item.get('post_title') or item.get('name') or item.get('model_name') or ''
+            img = absolute_alice_url(first_neko_image(item))
+            if not img:
+                missing.append(name); continue
+            avatar_url = cache_avatar(name, alice_name, img, referer=ALICE_BASE_URL + '/')
+            results.append({'girl_name':name, 'alice_name':alice_name, 'avatar_url':avatar_url, 'source_url':img})
+        except Exception as e:
+            errors.append({'girl_name':name, 'error':str(e)})
+    return jsonify(ok=True, source=source, source_count=len(alice_items), results=results,
+                   missing=missing, errors=errors, source_errors=fetch_alice_girls.last_errors,
+                   avatars={r['girl_name']:r for r in results})
 
 @app.route('/api/neko_avatars/sync', methods=['POST'])
 def api_neko_avatars_sync():
