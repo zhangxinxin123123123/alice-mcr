@@ -824,10 +824,27 @@ def _chain_interval_minutes(sh, sm, eh, em):
 
     return end - start
 
+def _business_clock_minutes_24h(h, mi):
+    if h >= 24:
+        return h * 60 + mi
+    if h < 6:
+        return (24 + h) * 60 + mi
+    return h * 60 + mi
+
+def _strict_24h_interval_minutes(sh, sm, eh, em):
+    start = _business_clock_minutes_24h(sh, sm)
+    end = _business_clock_minutes_24h(eh, em)
+    if end <= start:
+        end += 24 * 60
+    return end - start
+
 def service_duration_minutes(t):
     text = str(t or "").strip()
     if not text or "包夜" in text:
         return None
+    strict = re.search(r"(\d{1,2}):(\d{2})\s*(?:[-~ー～]|到|至)\s*(\d{1,2}):(\d{2})", text)
+    if strict:
+        return _strict_24h_interval_minutes(*_parse_time_groups(strict))
     m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
     if not m:
         return None
@@ -1216,6 +1233,8 @@ def normalize_chain_time_token(token):
         return token
 
     sh, sm, eh, em = _parse_time_groups(m)
+    if ':' in token:
+        return f"{sh % 24:02d}:{sm:02d}-{eh % 24:02d}:{em:02d}"
 
     # 12.30-1.30 是同日 12.30-13.30，不允许被标准化成 25.30。
     display_eh = eh
@@ -1429,7 +1448,34 @@ def _clock_parts(v):
         mi = 59
     return h, mi
 
+def _strict_24h_clock_parts(v):
+    raw = str(v or '').strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not m:
+        return None
+    h = int(m.group(1))
+    mi = int(m.group(2))
+    if mi >= 60:
+        mi = 59
+    return h, mi
+
+def _strict_24h_interval_values(start_value, end_value):
+    sp = _strict_24h_clock_parts(start_value)
+    ep = _strict_24h_clock_parts(end_value)
+    if not sp or not ep:
+        return None
+    sh, sm = sp
+    eh, em = ep
+    start = _business_clock_minutes_24h(sh, sm)
+    end = _business_clock_minutes_24h(eh, em)
+    if end <= start:
+        end += 24 * 60
+    return start, end
+
 def _interval_minutes(start_value, end_value):
+    strict = _strict_24h_interval_values(start_value, end_value)
+    if strict:
+        return strict
     sp = _clock_parts(start_value)
     ep = _clock_parts(end_value)
     if not sp or not ep:
@@ -1487,18 +1533,15 @@ def _parse_interval_text(text):
         return None
     if _is_package_time(t):
         return (24 * 60, 29 * 60)
-    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~銉硷綖]|鍒皘鑷?)\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
+    m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~ー～]|到|至)\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
     if not m:
         return None
     return _interval_minutes(m.group(1), m.group(2))
 
 def _fmt_free_minute(m, is_end=False):
-    if is_end and m >= 29 * 60:
-        return '鍖呭'
     h = (m // 60) % 24
     mi = m % 60
-    dh = h - 12 if 13 <= h <= 23 else h
-    return f"{dh}.{mi:02d}" if mi else str(dh)
+    return f"{h:02d}:{mi:02d}"
 
 def build_chain_free_rows(c, date_str):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""

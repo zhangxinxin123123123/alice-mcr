@@ -523,9 +523,10 @@ th{background:#fff0f7}
   function normalizeTime(t){
     t = String(t || "").trim();
     const m = t.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
-    if(!m) return t || "24:00";
+    if(!m) return t || "00:00";
     let h = Number(m[1]), min = Number(m[2] || 0);
-    if(h >= 0 && h <= 5) h += 24;
+    h = ((h % 24) + 24) % 24;
+    if(min >= 60) min = 59;
     return String(h).padStart(2,"0") + ":" + String(min).padStart(2,"0");
   }
 
@@ -533,13 +534,7 @@ th{background:#fff0f7}
     const nt = normalizeTime(t);
     const m = nt.match(/^(\d{1,2}):(\d{2})$/);
     if(!m) return nt;
-    const h = Number(m[1]);
-    const mm = m[2];
-    if(h >= 24){
-      const showH = h - 24;
-      return mm === "00" ? `凌晨${showH}点` : `凌晨${showH}点${mm}分`;
-    }
-    return mm === "00" ? `${h}点` : `${h}点${mm}分`;
+    return `${String(Number(m[1])).padStart(2,"0")}:${m[2]}`;
   }
   function displayTimeRange(start,end){
     return `${displayTime(start)}到${displayTime(end)}`;
@@ -548,7 +543,7 @@ th{background:#fff0f7}
   function timeOptions(selected){
     selected = normalizeTime(selected);
     let out = "";
-    for(let h=12; h<=29; h++){
+    for(let h=0; h<24; h++){
       for(const m of [0,30]){
         const v = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
         out += `<option value="${v}" ${v===selected?"selected":""}>${displayTime(v)}</option>`;

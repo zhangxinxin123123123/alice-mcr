@@ -408,7 +408,39 @@ def _install(module):
         mi = int(m.group(2) or 0)
         return h, min(mi, 59)
 
+    def _business_clock_minutes_24h(h, mi):
+        if h >= 24:
+            return h * 60 + mi
+        if h < 6:
+            return (24 + h) * 60 + mi
+        return h * 60 + mi
+
+    def _strict_24h_clock_parts(v):
+        raw = str(v or "").strip()
+        m = _re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+        if not m:
+            return None
+        h = int(m.group(1))
+        mi = int(m.group(2))
+        return h, min(mi, 59)
+
+    def _strict_24h_interval_values(start_value, end_value):
+        sp = _strict_24h_clock_parts(start_value)
+        ep = _strict_24h_clock_parts(end_value)
+        if not sp or not ep:
+            return None
+        sh, sm = sp
+        eh, em = ep
+        start = _business_clock_minutes_24h(sh, sm)
+        end = _business_clock_minutes_24h(eh, em)
+        if end <= start:
+            end += 24 * 60
+        return start, end
+
     def _interval_minutes(start_value, end_value):
+        strict = _strict_24h_interval_values(start_value, end_value)
+        if strict:
+            return strict
         sp = _clock_parts(start_value)
         ep = _clock_parts(end_value)
         if not sp or not ep:
@@ -447,7 +479,7 @@ def _install(module):
             return None
         if _is_package_time(t):
             return (24 * 60, 29 * 60)
-        m = _re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~ー－到至]\s*)(\d{1,2}(?:[:.]\d{1,2})?)", t)
+        m = _re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*(?:[-~ー－～]|到|至)\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
         if not m:
             m = _re.search(r"(\d{1,2}(?:[:.]\d{1,2})?)\s*[-~]\s*(\d{1,2}(?:[:.]\d{1,2})?)", t)
         if not m:
@@ -473,12 +505,9 @@ def _install(module):
         return h * 60 + mi
 
     def _patched_fmt_free_minute(m, is_end=False):
-        if is_end and m >= 29 * 60:
-            return "包夜"
         h = (m // 60) % 24
         mi = m % 60
-        dh = h - 12 if 13 <= h <= 23 else h
-        return f"{dh}.{mi:02d}" if mi else str(dh)
+        return f"{h:02d}:{mi:02d}"
 
     old_build_chain_free_rows = getattr(module, "build_chain_free_rows", None)
     module._clock_to_minutes = _patched_clock_to_minutes
