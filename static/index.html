@@ -604,7 +604,15 @@ async function copyChainFreeText(){
 
 
 let chainNamedImages=[];
-function currentChainEmployeeName(){return (window.cGirl&&cGirl.value)||chainState.girl_name||'员工';}
+function formatChainNameTime(clock){
+  const t=normalizeChainClock(clock||CHAIN_DEFAULT_START);
+  return `${Number(t.slice(0,2))}:${t.slice(3,5)}`;
+}
+function currentChainEmployeeName(){
+  const name=(window.cGirl&&cGirl.value)||chainState.girl_name||'员工';
+  const start=(window.coStart&&coStart.value)||parseChainTimeRange(window.coTime&&coTime.value||'').start||CHAIN_DEFAULT_START;
+  return `${formatChainNameTime(start)}-${name}`;
+}
 function setupChainImageTools(){
   const drop=document.getElementById('chainImageDrop');
   if(!drop || drop.dataset.ready)return;
@@ -632,6 +640,7 @@ function makeNamedImage(file,name){
     canvas.width=img.naturalWidth||img.width; canvas.height=img.naturalHeight||img.height;
     const ctx=canvas.getContext('2d');
     ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    mosaicGuestAvatars(ctx,canvas.width,canvas.height);
     const fontSize=Math.max(28,Math.round(canvas.width*0.075));
     const pad=Math.round(fontSize*0.45);
     const text=String(name||'员工');
@@ -643,7 +652,7 @@ function makeNamedImage(file,name){
     const x=(canvas.width-boxW)/2, y=canvas.height-pad-boxH;
     ctx.fillStyle='rgba(0,0,0,.58)';
     roundRect(ctx,x,y,boxW,boxH,Math.round(boxH/2)); ctx.fill();
-    ctx.lineWidth=Math.max(2,Math.round(fontSize*.08)); ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.strokeText(text,canvas.width,canvas.height-pad*1.35);
+    ctx.lineWidth=Math.max(2,Math.round(fontSize*.08)); ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.strokeText(text,canvas.width/2,canvas.height-pad*1.35);
     ctx.fillStyle='white'; ctx.fillText(text,canvas.width/2,canvas.height-pad*1.35);
     const dataUrl=canvas.toDataURL('image/png');
     chainNamedImages.unshift({name,dataUrl,filename:`${safeFileName(name)}_named.png`});
@@ -653,6 +662,94 @@ function makeNamedImage(file,name){
   img.src=URL.createObjectURL(file);
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+function colorDistance(a,b){
+  const dr=a[0]-b[0], dg=a[1]-b[1], db=a[2]-b[2];
+  return Math.sqrt(dr*dr+dg*dg+db*db);
+}
+function sampleCanvasBackground(data,width,height){
+  const cols=[];
+  const xs=[1,Math.min(width-1,4),Math.min(width-1,Math.max(1,Math.floor(width*.015)))];
+  const step=Math.max(1,Math.floor(height/28));
+  for(let y=1;y<height;y+=step){
+    xs.forEach(x=>{
+      const i=(y*width+x)*4;
+      if(data[i+3]>=20)cols.push([data[i],data[i+1],data[i+2]]);
+    });
+  }
+  if(!cols.length)return [255,255,255];
+  let bestGroup=[cols[0]];
+  cols.forEach(c=>{
+    const group=cols.filter(v=>colorDistance(c,v)<24);
+    if(group.length>bestGroup.length)bestGroup=group;
+  });
+  return [0,1,2].map(k=>Math.round(bestGroup.reduce((s,c)=>s+c[k],0)/bestGroup.length));
+}
+function pixelateCircle(ctx,cx,cy,radius){
+  const x=Math.max(0,Math.round(cx-radius)), y=Math.max(0,Math.round(cy-radius));
+  const size=Math.round(radius*2);
+  const block=Math.max(16,Math.round(radius*.85));
+  const small=document.createElement('canvas');
+  small.width=Math.max(2,Math.ceil(size/block));
+  small.height=Math.max(2,Math.ceil(size/block));
+  const sctx=small.getContext('2d');
+  sctx.imageSmoothingEnabled=true;
+  sctx.drawImage(ctx.canvas,x,y,size,size,0,0,small.width,small.height);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx,cy,radius,0,Math.PI*2);
+  ctx.clip();
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(small,0,0,small.width,small.height,x,y,size,size);
+  ctx.restore();
+}
+function mosaicGuestAvatars(ctx,width,height){
+  let img;
+  try{img=ctx.getImageData(0,0,width,height);}catch(e){return;}
+  const data=img.data;
+  const bg=sampleCanvasBackground(data,width,height);
+  const leftLimit=Math.min(Math.round(width*.16),96);
+  const minSize=Math.max(18,Math.round(width*.035));
+  const maxSize=Math.max(46,Math.round(width*.16));
+  const visited=new Uint8Array(leftLimit*height);
+  const idx=(x,y)=>y*leftLimit+x;
+  const isTarget=(x,y)=>{
+    const i=(y*width+x)*4;
+    if(data[i+3]<20)return false;
+    return colorDistance([data[i],data[i+1],data[i+2]],bg)>42;
+  };
+  const comps=[];
+  for(let y=0;y<height;y++){
+    for(let x=0;x<leftLimit;x++){
+      const start=idx(x,y);
+      if(visited[start]||!isTarget(x,y))continue;
+      const stack=[[x,y]];
+      visited[start]=1;
+      let minX=x,maxX=x,minY=y,maxY=y,count=0;
+      while(stack.length){
+        const [px,py]=stack.pop();
+        count++;
+        if(px<minX)minX=px; if(px>maxX)maxX=px; if(py<minY)minY=py; if(py>maxY)maxY=py;
+        [[px+1,py],[px-1,py],[px,py+1],[px,py-1]].forEach(([nx,ny])=>{
+          if(nx<0||nx>=leftLimit||ny<0||ny>=height)return;
+          const ni=idx(nx,ny);
+          if(!visited[ni]&&isTarget(nx,ny)){visited[ni]=1;stack.push([nx,ny]);}
+        });
+      }
+      const w=maxX-minX+1, h=maxY-minY+1;
+      const ratio=w/h;
+      if(count>minSize*minSize*.28&&w>=minSize&&h>=minSize&&w<=maxSize&&h<=maxSize&&ratio>.78&&ratio<1.28){
+        comps.push({minX,maxX,minY,maxY,w,h,count});
+      }
+    }
+  }
+  comps.forEach(c=>{
+    const margin=Math.max(4,Math.round(Math.max(c.w,c.h)*.12));
+    const cx=(c.minX+c.maxX)/2;
+    const cy=(c.minY+c.maxY)/2;
+    const radius=Math.max(c.w,c.h)/2+margin;
+    pixelateCircle(ctx,cx,cy,radius);
+  });
+}
 function safeFileName(s){return String(s||'employee').replace(/[\/:*?"<>|\s]+/g,'_').slice(0,40)||'employee';}
 function renderChainNamedImages(){
   const box=document.getElementById('chainImageList'); if(!box)return;
