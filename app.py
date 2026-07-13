@@ -109,7 +109,7 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_quick_links_group ON quick_links(group_name, sort_order, id)")
         for qg, qt, qc, so in [('网址','网址','',1),('常用短语','常用短语','',2)]:
             c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
-        defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','常客',5),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
+        defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','SVIP',5),('customer_type','常客',6),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
         # v17.1: 默认新增女孩定价 15000，到手 10000；旧库自动补列和迁移快捷分组名称。
@@ -1067,7 +1067,7 @@ def recalc_customer_points(c, customer_id=None, update_types=True):
 
 
 def update_customer_type_by_history(c, customer_id=None):
-    """自动维护客户类型：充值/月消费前5为 VIP；3单老客；2单回头客；否则新客。"""
+    """自动维护客户类型：充值为 SVIP；月消费前5/30天高定价复购为 VIP。"""
     month = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m')
     top_vip_ids = {
         int(r['customer_id'])
@@ -1075,6 +1075,7 @@ def update_customer_type_by_history(c, customer_id=None):
             SELECT customer_id
             FROM orders
             WHERE customer_id IS NOT NULL
+              AND COALESCE(order_status,'') NOT IN ('取消','鍙栨秷')
               AND COALESCE(received_amount,0) > 0
               AND substr(COALESCE(order_date,''),1,7)=?
             GROUP BY customer_id
@@ -1082,6 +1083,33 @@ def update_customer_type_by_history(c, customer_id=None):
             LIMIT 5
         """, (month,)).fetchall()
         if r['customer_id']
+    }
+    cutoff = (datetime.utcnow() + timedelta(hours=9) - timedelta(days=30)).strftime('%Y-%m-%d')
+    high_price_stats = {}
+    for r in c.execute("""
+        SELECT o.customer_id, o.girl_id, o.girl_name, o.hours, o.service_time, COALESCE(g.list_price,0) AS list_price
+        FROM orders o
+        LEFT JOIN girls g ON g.id=o.girl_id OR (COALESCE(o.girl_id,0)=0 AND g.name=o.girl_name)
+        WHERE o.customer_id IS NOT NULL
+          AND COALESCE(o.order_status,'') NOT IN ('取消','鍙栨秷')
+          AND COALESCE(o.order_date,'') >= ?
+          AND COALESCE(g.list_price,0) >= 25000
+    """, (cutoff,)).fetchall():
+        cid = int(r['customer_id'])
+        girl_key = str(r['girl_id'] or '').strip() or str(r['girl_name'] or '').strip()
+        if not girl_key:
+            continue
+        info = high_price_stats.setdefault(cid, {'girls': set(), 'has_long': False})
+        info['girls'].add(girl_key)
+        try:
+            hours = float(r['hours'] or calc_hours(r['service_time']))
+        except Exception:
+            hours = 1.0
+        if hours > 1.0:
+            info['has_long'] = True
+    high_price_vip_ids = {
+        cid for cid, info in high_price_stats.items()
+        if len(info['girls']) >= 2 and info['has_long']
     }
     recharged_ids = {
         int(r['customer_id'])
@@ -1115,7 +1143,9 @@ def update_customer_type_by_history(c, customer_id=None):
     for row in customer_rows:
         cid = int(row['id'])
         total_orders = int(row['total_orders'] or 0)
-        if cid in top_vip_ids or cid in recharged_ids:
+        if cid in recharged_ids:
+            new_type = 'SVIP'
+        elif cid in top_vip_ids or cid in high_price_vip_ids:
             new_type = 'VIP'
         elif total_orders >= 3:
             new_type = '老客'
