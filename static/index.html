@@ -266,7 +266,13 @@ async function loadAll(){
   console.error(e);
  }
 }
-function opts(type, selected=""){return data.enums.filter(e=>e.enum_type===type).map(e=>`<option ${e.value===selected?"selected":""}>${e.value}</option>`).join("")}
+function customerTypeOptions(selected=""){
+  const vals=["新客","回头客","老客","VIP"];
+  (data.enums||[]).filter(e=>e.enum_type==="customer_type").forEach(e=>{if(e.value&&!vals.includes(e.value))vals.push(e.value)});
+  (data.customers||[]).forEach(c=>{if(c.customer_type&&!vals.includes(c.customer_type))vals.push(c.customer_type)});
+  return vals.map(v=>`<option ${v===selected?"selected":""}>${v}</option>`).join("");
+}
+function opts(type, selected=""){if(type==="customer_type")return customerTypeOptions(selected);return data.enums.filter(e=>e.enum_type===type).map(e=>`<option ${e.value===selected?"selected":""}>${e.value}</option>`).join("")}
 function refreshSelects(){
  iGirl.innerHTML='<option value="">自动识别女孩</option>'+data.girls.map(g=>`<option value="${g.id}">${g.name}</option>`).join("");
  qOrderSettle.innerHTML='<option value="">结算全部</option>'+opts("settlement_status");
@@ -294,24 +300,43 @@ function smartVal(v){
   if(/^[-]?\d+(\.\d+)?$/.test(s)) return Number(s);
   return String(v).toLowerCase();
 }
+function activeSorts(el){
+  const st = sortState[el] || {};
+  if(Array.isArray(st.keys)) return st.keys;
+  if(st.key) return [{key:st.key, dir:st.dir || "asc"}];
+  return [];
+}
 function sortRows(rows, el){
-  const st = sortState[el];
-  if(!st || !st.key) return rows;
+  const keys = activeSorts(el);
+  if(!keys.length) return rows;
   return [...rows].sort((a,b)=>{
-    let x=smartVal(a[st.key]), y=smartVal(b[st.key]);
-    let r = (x>y?1:(x<y?-1:0));
-    return st.dir==="asc" ? r : -r;
+    for(const st of keys){
+      let x=smartVal(a[st.key]), y=smartVal(b[st.key]);
+      let r = (x>y?1:(x<y?-1:0));
+      if(r) return st.dir==="asc" ? r : -r;
+    }
+    return 0;
   });
 }
 function setSort(el,key){
-  const old=sortState[el]||{};
-  sortState[el]={key, dir:(old.key===key && old.dir==="asc")?"desc":"asc"};
+  const oldKeys=activeSorts(el);
+  const primary=oldKeys[0];
+  const existing=oldKeys.find(x=>x.key===key);
+  const dir=(primary&&primary.key===key&&primary.dir==="asc")?"desc":(existing?.dir||"asc");
+  const keys=[{key,dir}, ...oldKeys.filter(x=>x.key!==key)].slice(0,2);
+  sortState[el]={keys, key:keys[0].key, dir:keys[0].dir};
   render();
+}
+function sortMark(el,key){
+  const idx=activeSorts(el).findIndex(x=>x.key===key);
+  if(idx<0) return "";
+  const st=activeSorts(el)[idx];
+  return (idx===0 ? "" : "②") + (st.dir==="asc" ? " ▲" : " ▼");
 }
 function table(el,rows,cols,delTable,editFn){
   rows = sortRows(rows, el);
   let h='<div class="table"><table><thead><tr>'+
-    cols.map(c=>`<th class="sortable" onclick="setSort('${el}','${c.k}')">${c.t}${sortState[el]?.key===c.k?(sortState[el].dir==="asc"?" ▲":" ▼"):""}</th>`).join("")+
+    cols.map(c=>`<th class="sortable" onclick="setSort('${el}','${c.k}')">${c.t}${sortMark(el,c.k)}</th>`).join("")+
     "<th>操作</th></tr></thead><tbody>";
   rows.forEach((r,i)=>{
     h+="<tr>"+cols.map(c=>`<td>${c.f?c.f(r[c.k],r):(r[c.k]??"")}</td>`).join("")+
@@ -871,7 +896,7 @@ async function bulkSettleOrders(status="已结算"){
 async function recalcCustomerPoints(){
   await api("/api/customers/recalc_points",{});
   await loadAll();
-  alert("客户积分已按订单重新统计");
+  alert("客户积分和客户类型已按订单重新统计");
 }
 
 function gotoGirlFromOrder(girlName){

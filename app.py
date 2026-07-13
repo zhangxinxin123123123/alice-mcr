@@ -1062,12 +1062,68 @@ def recalc_customer_points(c, customer_id=None):
         pts = int(row["pts"] or 0)
         spent = int(row["spent"] or 0)
         c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, pts, spent, cid))
-        update_customer_type_by_history(c, cid)
+    update_customer_type_by_history(c, None)
 
 
 def update_customer_type_by_history(c, customer_id=None):
-    """客户类型以客户表手动编辑值为准，不再被单子数量/充值逻辑自动覆盖。"""
-    return
+    """自动维护客户类型：充值/月消费前5为 VIP；3单老客；2单回头客；否则新客。"""
+    month = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m')
+    top_vip_ids = {
+        int(r['customer_id'])
+        for r in c.execute("""
+            SELECT customer_id
+            FROM orders
+            WHERE customer_id IS NOT NULL
+              AND COALESCE(received_amount,0) > 0
+              AND substr(COALESCE(order_date,''),1,7)=?
+            GROUP BY customer_id
+            ORDER BY SUM(COALESCE(received_amount,0)) DESC, COUNT(*) DESC, MAX(id) DESC
+            LIMIT 5
+        """, (month,)).fetchall()
+        if r['customer_id']
+    }
+    recharged_ids = {
+        int(r['customer_id'])
+        for r in c.execute("""
+            SELECT DISTINCT customer_id
+            FROM recharge_records
+            WHERE customer_id IS NOT NULL AND COALESCE(amount,0) > 0
+        """).fetchall()
+        if r['customer_id']
+    }
+    for r in c.execute("SELECT id FROM customers WHERE COALESCE(total_recharge,0)>0 OR COALESCE(recharge_balance,0)>0").fetchall():
+        recharged_ids.add(int(r['id']))
+
+    params = []
+    where = ""
+    if customer_id:
+        where = "WHERE c.id=?"
+        params.append(int(customer_id))
+    customer_rows = c.execute(f"""
+        SELECT c.id, c.customer_type, COALESCE(o.total_orders,0) AS total_orders
+        FROM customers c
+        LEFT JOIN (
+            SELECT customer_id, COUNT(*) AS total_orders
+            FROM orders
+            WHERE customer_id IS NOT NULL
+            GROUP BY customer_id
+        ) o ON o.customer_id=c.id
+        {where}
+    """, params).fetchall()
+
+    for row in customer_rows:
+        cid = int(row['id'])
+        total_orders = int(row['total_orders'] or 0)
+        if cid in top_vip_ids or cid in recharged_ids:
+            new_type = 'VIP'
+        elif total_orders >= 3:
+            new_type = '老客'
+        elif total_orders >= 2:
+            new_type = '回头客'
+        else:
+            new_type = '新客'
+        if (row['customer_type'] or '') != new_type:
+            c.execute("UPDATE customers SET customer_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_type, cid))
 
 
 
@@ -1126,7 +1182,6 @@ def create_or_update_order(c,d):
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
-            # 客户类型手动优先，不按单量自动覆盖
         recalc_customer_points(c, cust['id'])
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
@@ -1144,6 +1199,7 @@ def all_data():
     init_db()
     with conn() as c:
         auto_finish_reservations(c)
+        update_customer_type_by_history(c, None)
         return jsonify({
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
@@ -1173,6 +1229,7 @@ def customers():
             c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
         else:
             c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
+        update_customer_type_by_history(c, None)
     return jsonify(ok=True)
 @app.route('/api/girls',methods=['POST'])
 def girls():
@@ -1194,7 +1251,19 @@ def orders():
 def delete(table,item_id):
     allowed={'customers':'customers','girls':'girls','orders':'orders','recharges':'recharge_records','points':'points_records'}
     if table not in allowed: return jsonify(ok=False),400
-    with conn() as c: c.execute(f'DELETE FROM {allowed[table]} WHERE id=?',(item_id,))
+    with conn() as c:
+        affected_customer_id = None
+        if table == 'orders':
+            old = c.execute('SELECT customer_id FROM orders WHERE id=?', (item_id,)).fetchone()
+            affected_customer_id = old['customer_id'] if old else None
+        elif table in ('recharges', 'points'):
+            old = c.execute(f'SELECT customer_id FROM {allowed[table]} WHERE id=?', (item_id,)).fetchone()
+            affected_customer_id = old['customer_id'] if old else None
+        c.execute(f'DELETE FROM {allowed[table]} WHERE id=?',(item_id,))
+        if table == 'orders' and affected_customer_id:
+            recalc_customer_points(c, affected_customer_id)
+        elif table in ('customers', 'recharges', 'points'):
+            update_customer_type_by_history(c, None)
     return jsonify(ok=True)
 @app.route('/api/delete_by_date',methods=['POST'])
 def delete_by_date():
