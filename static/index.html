@@ -896,7 +896,7 @@ async function bulkSettleOrders(status="已结算"){
 async function recalcCustomerPoints(){
   await api("/api/customers/recalc_points",{});
   await loadAll();
-  alert("客户积分和客户类型已按订单重新统计");
+  alert("客户积分已按订单重新统计");
 }
 
 function gotoGirlFromOrder(girlName){

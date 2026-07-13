@@ -1052,7 +1052,7 @@ def recalc_girl(c,gid):
         h=float(o['hours'] or calc_hours(o['service_time'])); th=take_home(g,h); prof=round_yen_1000_half_up(int(o['received_amount'] or 0)-th)
         c.execute('UPDATE orders SET girl_name=?, girl_take_home=?, store_profit=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',(g['name'],th,prof,o['id']))
 
-def recalc_customer_points(c, customer_id=None):
+def recalc_customer_points(c, customer_id=None, update_types=True):
     if customer_id:
         ids = [customer_id]
     else:
@@ -1062,7 +1062,8 @@ def recalc_customer_points(c, customer_id=None):
         pts = int(row["pts"] or 0)
         spent = int(row["spent"] or 0)
         c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, pts, spent, cid))
-    update_customer_type_by_history(c, None)
+    if update_types:
+        update_customer_type_by_history(c, None)
 
 
 def update_customer_type_by_history(c, customer_id=None):
@@ -2039,7 +2040,7 @@ def api_quick_links():
 @app.route('/api/customers/recalc_points', methods=['POST'])
 def api_customers_recalc_points():
     with conn() as c:
-        recalc_customer_points(c, None)
+        recalc_customer_points(c, None, update_types=False)
     return jsonify(ok=True)
 
 
