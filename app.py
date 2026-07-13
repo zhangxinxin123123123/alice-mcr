@@ -1643,9 +1643,29 @@ def _fmt_free_minute(m, is_end=False):
     mi = m % 60
     return f"{h:02d}:{mi:02d}"
 
+def _round_up_to_slot(m, step=30):
+    return ((int(m) + step - 1) // step) * step
+
+def _current_business_minute_for_date(date_str, now=None):
+    try:
+        target = datetime.strptime(str(date_str), '%Y-%m-%d').date()
+    except Exception:
+        return None
+    now = now or (datetime.utcnow() + timedelta(hours=9))
+    today = now.date()
+    if target > today:
+        return None
+    current = _round_up_to_slot(now.hour * 60 + now.minute)
+    if target == today:
+        return current if now.hour >= 6 else None
+    if target == today - timedelta(days=1) and now.hour < 12:
+        return _round_up_to_slot((24 + now.hour) * 60 + now.minute)
+    return 48 * 60
+
 def build_chain_free_rows(c, date_str):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
     result = []
+    cutoff = _current_business_minute_for_date(date_str)
     for sft in pure_shift_rows_for_date(c, date_str):
         girl = sft.get('girl') or ''
         if _is_package_time(sft.get('start')) or _is_package_time(sft.get('end')):
@@ -1654,6 +1674,10 @@ def build_chain_free_rows(c, date_str):
             base = _interval_minutes(sft.get('start'), sft.get('end'))
         if not base or base[0] is None or base[1] is None:
             continue
+        if cutoff is not None:
+            base = (max(base[0], cutoff), base[1])
+            if base[0] >= base[1]:
+                continue
         busy = []
         for o in c.execute("""SELECT service_time FROM orders
                             WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'""", (date_str, girl)).fetchall():
@@ -2470,6 +2494,7 @@ def api_customer_available():
     girl_filter=str(d.get('girl_name') or '').strip()
     with conn() as c:
         shifts=pure_shift_rows_for_date(c, day)
+        cutoff=_current_business_minute_for_date(day)
         out=[]
         for sft in shifts:
             girl=sft['girl']
@@ -2478,6 +2503,9 @@ def api_customer_available():
             en=time_to_min(sft.get('end') or sft.get('end_time'))
             if st is None or en is None: continue
             if en <= st: en += 24*60
+            if cutoff is not None:
+                st=max(st, cutoff)
+                if st >= en: continue
             busy=[]
             for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
                 r=service_range_minutes(o['service_time'])
@@ -2516,6 +2544,9 @@ def api_customer_reserve():
         a=time_to_min(start); b=time_to_min(end)
         if a is None or b is None: return jsonify(ok=False,error='时间格式错误'),400
         if b <= a: b += 24*60
+        cutoff=_current_business_minute_for_date(day)
+        if cutoff is not None and a < cutoff:
+            return jsonify(ok=False,error='不能预约已经过去的时间'),400
         for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
             r=service_range_minutes(o['service_time'])
             if r and ranges_overlap(a,b,r[0],r[1]): return jsonify(ok=False,error='这个时间已经被预约'),409
