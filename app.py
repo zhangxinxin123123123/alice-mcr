@@ -1706,6 +1706,15 @@ def _current_business_minute_for_date(date_str, now=None):
         return _round_up_to_slot((24 + now.hour) * 60 + now.minute)
     return 48 * 60
 
+def _normalize_today_free_base_for_cutoff(base, cutoff):
+    if cutoff is None or cutoff >= 24 * 60:
+        return base
+    a, b = base
+    da, db = a % (24 * 60), b % (24 * 60)
+    if a >= 24 * 60 and b >= 24 * 60 and da < cutoff < db:
+        return (da, db)
+    return base
+
 def build_chain_free_rows(c, date_str):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
     result = []
@@ -1718,6 +1727,7 @@ def build_chain_free_rows(c, date_str):
             base = _interval_minutes(sft.get('start'), sft.get('end'))
         if not base or base[0] is None or base[1] is None:
             continue
+        base = _normalize_today_free_base_for_cutoff(base, cutoff)
         if cutoff is not None:
             base = (max(base[0], cutoff), base[1])
             if base[0] >= base[1]:
@@ -1729,6 +1739,8 @@ def build_chain_free_rows(c, date_str):
             if itv:
                 busy.append(itv)
         free = _subtract_intervals(base, busy)
+        if cutoff is not None:
+            free = [(max(a, cutoff), b) for a, b in free if max(a, cutoff) < b]
         if not free:
             continue
         segments = ''.join([f"{_fmt_free_minute(a)}-{_fmt_free_minute(b, True)}空" for a,b in free])
@@ -1846,7 +1858,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v17_chain_reservation",
+            "version": "v18_chain_free_cutoff",
             "port": 5057,
         })
 
@@ -1865,7 +1877,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v17_chain_reservation",
+            "version": "v18_chain_free_cutoff",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
