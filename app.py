@@ -1,6 +1,10 @@
 
 import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from pathlib import Path
@@ -1646,12 +1650,35 @@ def _fmt_free_minute(m, is_end=False):
 def _round_up_to_slot(m, step=30):
     return ((int(m) + step - 1) // step) * step
 
-def _current_business_minute_for_date(date_str, now=None):
-    try:
-        target = datetime.strptime(str(date_str), '%Y-%m-%d').date()
-    except Exception:
+def _tokyo_now():
+    if ZoneInfo:
+        return datetime.now(ZoneInfo('Asia/Tokyo')).replace(tzinfo=None)
+    jst = timezone(timedelta(hours=9))
+    return datetime.now(timezone.utc).astimezone(jst).replace(tzinfo=None)
+
+def _parse_chain_date(value, now=None):
+    raw = str(value or '').strip()
+    if not raw:
         return None
-    now = now or (datetime.utcnow() + timedelta(hours=9))
+    for fmt in ('%Y-%m-%d', '%Y/%m/%d'):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except Exception:
+            pass
+    compact = re.sub(r'\D', '', raw)
+    if len(compact) == 4:
+        base = now or _tokyo_now()
+        try:
+            return date(base.year, int(compact[:2]), int(compact[2:]))
+        except Exception:
+            return None
+    return None
+
+def _current_business_minute_for_date(date_str, now=None):
+    now = now or _tokyo_now()
+    target = _parse_chain_date(date_str, now)
+    if not target:
+        return None
     today = now.date()
     if target > today:
         return None
