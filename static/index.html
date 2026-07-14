@@ -216,8 +216,11 @@ const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
 const moneyInput=v=>{v=String(v||"").replace(/[（）()¥円,]/g,"").trim();if(!v)return 0;if(v.includes("万"))return Math.round(parseFloat(v)*10000);let n=parseFloat(v)||0;return n>0&&n<100?Math.round(n*10000):Math.round(n);}
 async function api(url,body){
- let r=await fetch(url,{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json","X-Client-Now":new Date().toISOString(),...authHeaders()},body:JSON.stringify(body||{})});
- let j=await r.json().catch(()=>({ok:false,error:"服务器返回不是JSON"}));
+ body={...(body||{}),client_now:new Date().toISOString()};
+ let r=await fetch(url,{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
+ let text=await r.text();
+ let j;
+ try{j=text?JSON.parse(text):{};}catch(e){console.error("API returned non-JSON",url,r.status,text);j={ok:false,error:`接口返回异常 HTTP ${r.status}`};}
  if(!r.ok || j.ok===false){ alert(j.error || ("保存失败 HTTP "+r.status)); throw new Error(j.error||"保存失败"); }
  return j;
 }
