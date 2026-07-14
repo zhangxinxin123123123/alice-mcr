@@ -211,7 +211,14 @@ body.role-user #stats{display:none!important}
 <script>
 let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[]}, charts={}, currentEdit=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
-function authHeaders(){return auth?{"X-Alice-Role":auth.role}:{};}
+if(auth&&!auth.session_token&&!["localhost","127.0.0.1"].includes(location.hostname)){localStorage.removeItem("alice_auth");auth=null;}
+function authHeaders(){
+  if(!auth)return {};
+  const h={"X-Alice-Role":auth.role};
+  if(auth.session_token)h["X-Alice-Session"]=auth.session_token;
+  if(auth.username)h["X-Alice-User"]=auth.username;
+  return h;
+}
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
 const moneyInput=v=>{v=String(v||"").replace(/[（）()¥円,]/g,"").trim();if(!v)return 0;if(v.includes("万"))return Math.round(parseFloat(v)*10000);let n=parseFloat(v)||0;return n>0&&n<100?Math.round(n*10000):Math.round(n);}
@@ -242,7 +249,7 @@ async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
   const j=await r.json().catch(()=>({ok:false,error:'登录失败'}));
   if(!r.ok || !j.ok){alert(j.error||'登录失败');return;}
-  auth={username:j.username,role:j.role,label:j.label};
+  auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
   localStorage.setItem('alice_auth',JSON.stringify(auth));
   applyRole();
   await loadAll();
