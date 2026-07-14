@@ -1459,6 +1459,23 @@ def import_chain():
         return jsonify(ok=False, error=str(e)), 500
 
 
+def _basic_12h_minute_label(m):
+    h = (int(m) // 60) % 24
+    mi = int(m) % 60
+    suffix = 'am' if h < 12 else 'pm'
+    dh = h % 12 or 12
+    return f"{dh}:{mi:02d}{suffix}" if mi else f"{dh}{suffix}"
+
+def format_chain_basic_service_time(service_time):
+    raw = str(service_time or '').strip()
+    if not raw:
+        return raw
+    interval = _parse_interval_text(raw)
+    if not interval:
+        return raw
+    start, end = interval
+    return f"{_basic_12h_minute_label(start)}-{_basic_12h_minute_label(end)}"
+
 def order_to_chain_line(o, idx, full=True):
     service_time = str(o['service_time'] or '').strip()
     price = int(o['received_amount'] or 0)
@@ -1470,7 +1487,7 @@ def order_to_chain_line(o, idx, full=True):
             parts.append(remark)
     else:
         # 普通版：只给女孩/群里看的时间、价格、备注，不暴露客户ID和名字
-        parts = [service_time, str(price)]
+        parts = [format_chain_basic_service_time(service_time), str(price)]
         if remark:
             parts.append(remark)
     return f"{idx}.{ '/'.join([p for p in parts if p != '']) }"
