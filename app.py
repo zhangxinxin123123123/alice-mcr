@@ -1698,7 +1698,13 @@ def _parse_client_now(value):
         return None
 
 def _request_client_now(payload=None):
-    payload = payload or {}
+    if payload is None:
+        try:
+            payload = request.get_json(silent=True) or {}
+        except Exception:
+            payload = {}
+    else:
+        payload = payload or {}
     return _parse_client_now(
         request.headers.get('X-Client-Now')
         or payload.get('client_now')
@@ -1748,9 +1754,13 @@ def _normalize_today_free_base_for_cutoff(base, cutoff):
         return (da, db)
     return base
 
-def build_chain_free_rows(c, date_str, now=None):
+def build_chain_free_rows(c, date_str):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
     result = []
+    try:
+        now = _request_client_now()
+    except Exception:
+        now = None
     cutoff = _current_business_minute_for_date(date_str, now)
     for sft in pure_shift_rows_for_date(c, date_str):
         girl = sft.get('girl') or ''
@@ -1808,7 +1818,7 @@ def api_chain_page():
         orders = rows(c.execute("""SELECT * FROM orders
             WHERE order_date=? AND girl_name=?
             ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
-        free = build_chain_free_rows(c, date_str, client_now)
+        free = build_chain_free_rows(c, date_str)
         return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders, free=free)
 
 @app.route('/api/chain_order', methods=['POST'])
@@ -1880,7 +1890,7 @@ def api_chain_export():
             display_header = f"{date_str} {girl_name} 接龙"
         full_lines = [header] + [order_to_chain_line(o, i, True) for i, o in enumerate(orders, start=1)]
         basic_lines = [display_header] + [order_to_chain_line(o, i, False) for i, o in enumerate(orders, start=1)]
-        free = build_chain_free_rows(c, date_str, client_now)
+        free = build_chain_free_rows(c, date_str)
         return jsonify(ok=True, full='\n'.join(full_lines), basic='\n'.join(basic_lines), count=len(orders), free=free)
 
 
@@ -1893,7 +1903,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v21_json_errors",
+            "version": "v22_sitecustomize_cutoff",
             "port": 5057,
         })
 
@@ -1912,7 +1922,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v21_json_errors",
+            "version": "v22_sitecustomize_cutoff",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

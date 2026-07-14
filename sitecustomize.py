@@ -516,6 +516,10 @@ def _install(module):
     if callable(old_build_chain_free_rows):
         def _patched_build_chain_free_rows(c, date_str):
             result = []
+            try:
+                cutoff = module._current_business_minute_for_date(date_str, module._request_client_now())
+            except Exception:
+                cutoff = None
             for sft in module.pure_shift_rows_for_date(c, date_str):
                 girl = sft.get("girl") or ""
                 if _is_package_time(sft.get("start")) or _is_package_time(sft.get("end")):
@@ -524,6 +528,12 @@ def _install(module):
                     base = _interval_minutes(sft.get("start"), sft.get("end"))
                 if not base:
                     continue
+                if cutoff is not None and hasattr(module, "_normalize_today_free_base_for_cutoff"):
+                    base = module._normalize_today_free_base_for_cutoff(base, cutoff)
+                if cutoff is not None:
+                    base = (max(base[0], cutoff), base[1])
+                    if base[0] >= base[1]:
+                        continue
                 busy = []
                 for o in c.execute("""SELECT service_time FROM orders
                                     WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'') NOT IN ('取消','鍙栨秷')""", (date_str, girl)).fetchall():
@@ -531,6 +541,8 @@ def _install(module):
                     if itv:
                         busy.append(itv)
                 free = module._subtract_intervals(base, busy)
+                if cutoff is not None:
+                    free = [(max(a, cutoff), b) for a, b in free if max(a, cutoff) < b]
                 if not free:
                     continue
                 segments = "".join([f"{_patched_fmt_free_minute(a)}-{_patched_fmt_free_minute(b, True)}空" for a, b in free])
