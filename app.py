@@ -1673,6 +1673,32 @@ def _tokyo_now():
     jst = timezone(timedelta(hours=9))
     return datetime.now(timezone.utc).astimezone(jst).replace(tzinfo=None)
 
+def _to_tokyo_naive(dt):
+    if dt.tzinfo is None:
+        return dt
+    if ZoneInfo:
+        return dt.astimezone(ZoneInfo('Asia/Tokyo')).replace(tzinfo=None)
+    jst = timezone(timedelta(hours=9))
+    return dt.astimezone(jst).replace(tzinfo=None)
+
+def _parse_client_now(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    try:
+        return _to_tokyo_naive(datetime.fromisoformat(raw.replace('Z', '+00:00')))
+    except Exception:
+        return None
+
+def _request_client_now(payload=None):
+    payload = payload or {}
+    return _parse_client_now(
+        request.headers.get('X-Client-Now')
+        or payload.get('client_now')
+        or payload.get('clientNow')
+        or payload.get('now')
+    )
+
 def _parse_chain_date(value, now=None):
     raw = str(value or '').strip()
     if not raw:
@@ -1715,10 +1741,10 @@ def _normalize_today_free_base_for_cutoff(base, cutoff):
         return (da, db)
     return base
 
-def build_chain_free_rows(c, date_str):
+def build_chain_free_rows(c, date_str, now=None):
     """出勤时间减去当天接龙预约时间，返回全部女孩空闲文本。"""
     result = []
-    cutoff = _current_business_minute_for_date(date_str)
+    cutoff = _current_business_minute_for_date(date_str, now)
     for sft in pure_shift_rows_for_date(c, date_str):
         girl = sft.get('girl') or ''
         if _is_package_time(sft.get('start')) or _is_package_time(sft.get('end')):
@@ -1758,6 +1784,7 @@ def api_chain_page():
     d = request.json or {}
     date_str = d.get('date') or str(date.today())
     girl_name = str(d.get('girl_name') or '').strip()
+    client_now = _request_client_now(d)
     with conn() as c:
         auto_finish_reservations(c)
         shifts = pure_shift_rows_for_date(c, date_str)
@@ -1774,7 +1801,7 @@ def api_chain_page():
         orders = rows(c.execute("""SELECT * FROM orders
             WHERE order_date=? AND girl_name=?
             ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
-        free = build_chain_free_rows(c, date_str)
+        free = build_chain_free_rows(c, date_str, client_now)
         return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders, free=free)
 
 @app.route('/api/chain_order', methods=['POST'])
@@ -1831,6 +1858,7 @@ def api_chain_export():
     d = request.json or {}
     date_str = d.get('date') or str(date.today())
     girl_name = str(d.get('girl_name') or '').strip()
+    client_now = _request_client_now(d)
     with conn() as c:
         auto_finish_reservations(c)
         orders = c.execute("""SELECT * FROM orders
@@ -1845,7 +1873,7 @@ def api_chain_export():
             display_header = f"{date_str} {girl_name} 接龙"
         full_lines = [header] + [order_to_chain_line(o, i, True) for i, o in enumerate(orders, start=1)]
         basic_lines = [display_header] + [order_to_chain_line(o, i, False) for i, o in enumerate(orders, start=1)]
-        free = build_chain_free_rows(c, date_str)
+        free = build_chain_free_rows(c, date_str, client_now)
         return jsonify(ok=True, full='\n'.join(full_lines), basic='\n'.join(basic_lines), count=len(orders), free=free)
 
 
@@ -1858,7 +1886,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v18_chain_free_cutoff",
+            "version": "v19_client_time_cutoff",
             "port": 5057,
         })
 
@@ -1877,7 +1905,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v18_chain_free_cutoff",
+            "version": "v19_client_time_cutoff",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2548,9 +2576,10 @@ def api_customer_available():
     d=request.json or {}
     day=d.get('date') or str(date.today())
     girl_filter=str(d.get('girl_name') or '').strip()
+    client_now=_request_client_now(d)
     with conn() as c:
         shifts=pure_shift_rows_for_date(c, day)
-        cutoff=_current_business_minute_for_date(day)
+        cutoff=_current_business_minute_for_date(day, client_now)
         out=[]
         for sft in shifts:
             girl=sft['girl']
@@ -2600,7 +2629,7 @@ def api_customer_reserve():
         a=time_to_min(start); b=time_to_min(end)
         if a is None or b is None: return jsonify(ok=False,error='时间格式错误'),400
         if b <= a: b += 24*60
-        cutoff=_current_business_minute_for_date(day)
+        cutoff=_current_business_minute_for_date(day, _request_client_now(d))
         if cutoff is not None and a < cutoff:
             return jsonify(ok=False,error='不能预约已经过去的时间'),400
         for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
