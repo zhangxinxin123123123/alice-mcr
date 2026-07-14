@@ -66,7 +66,8 @@ def init_db():
             customer_type TEXT DEFAULT '新客', customer_status TEXT DEFAULT '正常', recharge_balance INTEGER DEFAULT 0,
             total_recharge INTEGER DEFAULT 0, total_spent INTEGER DEFAULT 0, points INTEGER DEFAULT 0, total_points INTEGER DEFAULT 0,
             source TEXT DEFAULT '', contact TEXT DEFAULT '', grade TEXT DEFAULT '', tags TEXT DEFAULT '', member_level TEXT DEFAULT '',
-            remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', customer_type_locked INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职',
             take_home_per_hour INTEGER DEFAULT 10000, list_price INTEGER DEFAULT 15000, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
@@ -124,6 +125,9 @@ def init_db():
         for et,v,so in defaults:
             c.execute('INSERT OR IGNORE INTO enum_values(enum_type,value,sort_order) VALUES(?,?,?)',(et,v,so))
         # v17.1: 默认新增女孩定价 15000，到手 10000；旧库自动补列和迁移快捷分组名称。
+        customer_cols = [r[1] for r in c.execute('PRAGMA table_info(customers)').fetchall()]
+        if 'customer_type_locked' not in customer_cols:
+            c.execute("ALTER TABLE customers ADD COLUMN customer_type_locked INTEGER DEFAULT 0")
         girl_cols = [r[1] for r in c.execute('PRAGMA table_info(girls)').fetchall()]
         if 'list_price' not in girl_cols:
             c.execute('ALTER TABLE girls ADD COLUMN list_price INTEGER DEFAULT 15000')
@@ -1140,7 +1144,7 @@ def update_customer_type_by_history(c, customer_id=None):
         where = "WHERE c.id=?"
         params.append(int(customer_id))
     customer_rows = c.execute(f"""
-        SELECT c.id, c.customer_type, COALESCE(o.total_orders,0) AS total_orders
+        SELECT c.id, c.customer_type, COALESCE(c.customer_type_locked,0) AS customer_type_locked, COALESCE(o.total_orders,0) AS total_orders
         FROM customers c
         LEFT JOIN (
             SELECT customer_id, COUNT(*) AS total_orders
@@ -1152,6 +1156,8 @@ def update_customer_type_by_history(c, customer_id=None):
     """, params).fetchall()
 
     for row in customer_rows:
+        if int(row['customer_type_locked'] or 0):
+            continue
         cid = int(row['id'])
         total_orders = int(row['total_orders'] or 0)
         if cid in recharged_ids:
@@ -1266,11 +1272,13 @@ def customers():
     with conn() as c:
         no=d.get('customer_no') or next_customer_no(c)
         if str(no).isdigit(): no=f'{int(no):04d}'
-        vals=(no,d.get('name') or f'客户{no}',d.get('customer_type','新客'),d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''))
+        manual_type = str(d.get('customer_type','新客') or '新客').strip()
+        type_locked = 1 if manual_type.upper() in ('VIP','SVIP') else 0
+        vals=(no,d.get('name') or f'客户{no}',manual_type,d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''),type_locked)
         if d.get('id'):
-            c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
+            c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,customer_type_locked=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
         else:
-            c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
+            c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2,customer_type_locked) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         update_customer_type_by_history(c, None)
     return jsonify(ok=True)
 @app.route('/api/girls',methods=['POST'])
@@ -1903,7 +1911,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v24_dona_default_shift",
+            "version": "v25_manual_vip_lock",
             "port": 5057,
         })
 
@@ -1922,7 +1930,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v24_dona_default_shift",
+            "version": "v25_manual_vip_lock",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
