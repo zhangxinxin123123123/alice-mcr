@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -28,6 +28,13 @@ USERS = {
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
 PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
+
+@app.errorhandler(Exception)
+def api_json_error(e):
+    traceback.print_exc()
+    if request.path.startswith('/api/'):
+        return jsonify(ok=False, error=f"服务器内部错误：{type(e).__name__}: {e}"), 500
+    raise e
 
 def round_yen_1000_half_up(n):
     """店铺收益按 1000 円单位四舍五入：7500 -> 8000，末尾 500 自动进位。"""
@@ -1886,7 +1893,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v20_client_time_body",
+            "version": "v21_json_errors",
             "port": 5057,
         })
 
@@ -1905,7 +1912,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v20_client_time_body",
+            "version": "v21_json_errors",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
