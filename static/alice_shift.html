@@ -714,7 +714,7 @@ th{
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
     <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button class="primary" onclick="syncAliceAvatars()">从爱丽丝更新头像</button>
+      <button class="primary" onclick="syncAliceAvatars()">从东京YY更新头像</button>
       <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
       <button class="soft" onclick="syncNekoAvatarsFromAdmin()">后台更新头像</button>
       <span class="avatar-status" id="avatarStatus"></span>
@@ -925,7 +925,7 @@ th{
     if(!rowsForDate().length) return;
     const names = currentShiftNames();
     if(!names.length) return;
-    const key = "alice_shift_alice_avatar_sync_" + today;
+    const key = "alice_shift_tokyo_avatar_sync_" + today;
     if(localStorage.getItem(key) === "done") return;
     try{
       const ok = await syncAliceAvatars({silent:true});
@@ -939,7 +939,7 @@ th{
     options = options || {};
     const names = currentShiftNames();
     if(!names.length){ if(!options.silent) alert("当前没有可更新头像的女孩"); return false; }
-    if(!options.silent) avatarStatus.textContent = "正在从爱丽丝更新头像...";
+    if(!options.silent) avatarStatus.textContent = "正在从东京YY爱丽丝学园更新头像...";
     try{
       const r = await fetch('/api/alice_avatars/sync', {
         method:'POST',
@@ -954,14 +954,14 @@ th{
       const miss = (data.missing || []).length;
       const err = (data.errors || []).length;
       if(!options.silent || ok){
-        avatarStatus.textContent = `爱丽丝头像已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
+        avatarStatus.textContent = `东京YY头像已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
       }
       return ok > 0 || miss === 0;
     }catch(e){
       console.error(e);
       if(!options.silent){
-        avatarStatus.textContent = "爱丽丝头像更新失败";
-        alert(e.message || "爱丽丝头像更新失败");
+        avatarStatus.textContent = "东京YY头像更新失败";
+        alert(e.message || "东京YY头像更新失败");
       }
       return false;
     }

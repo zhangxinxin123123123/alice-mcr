@@ -16,6 +16,8 @@ DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db
 BOSS_EMAIL=os.environ.get('ALICE_BOSS_EMAIL','xinxinzhang330@gmail.com')
 NEKO_BASE_URL=os.environ.get('ALICE_NEKO_BASE_URL','https://neko-miaomiao.com').rstrip('/')
 ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rstrip('/')
+TOKYO_YY_BASE_URL=os.environ.get('TOKYO_YY_BASE_URL','https://tokyo-yy.com').rstrip('/')
+TOKYO_ALICE_SHOP_ID=os.environ.get('TOKYO_ALICE_SHOP_ID','\u7231\u4e3d\u4e1d\u5b66\u56ed')
 AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
@@ -218,8 +220,12 @@ def normalize_avatar_name(s):
     s = str(s or '').strip().lower()
     table = str.maketrans({'織':'织','紅':'红','綾':'绫','蓮':'莲','煙':'烟'})
     s = s.translate(table)
+    s = s.translate(str.maketrans({
+        '\u611b':'\u7231', '\u9e97':'\u4e3d', '\u7d72':'\u4e1d',
+        '\u5b78':'\u5b66', '\u5712':'\u56ed', '\u65af':'\u4e1d',
+    }))
     s = re.sub(r'（[^）]*）|\([^)]*\)', '', s)
-    s = re.sub(r'新人女孩|性感日妹|童颜|巨乳|萝莉|模特|美女|妹妹|校花|傲娇|地雷系|长腿|纯欲|三点粉|双马尾|ss级|ss|s级|a级|伴游|top', '', s, flags=re.I)
+    s = re.sub(r'新人女孩|本人照片|超年轻嫩妹|自带房间|带房间|免费房间|回归|上班前预约立减\d+|性感日妹|童颜|巨乳|萝莉|模特|美女|妹妹|校花|傲娇|地雷系|长腿|纯欲|三点粉|双马尾|ss级|ss|s级|a级|伴游|top', '', s, flags=re.I)
     s = re.sub(r'[\s·・,，。/\\|:：;；!！?？~～\-—_]+', '', s)
     return s
 
@@ -312,6 +318,88 @@ def absolute_alice_url(value):
         return urljoin(ALICE_BASE_URL + '/', value.lstrip('/'))
     return value
 
+def absolute_tokyo_url(value):
+    value = str(value or '').strip()
+    if not value:
+        return ''
+    if value.startswith('//'):
+        return 'https:' + value
+    if value.startswith('/'):
+        return urljoin(TOKYO_YY_BASE_URL + '/', value.lstrip('/'))
+    return value
+
+def tokyo_shop_url(shop_id=None):
+    shop_id = str(shop_id or TOKYO_ALICE_SHOP_ID).strip()
+    return TOKYO_YY_BASE_URL + '/%E5%8D%8E%E4%BA%BA%E5%87%BA%E5%BC%A0%E5%BA%97/' + quote(shop_id, safe='') + '/'
+
+def tokyo_shop_api_url(shop_id=None):
+    shop_id = str(shop_id or TOKYO_ALICE_SHOP_ID).strip()
+    return TOKYO_YY_BASE_URL + '/api/shop/' + quote(shop_id, safe='')
+
+def tokyo_chuqin_image_url(shop_id, filename):
+    shop_id = str(shop_id or TOKYO_ALICE_SHOP_ID).strip()
+    filename = str(filename or '').strip()
+    if not filename:
+        return ''
+    if filename.startswith(('http://','https://','//')):
+        return absolute_tokyo_url(filename)
+    return TOKYO_YY_BASE_URL + '/data/chuqin/' + quote(shop_id, safe='') + '/' + quote(filename, safe='')
+
+def clean_tokyo_girl_name(text):
+    text = strip_html_text(text)
+    if not text:
+        return ''
+    if re.search(r'今日出勤|招聘|价格|玩法|SYSTEM|制度|积分|充值|活动|盲盒|拍卖|已经结束|客服|公告', text, re.I):
+        return ''
+    return text
+
+def fetch_tokyo_alice_girls():
+    shop_id = TOKYO_ALICE_SHOP_ID
+    url = tokyo_shop_api_url(shop_id)
+    req = Request(url, headers={
+        'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
+        'Accept':'application/json,text/plain,*/*',
+        'Referer':tokyo_shop_url(shop_id),
+    })
+    with urlopen(req, timeout=25) as r:
+        data = json.loads(r.read().decode(r.headers.get_content_charset() or 'utf-8', 'replace'))
+    shop = data.get('shop') if isinstance(data, dict) else {}
+    shop_id = str((shop or {}).get('shopId') or shop_id)
+    items = []
+    seen = set()
+    for girl in (data.get('girls') or []):
+        if not isinstance(girl, dict):
+            continue
+        name = clean_tokyo_girl_name(first_nonempty(girl.get('name'), girl.get('seo_name')))
+        if not name:
+            continue
+        media = girl.get('media') or []
+        if not isinstance(media, list):
+            media = []
+        media = [str(x or '').strip() for x in media if str(x or '').strip() and not re.search(r'\.(mp4|mov|avi|webm)(?:\?|$)', str(x), re.I)]
+        if not media:
+            continue
+        first_img = next((x for x in media if '.480.' in x), media[0])
+        img = tokyo_chuqin_image_url(shop_id, first_img)
+        key = normalize_avatar_name(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        post_id = str(girl.get('post_id') or '')
+        link = tokyo_shop_url(shop_id)
+        if post_id:
+            link = link + post_id + '-' + quote(str(girl.get('seo_name') or name), safe='') + '/'
+        items.append({
+            'name': name,
+            'post_title': name,
+            'thumbnail': img,
+            'link': link,
+            'referer': tokyo_shop_url(shop_id),
+            'source': 'tokyo-yy-api',
+            'status': girl.get('status') or '',
+        })
+    return items, 'tokyo-yy:' + shop_id
+
 def clean_alice_card_name(text):
     text = strip_html_text(text)
     if not text:
@@ -348,6 +436,14 @@ def extract_alice_items_from_html(page_html):
 
 def fetch_alice_girls():
     errors = []
+    try:
+        items, source = fetch_tokyo_alice_girls()
+        if items:
+            fetch_alice_girls.last_errors = []
+            return items, source
+        errors.append({'url': tokyo_shop_api_url(), 'error': 'empty'})
+    except Exception as e:
+        errors.append({'url': tokyo_shop_api_url(), 'error': str(e)})
     urls = [
         ALICE_BASE_URL + '/',
         ALICE_BASE_URL + '/?rest_route=/wp/v2/model&per_page=100&_embed=1',
@@ -1911,7 +2007,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v25_manual_vip_lock",
+            "version": "v26_tokyo_yy_avatars",
             "port": 5057,
         })
 
@@ -1930,7 +2026,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v25_manual_vip_lock",
+            "version": "v26_tokyo_yy_avatars",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2467,7 +2563,7 @@ def api_alice_avatars_sync():
             img = absolute_alice_url(first_neko_image(item))
             if not img:
                 missing.append(name); continue
-            avatar_url = cache_avatar(name, alice_name, img, referer=ALICE_BASE_URL + '/')
+            avatar_url = cache_avatar(name, alice_name, img, referer=item.get('referer') or item.get('link') or (ALICE_BASE_URL + '/'))
             results.append({'girl_name':name, 'alice_name':alice_name, 'avatar_url':avatar_url, 'source_url':img})
         except Exception as e:
             errors.append({'girl_name':name, 'error':str(e)})
