@@ -44,7 +44,24 @@ body.role-user #stats{display:none!important}
 .type-vip{background:#f4e8ff;color:#7a2ab8;border:1px solid #d8a8ff}
 .embed-card{padding:10px;overflow:hidden}
 .pure-shift-frame{display:block;width:100%;height:calc(100vh - 96px);min-height:760px;border:2px solid var(--line);border-radius:18px;background:white}
-@media(max-width:950px){.pure-shift-frame{height:calc(100vh - 120px);min-height:720px}}
+.free-dona-wrap{display:grid;grid-template-columns:minmax(260px,1fr) minmax(280px,340px);gap:16px;align-items:start;margin-top:8px}
+.free-dona-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.free-dona-card{position:relative;overflow:hidden;min-height:520px;padding:22px 14px 28px;border:2px solid #ff2f9a;border-radius:8px;background:repeating-linear-gradient(0deg,rgba(33,247,255,.08) 0 1px,transparent 1px 18px),repeating-linear-gradient(90deg,rgba(255,47,154,.10) 0 1px,transparent 1px 18px),linear-gradient(135deg,#070611 0%,#190921 46%,#061720 100%);box-shadow:0 0 0 1px rgba(33,247,255,.38),0 0 30px rgba(255,47,154,.38),inset 0 0 28px rgba(33,247,255,.10);font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;color:#f9efff}
+.free-dona-card::before{content:"";position:absolute;inset:8px;border:1px solid rgba(33,247,255,.52);background:linear-gradient(180deg,rgba(255,47,154,.12),transparent 32%,rgba(33,247,255,.08)),linear-gradient(90deg,rgba(255,47,154,.12) 0 5px,transparent 5px calc(100% - 5px),rgba(33,247,255,.12) calc(100% - 5px));box-shadow:inset 0 0 0 1px rgba(255,47,154,.22),inset 0 -24px 0 rgba(255,212,71,.08);pointer-events:none}
+.free-dona-card::after{content:"DONA DONA // FREE TIME";position:absolute;left:12px;right:12px;bottom:8px;color:rgba(255,212,71,.9);font-size:9px;letter-spacing:1.2px;text-shadow:0 0 8px rgba(255,212,71,.45)}
+.free-dona-card>*{position:relative;z-index:1}
+.free-dona-title{display:flex;align-items:center;justify-content:center;margin:0 0 8px;padding:7px 8px 8px;border:1px solid rgba(33,247,255,.72);border-radius:8px;color:#fff;background:linear-gradient(90deg,rgba(255,47,154,.28),rgba(11,36,54,.88));font-size:20px;font-weight:900;line-height:1.05;letter-spacing:0;text-align:center;text-shadow:3px 0 #21f7ff,-3px 0 #ff2f9a,0 0 12px rgba(255,255,255,.42)}
+.free-dona-title::before,.free-dona-title::after{content:"";width:11px;height:11px;margin:0 6px 1px;border-radius:2px;background:#ffd447;box-shadow:0 0 8px rgba(255,212,71,.72);flex:0 0 auto}
+.free-dona-title::after{background:#21f7ff;box-shadow:0 0 8px rgba(33,247,255,.72)}
+.free-dona-sub{display:flex;justify-content:center;gap:4px;margin:0 0 10px;padding:4px 8px;border:1px solid rgba(255,212,71,.72);border-radius:999px;color:#ffd447;background:rgba(255,212,71,.10);font-size:11px;font-weight:900}
+.free-dona-list{display:flex;flex-direction:column;gap:7px;padding:0 1px}
+.free-dona-row{display:grid;grid-template-columns:50px minmax(0,1fr);column-gap:8px;align-items:center;padding:7px;border:1px solid rgba(255,47,154,.78);border-radius:8px;background:linear-gradient(90deg,rgba(255,47,154,.24),rgba(13,16,32,.95) 42%,rgba(6,17,25,.98));box-shadow:inset 4px 0 0 #ff2f9a,0 0 12px rgba(255,47,154,.20)}
+.free-dona-avatar{width:50px;height:50px;border:2px solid #21f7ff;border-radius:8px;overflow:hidden;background:linear-gradient(145deg,#13273b,#2b1840);outline:1px solid rgba(255,47,154,.70);box-shadow:inset 0 0 16px rgba(33,247,255,.25),0 0 10px rgba(33,247,255,.26);display:grid;place-items:center;color:#d6fbff;font-weight:900;text-shadow:0 0 8px rgba(33,247,255,.62)}
+.free-dona-avatar img{width:100%;height:100%;display:block;object-fit:cover}
+.free-dona-name{min-width:0;color:#fff;font-size:15px;font-weight:900;line-height:1.12;text-shadow:2px 0 #ff2f9a,0 0 12px rgba(255,255,255,.34);word-break:break-word}
+.free-dona-time{margin-top:4px;color:#dfffff;font-size:12px;font-weight:900;line-height:1.25;text-shadow:0 0 8px rgba(33,247,255,.42);word-break:break-word}
+.free-dona-empty{padding:18px 10px;color:#dfffff;font-weight:900;text-align:center;text-shadow:0 0 10px rgba(33,247,255,.54)}
+@media(max-width:950px){.pure-shift-frame{height:calc(100vh - 120px);min-height:720px}.free-dona-wrap{grid-template-columns:1fr}.free-dona-card{width:100%;max-width:360px;margin:0 auto}}
 </style>
 </head>
 <body>
@@ -164,7 +181,18 @@ body.role-user #stats{display:none!important}
  </div>
  <div class="card"><h2>微信格式输出</h2>
   <div class="split"><div><h3>完整版（内部用：含客户ID和名字）</h3><textarea id="chainFullOut" readonly></textarea></div><div><h3>普通版（给女孩/群里看）</h3><textarea id="chainBasicOut" readonly></textarea></div></div>
-  <h3 style="margin-top:14px">全部女孩空闲时间</h3><textarea id="chainFreeOut" readonly></textarea><div style="margin-top:8px"><button class="soft" onclick="refreshChainFreeTimes()">刷新空闲时间</button> <button class="soft" onclick="copyChainFreeText()">复制空闲时间</button></div>
+  <h3 style="margin-top:14px">全部女孩空闲时间</h3>
+  <div class="free-dona-wrap">
+    <div>
+      <textarea id="chainFreeOut" readonly></textarea>
+      <div class="free-dona-actions"><button class="soft" onclick="refreshChainFreeTimes()">刷新空闲时间</button><button class="soft" onclick="copyChainFreeText()">复制空闲时间</button><button class="primary" onclick="copyChainFreeTable()">复制空闲时间表</button></div>
+    </div>
+    <div class="free-dona-card" id="chainFreeDonaBox">
+      <div class="free-dona-title" id="chainFreeDonaTitle">空闲时间</div>
+      <div class="free-dona-sub"><span>空闲女孩</span><span id="chainFreeDonaCount">0</span></div>
+      <div class="free-dona-list" id="chainFreeDonaList"><div class="free-dona-empty">暂无空闲时间</div></div>
+    </div>
+  </div>
  </div></section>
 
 
@@ -302,6 +330,9 @@ function refreshSelects(){
  refreshChainGirlSelect();
 }
 function safe(v){return String(v??"").toLowerCase()} function match(v,q){q=safe(q);return !q||safe(v).includes(q)}
+function escapeHtml(v){
+  return String(v??"").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
 function customerTypeBadge(v){
   v=v||'新客';
   const cls=(v==='VIP'||v==='SVIP')?'type-vip':(v==='老客'?'type-old':(v==='回头客'?'type-return':'type-new'));
@@ -394,6 +425,9 @@ async function importChain(){let r=await api("/api/import_chain",{order_date:iDa
 
 
 let chainState={date:"",girl_name:"",girl_id:"",price:0,orders:[],shifts:[]};
+let chainFreeState={header:"空闲时间",lines:[],text:""};
+let chainFreeAvatars={};
+let chainFreeAvatarKey="";
 let chainPriceTouched=false;
 const CHAIN_DEFAULT_START="20:00";
 const CHAIN_DEFAULT_END="21:00";
@@ -407,6 +441,77 @@ function normalizeChainClock(value,fallback=CHAIN_DEFAULT_START){
   if(min>=60) min=59;
   h=((h%24)+24)%24;
   return `${pad2(h)}:${pad2(min)}`;
+}
+function parseChainFreeFromText(text){
+  const raw=String(text||"");
+  const rows=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const header=rows[0]||"空闲时间";
+  const lines=rows.slice(1).filter(x=>!/^https?:\/\//i.test(x)).map(line=>{
+    const m=line.match(/^(.+?)(\d{1,2}:\d{2}.*)$/);
+    if(!m)return {girl:line,segments:"",text:line};
+    return {girl:m[1].trim(),segments:m[2].trim(),text:line};
+  });
+  return {header,lines,text:raw};
+}
+function normalizeChainFree(free){
+  const src=(free&&Array.isArray(free.lines))?free:parseChainFreeFromText(free&&free.text?free.text:(window.chainFreeOut?chainFreeOut.value:""));
+  const lines=(src.lines||[]).map(row=>{
+    const girl=String(row.girl||"").trim();
+    const text=String(row.text||"").trim();
+    const segments=String(row.segments || (girl&&text.startsWith(girl)?text.slice(girl.length):text)).trim();
+    return {girl,segments,text:text || (girl+segments)};
+  }).filter(row=>row.girl);
+  return {header:String(src.header||"空闲时间").trim(),lines,text:String(src.text||"")};
+}
+function chainFreeTitle(header){
+  const raw=String(header||"空闲时间").trim()||"空闲时间";
+  if(raw.includes("出勤"))return raw.replace(/出勤/g,"空闲时间");
+  return raw.includes("空闲")?raw:`${raw} 空闲时间`;
+}
+function chainFreeAvatarFor(name){
+  const row=chainFreeAvatars[String(name||"").trim()];
+  return row&&row.avatar_url ? row.avatar_url+"?v="+encodeURIComponent(row.updated_at||"") : "";
+}
+function chainFreeInitial(name){
+  const clean=String(name||"").replace(/\s+/g,"").replace(/[（(].*$/,"");
+  return escapeHtml(clean.slice(0,2)||"?");
+}
+function renderChainFreeAvatar(name){
+  const url=chainFreeAvatarFor(name);
+  if(url)return `<div class="free-dona-avatar"><img src="${escapeHtml(url)}" alt=""></div>`;
+  return `<div class="free-dona-avatar"><span>${chainFreeInitial(name)}</span></div>`;
+}
+async function ensureChainFreeAvatars(names){
+  const clean=[...new Set((names||[]).map(n=>String(n||"").trim()).filter(Boolean))];
+  const key=clean.join("|");
+  if(!key || key===chainFreeAvatarKey)return;
+  chainFreeAvatarKey=key;
+  const r=await fetch("/api/girl_avatars?names="+encodeURIComponent(clean.join(","))+"&v="+Date.now(),{cache:"no-store",headers:authHeaders()});
+  const j=await r.json().catch(()=>({ok:false}));
+  if(j.ok){
+    chainFreeAvatars=j.avatars||{};
+    renderChainFreeDona();
+  }
+}
+function renderChainFreeDona(free){
+  if(free)chainFreeState=normalizeChainFree(free);
+  else if(window.chainFreeOut)chainFreeState=normalizeChainFree(chainFreeState.text?chainFreeState:{text:chainFreeOut.value});
+  const titleEl=document.getElementById("chainFreeDonaTitle");
+  const countEl=document.getElementById("chainFreeDonaCount");
+  const listEl=document.getElementById("chainFreeDonaList");
+  if(!titleEl||!countEl||!listEl)return;
+  const rows=chainFreeState.lines||[];
+  titleEl.textContent=chainFreeTitle(chainFreeState.header);
+  countEl.textContent=String(rows.length);
+  listEl.innerHTML=rows.length?rows.map(row=>`
+    <div class="free-dona-row">
+      ${renderChainFreeAvatar(row.girl)}
+      <div>
+        <div class="free-dona-name">${escapeHtml(row.girl)}</div>
+        <div class="free-dona-time">${escapeHtml(row.segments||"空闲")}</div>
+      </div>
+    </div>`).join(""):`<div class="free-dona-empty">暂无空闲时间</div>`;
+  ensureChainFreeAvatars(rows.map(row=>row.girl)).catch(e=>console.warn("load free avatars failed",e));
 }
 function normalizeChainClockToken(token, isEnd=false, startHour=null){
   const raw=String(token||"").trim();
@@ -557,6 +662,7 @@ async function loadChainPage(){
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
   chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
+  renderChainFreeDona(j.free);
   await refreshChainExports();
   renderChainOrders(j.orders||[]);
   setupChainImageTools();
@@ -597,15 +703,18 @@ async function refreshChainExports(){
   chainFullOut.value=j.full||'';
   chainBasicOut.value=j.basic||'';
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
+  renderChainFreeDona(j.free);
 }
 async function refreshChainFreeTimes(){
   if(!window.chainFreeOut)return;
   const old=chainFreeOut.value;
   try{
     chainFreeOut.value='正在刷新空闲时间...';
+    renderChainFreeDona({header:"空闲时间",lines:[],text:chainFreeOut.value});
     await loadChainPage();
   }catch(e){
     chainFreeOut.value=old;
+    renderChainFreeDona({text:old});
     alert('刷新空闲时间失败：'+e.message);
   }
 }
@@ -619,6 +728,12 @@ async function copyChainFreeText(){
   await refreshChainExports();
   const txt=chainFreeOut.value;
   if(!txt){alert('没有空闲时间内容');return;}
+  await navigator.clipboard.writeText(txt).catch(()=>{});
+}
+async function copyChainFreeTable(){
+  await refreshChainExports();
+  const txt=(chainFreeState&&chainFreeState.text)||chainFreeOut.value;
+  if(!txt){alert('没有空闲时间表内容');return;}
   await navigator.clipboard.writeText(txt).catch(()=>{});
 }
 
