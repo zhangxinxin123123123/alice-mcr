@@ -42,6 +42,9 @@ body.role-user #stats{display:none!important}
 .type-return{background:#fff8db;color:#9a6a00;border:1px solid #f0d46a}
 .type-old{background:#eaf2ff;color:#1d5fbf;border:1px solid #9cc3ff}
 .type-vip{background:#f4e8ff;color:#7a2ab8;border:1px solid #d8a8ff}
+.embed-card{padding:10px;overflow:hidden}
+.pure-shift-frame{display:block;width:100%;height:calc(100vh - 96px);min-height:760px;border:2px solid var(--line);border-radius:18px;background:white}
+@media(max-width:950px){.pure-shift-frame{height:calc(100vh - 120px);min-height:720px}}
 </style>
 </head>
 <body>
@@ -70,7 +73,7 @@ body.role-user #stats{display:none!important}
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
     <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
   <button class="admin-only" onclick="show('enums',this)">⚙️ 枚举类型</button>
-  <button class="admin-only" onclick="window.open('/static/alice_shift.html','_blank')">📋 纯出勤表</button>
+  <button class="admin-only" onclick="show('pureShift',this)">📋 纯出勤表</button>
   <button class="admin-only" onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
   <button class="user-hide" onclick="show('stats',this)">🥧 收益图表</button>
   <button class="admin-only" onclick="show('debug',this)">🩺 数据诊断</button>
@@ -115,6 +118,12 @@ body.role-user #stats{display:none!important}
   <p class="note">保存常用文字或链接。内容如果是 http/https 链接，点击“打开”会跳转；否则会复制内容。</p>
   <div class="form"><input id="qlId" type="hidden"><select id="qlGroup"><option>网址</option><option>常用短语</option></select><input id="qlTitle" placeholder="名字"><input id="qlContent" placeholder="内容或链接"><input id="qlSort" placeholder="排序"><button class="primary" onclick="saveQuickLink()">保存</button><button class="soft" onclick="clearQuickLinkForm()">清空</button></div>
   <div id="quickLinksTable"></div></div>
+ </section>
+
+ <section id="pureShift" class="panel">
+  <div class="card embed-card">
+    <iframe id="pureShiftFrame" class="pure-shift-frame" title="纯出勤表" data-src="/static/alice_shift.html"></iframe>
+  </div>
  </section>
 
  <section id="importer" class="panel"><div class="card"><h2>微信 / LINE 接龙导入</h2>
@@ -255,7 +264,8 @@ async function doLogin(){
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
-function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on");render(); if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
+function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
