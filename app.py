@@ -1573,9 +1573,8 @@ def import_chain():
 def _basic_12h_minute_label(m):
     h = (int(m) // 60) % 24
     mi = int(m) % 60
-    suffix = 'am' if h < 12 else 'pm'
     dh = h % 12 or 12
-    return f"{dh}:{mi:02d}{suffix}" if mi else f"{dh}{suffix}"
+    return f"{dh}:{mi:02d}" if mi else str(dh)
 
 def format_chain_basic_service_time(service_time):
     raw = str(service_time or '').strip()
@@ -2007,7 +2006,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v28_dona_free_time",
+            "version": "v29_basic_time_no_pm",
             "port": 5057,
         })
 
@@ -2026,7 +2025,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v28_dona_free_time",
+            "version": "v29_basic_time_no_pm",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
