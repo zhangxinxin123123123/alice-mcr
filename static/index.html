@@ -205,8 +205,10 @@ body.role-user #stats{display:none!important}
  </div>
  <div class="card"><h2>每日房间安排</h2>
   <div class="form"><input id="assignId" type="hidden"><input id="roomDate" type="date"><select id="roomPick"></select><select id="roomGirl"><option value="">不安排女孩</option></select><input id="assignCost" placeholder="成本，不填用房间默认"><input id="assignNote" placeholder="备注"><button id="assignSaveBtn" class="primary" onclick="saveRoomAssignment()">保存当天安排</button><button class="soft" onclick="clearRoomAssignmentForm()">清空</button></div>
-  <h3>批量安排</h3><div class="form"><input id="bulkStart" type="date"><input id="bulkEnd" type="date"><textarea id="bulkRooms" placeholder="每行一个房间：酒店名/房间号/成本/女孩名
-例：池袋A/301/8000/小樱"></textarea><button class="primary" onclick="bulkRoomAssignment()">批量添加</button></div>
+  <h3>批量安排</h3><div class="form"><input id="bulkStart" type="date"><input id="bulkEnd" type="date"><textarea id="bulkRooms" placeholder="每行一个安排：房间/成本/女孩名/出勤时间
+房间空白就是无房间；旧格式 酒店/房号/成本/女孩名/出勤时间 也可以
+例：池袋A301/8000/小樱/18:00-23:00
+例：/0/小樱/18:00-23:00"></textarea><button class="primary" onclick="bulkRoomAssignment()">批量添加</button></div>
   <div class="form"><input id="roomMonth" type="month" onchange="renderRooms()"><button class="soft" onclick="roomMonth.value=todayStr.slice(0,7);renderRooms()">本月</button></div>
   <div id="roomCalendar"></div><div id="roomAssignmentsTable" style="margin-top:12px"></div>
  </div></section>
@@ -248,13 +250,23 @@ body.role-user #stats{display:none!important}
 <script>
 let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[]}, charts={}, currentEdit=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
-if(auth&&!auth.session_token&&!["localhost","127.0.0.1"].includes(location.hostname)){localStorage.removeItem("alice_auth");auth=null;}
+let authVerified=false;
+if(auth&&!auth.session_token){localStorage.removeItem("alice_auth");auth=null;}
 function authHeaders(){
   if(!auth)return {};
   const h={"X-Alice-Role":auth.role};
   if(auth.session_token)h["X-Alice-Session"]=auth.session_token;
   if(auth.username)h["X-Alice-User"]=auth.username;
   return h;
+}
+function clearAuthAndShowLogin(message){
+  authVerified=false;
+  auth=null;
+  localStorage.removeItem("alice_auth");
+  if(window.loginMask)loginMask.style.display='flex';
+  document.body.classList.remove('role-user','role-boss');
+  if(window.roleBadge)roleBadge.textContent='未登录';
+  if(message&&window.dbInfo)dbInfo.innerHTML=`请先登录：${escapeHtml(message)}`;
 }
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
@@ -265,15 +277,16 @@ async function api(url,body){
  let text=await r.text();
  let j;
  try{j=text?JSON.parse(text):{};}catch(e){console.error("API returned non-JSON",url,r.status,text);j={ok:false,error:`接口返回异常 HTTP ${r.status}`};}
+ if(r.status===401){clearAuthAndShowLogin(j.error||'登录已失效，请重新登录');}
  if(!r.ok || j.ok===false){ alert(j.error || ("保存失败 HTTP "+r.status)); throw new Error(j.error||"保存失败"); }
  return j;
 }
 
 function applyRole(){
-  if(!auth){loginMask.style.display='flex';return;}
+  if(!auth||!authVerified){loginMask.style.display='flex';return;}
   loginMask.style.display='none';
   document.body.classList.toggle('role-user', auth.role==='user');
-  roleBadge.textContent = auth.role==='admin' ? '管理员模式' : '普通用户模式';
+  roleBadge.textContent = auth.role==='boss' ? '老板模式' : (auth.role==='admin' ? '管理员模式' : '普通用户模式');
   if(auth.role==='user'){
     const current=document.querySelector('.panel.on');
     if(current && (current.id==='home' || current.id==='stats')){
@@ -288,30 +301,42 @@ async function doLogin(){
   if(!r.ok || !j.ok){alert(j.error||'登录失败');return;}
   auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
   localStorage.setItem('alice_auth',JSON.stringify(auth));
-  applyRole();
   await loadAll();
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
 function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
+ if(!auth){clearAuthAndShowLogin();return false;}
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
   let r=await fetch("/api/all?v="+Date.now(),{cache:"no-store",headers:authHeaders()});
   let text=await r.text();
+  let parsed=null;
+  try{parsed=text?JSON.parse(text):null;}catch(e){}
+  if(r.status===401){
+    clearAuthAndShowLogin((parsed&&parsed.error)||'登录已失效，请重新登录');
+    return false;
+  }
   if(text.trim().startsWith("<")){
     dbInfo.innerHTML="❌ 后端返回了 HTML，不是 JSON。<br>这通常说明你打开的不是 Flask 接口，或旧服务还在运行。<br>请打开：<b>http://127.0.0.1:5057/api/all</b><br>如果看到网页而不是 JSON，把那个页面截图发我。";
     debugText.textContent=text.slice(0,1000);
-    return;
+    return false;
   }
-  data=JSON.parse(text);
+  data=parsed||JSON.parse(text);
+  if(!r.ok || data.ok===false || !Array.isArray(data.customers)){
+    throw new Error((data&&data.error)||`读取失败 HTTP ${r.status}`);
+  }
+  authVerified=true;
   let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
   debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>v17 接龙预约</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
+  return true;
  }catch(e){
   dbInfo.innerHTML=`❌ 读取失败：${e.message}<br>请确认黑窗口显示 Running on http://127.0.0.1:5057，并打开 /api/all 看是否是 JSON。`;
   console.error(e);
+  return false;
  }
 }
 function customerTypeOptions(selected=""){
@@ -340,7 +365,7 @@ function customerTypeBadge(v){
 }
 function filteredOrders(){return data.orders.filter(o=>(!qOrderDate.value||o.order_date===qOrderDate.value)&&match(o.girl_name,qOrderGirl.value)&&(match(o.customer_no,qOrderCustomer.value)||match(o.customer_name,qOrderCustomer.value))&&match((o.remark||"")+" "+(o.remark2||""),qOrderRemark.value)&&(!qOrderSettle.value||o.settlement_status===qOrderSettle.value))}
 function filteredCustomers(){return data.customers.filter(c=>match(c.customer_no,qCustomerNo.value)&&match(c.name,qCustomerName.value)&&(!qCustomerType.value||c.customer_type===qCustomerType.value)&&match((c.source||"")+" "+(c.contact||"")+" "+(c.remark||"")+" "+(c.remark2||""),qCustomerRemark.value))}
-function filteredGirls(){return data.girls.filter(g=>match(g.name,qGirlName.value)&&(!qGirlType.value||g.girl_type===qGirlType.value)&&match((g.contact||"")+" "+(g.tags||"")+" "+(g.remark||"")+" "+(g.remark2||""),qGirlRemark.value))}
+function filteredGirls(){return data.girls.filter(g=>match(g.name,qGirlName.value)&&(!qGirlType.value||g.girl_type===qGirlType.value)&&match((g.enrollment||"")+" "+(g.contact||"")+" "+(g.tags||"")+" "+(g.remark||"")+" "+(g.remark2||""),qGirlRemark.value))}
 function clearOrderQuery(){qOrderDate.value="";qOrderGirl.value="";qOrderCustomer.value="";qOrderRemark.value="";qOrderSettle.value="";render()}function clearCustomerQuery(){qCustomerNo.value="";qCustomerName.value="";qCustomerType.value="";qCustomerRemark.value="";render()}function clearGirlQuery(){qGirlName.value="";qGirlType.value="";qGirlRemark.value="";render()}
 
 let sortState = {};
@@ -418,9 +443,9 @@ function paymentSelect(id,selected="现金"){const vals=["现金","人民币","P
 function girlSelect(id,selected){return `<select id="${id}">`+data.girls.map(g=>`<option value="${g.id}" ${String(g.id)===String(selected)?"selected":""}>${g.name}</option>`).join("")+`</select>`}
 function editOrder(o){currentEdit={table:"orders",id:o.id};editTitle.textContent="编辑订单";editFields.innerHTML=field("日期",`<input id="m_order_date" type="date" value="${o.order_date||""}">`)+field("时间",`<input id="m_service_time" value="${o.service_time||""}">`)+field("女孩",girlSelect("m_girl_id",o.girl_id))+field("客人总付",`<input id="m_received_amount" value="${o.received_amount||0}">`)+field("女孩到手（只改本订单）",`<input id="m_girl_take_home" value="${o.girl_take_home||0}">`)+field("客户ID",`<input id="m_customer_raw" value="${o.customer_no||""}">`)+field("订单状态",enumSelect("m_order_status","order_status",o.order_status))+field("结算",enumSelect("m_settlement_status","settlement_status",o.settlement_status))+field("支付方式",paymentSelect("m_payment_method",o.payment_method||"现金"))+field("备注",`<input id="m_remark" value="${o.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${o.remark2||""}">`);editModal.classList.add("on")}
 function editCustomer(c){currentEdit={table:"customers",id:c.id};editTitle.textContent="编辑客户";editFields.innerHTML=field("客户ID",`<input id="m_customer_no" value="${c.customer_no||""}">`)+field("昵称",`<input id="m_name" value="${c.name||""}">`)+field("类型",enumSelect("m_customer_type","customer_type",c.customer_type))+field("充值余额",`<input id="m_recharge_balance" value="${c.recharge_balance||0}">`)+field("积分",`<input id="m_points" value="${c.points||0}">`)+field("来源",`<input id="m_source" value="${c.source||""}">`)+field("联系方式",`<input id="m_contact" value="${c.contact||""}">`)+field("备注",`<input id="m_remark" value="${c.remark||""}">`)+field("偏好TAG（多个用逗号/空格）",`<input id="m_remark2" value="${c.remark2||""}" placeholder="例：酒量好 喜欢聊天">`);editModal.classList.add("on")}
-function editGirl(g){currentEdit={table:"girls",id:g.id};editTitle.textContent="编辑女孩";editFields.innerHTML=field("女孩名",`<input id="m_name" value="${g.name||""}">`)+field("马甲",`<input id="m_girl_alias" value="${g.girl_alias||""}" placeholder="内部备注，不影响订单/出勤显示">`)+field("类型",enumSelect("m_girl_type","girl_type",g.girl_type))+field("状态",enumSelect("m_girl_status","girl_status",g.girl_status))+field("每小时到手",`<input id="m_take_home_per_hour" value="${g.take_home_per_hour||10000}">`)+field("定价/出勤价格",`<input id="m_list_price" value="${g.list_price||15000}" placeholder="纯出勤表显示价格，可空">`)+field("联系方式",`<input id="m_contact" value="${g.contact||""}">`)+field("标签",`<input id="m_tags" value="${g.tags||""}">`)+field("备注",`<input id="m_remark" value="${g.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${g.remark2||""}">`);editModal.classList.add("on")}
+function editGirl(g){currentEdit={table:"girls",id:g.id};editTitle.textContent="编辑女孩";editFields.innerHTML=field("女孩名",`<input id="m_name" value="${g.name||""}">`)+field("马甲",`<input id="m_girl_alias" value="${g.girl_alias||""}" placeholder="内部备注，不影响订单/出勤显示">`)+field("类型",enumSelect("m_girl_type","girl_type",g.girl_type))+field("状态",enumSelect("m_girl_status","girl_status",g.girl_status))+field("在籍",`<input id="m_enrollment" value="${g.enrollment||""}" placeholder="例：在籍 / 退籍 / 休籍">`)+field("每小时到手",`<input id="m_take_home_per_hour" value="${g.take_home_per_hour||10000}">`)+field("定价/出勤价格",`<input id="m_list_price" value="${g.list_price||15000}" placeholder="纯出勤表显示价格，可空">`)+field("联系方式",`<input id="m_contact" value="${g.contact||""}">`)+field("标签",`<input id="m_tags" value="${g.tags||""}">`)+field("备注",`<input id="m_remark" value="${g.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${g.remark2||""}">`);editModal.classList.add("on")}
 function closeModal(){editModal.classList.remove("on");currentEdit=null}
-async function saveModalEdit(){if(!currentEdit)return;if(currentEdit.table==="orders"){await api("/api/orders",{id:currentEdit.id,order_date:m_order_date.value,service_time:m_service_time.value,girl_id:m_girl_id.value,received_amount:moneyInput(m_received_amount.value),girl_take_home:moneyInput(m_girl_take_home.value),customer_raw:m_customer_raw.value,order_status:m_order_status.value,settlement_status:m_settlement_status.value,payment_method:m_payment_method.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="customers"){await api("/api/customers",{id:currentEdit.id,customer_no:m_customer_no.value,name:m_name.value,customer_type:m_customer_type.value,recharge_balance:moneyInput(m_recharge_balance.value),points:Number(m_points.value||0),source:m_source.value,contact:m_contact.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="girls"){await api("/api/girls",{id:currentEdit.id,name:m_name.value,girl_alias:m_girl_alias.value,girl_type:m_girl_type.value,girl_status:m_girl_status.value,take_home_per_hour:moneyInput(m_take_home_per_hour.value),list_price:moneyInput(m_list_price.value),contact:m_contact.value,tags:m_tags.value,remark:m_remark.value,remark2:m_remark2.value})}closeModal();await loadAll()}
+async function saveModalEdit(){if(!currentEdit)return;if(currentEdit.table==="orders"){await api("/api/orders",{id:currentEdit.id,order_date:m_order_date.value,service_time:m_service_time.value,girl_id:m_girl_id.value,received_amount:moneyInput(m_received_amount.value),girl_take_home:moneyInput(m_girl_take_home.value),customer_raw:m_customer_raw.value,order_status:m_order_status.value,settlement_status:m_settlement_status.value,payment_method:m_payment_method.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="customers"){await api("/api/customers",{id:currentEdit.id,customer_no:m_customer_no.value,name:m_name.value,customer_type:m_customer_type.value,recharge_balance:moneyInput(m_recharge_balance.value),points:Number(m_points.value||0),source:m_source.value,contact:m_contact.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="girls"){await api("/api/girls",{id:currentEdit.id,name:m_name.value,girl_alias:m_girl_alias.value,girl_type:m_girl_type.value,girl_status:m_girl_status.value,enrollment:m_enrollment.value,take_home_per_hour:moneyInput(m_take_home_per_hour.value),list_price:moneyInput(m_list_price.value),contact:m_contact.value,tags:m_tags.value,remark:m_remark.value,remark2:m_remark2.value})}closeModal();await loadAll()}
 async function importChain(){let r=await api("/api/import_chain",{order_date:iDate.value,girl_id:iGirl.value,settlement_status:iSettle.value,text:chain.value});alert(r.ok?`录入成功：${r.count} 单｜女孩：${r.girl_name}`:(r.error||"导入失败"));await loadAll()}
 
 
@@ -1264,6 +1289,33 @@ function editRoomAssignmentDummy(r){
   document.getElementById('rooms').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function parseRoomPick(v){const [hotel,room]=String(v||'').split('|||'); return {hotel,room};}
+function isMoneyToken(v){
+  const s=String(v||'').replace(/[¥円,，\s]/g,'').trim();
+  return /^(\d+(\.\d+)?万?|\d+)$/.test(s);
+}
+function findGirlByName(name){
+  const clean=String(name||'').trim();
+  return (data.girls||[]).find(g=>String(g.name||'').trim()===clean);
+}
+function parseBulkRoomLine(line,idx){
+  const p=String(line||'').split(/[\/，,\t]+/).map(x=>x.trim());
+  let roomName='', hotel='', room='', cost='', girl='', shift='';
+  if(p.length>=5){
+    hotel=p[0]; room=p[1]; cost=p[2]; girl=p[3]; shift=p.slice(4).join('/');
+  }else if(p.length===4){
+    if(p[0]==='' || !isMoneyToken(p[2])){
+      roomName=p[0]; cost=p[1]; girl=p[2]; shift=p[3];
+    }else{
+      hotel=p[0]; room=p[1]; cost=p[2]; girl=p[3];
+    }
+  }else if(p.length===3){
+    roomName=''; cost=p[0]; girl=p[1]; shift=p[2];
+  }else{
+    return {error:`第 ${idx+1} 行格式不对：${line}`};
+  }
+  const g=findGirlByName(girl);
+  return {room_name:roomName,hotel_name:hotel,room_no:room,daily_cost:moneyInput(cost||0),girl_id:g?g.id:'',girl_name:girl,shift_time:shift};
+}
 async function saveHotelRoom(){
   const payload={id:roomId.value||null,hotel_name:roomHotel.value,room_no:roomNo.value,daily_cost:moneyInput(roomCost.value),remark:roomRemark.value};
   await api('/api/hotel_rooms',payload);
@@ -1284,16 +1336,32 @@ async function saveRoomAssignment(){
 }
 async function deleteRoomAssignment(id){ if(!confirm('删除这条安排？'))return; await api('/api/delete_room_assignment/'+id,{}); await loadAll(); }
 async function bulkRoomAssignment(){
-  const rooms=[], girls=[];
-  String(bulkRooms.value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).forEach(line=>{
-    const p=line.split(/[\/，,\t]+/).map(x=>x.trim()); if(p.length>=2){rooms.push({hotel_name:p[0],room_no:p[1],daily_cost:moneyInput(p[2]||0)}); const g=(data.girls||[]).find(x=>x.name===p[3]); girls.push(g?g.id:'');}
+  const rooms=[], errors=[];
+  String(bulkRooms.value||'').split(/\n+/).map(x=>x.trim()).filter(Boolean).forEach((line,idx)=>{
+    const row=parseBulkRoomLine(line,idx);
+    if(row.error)errors.push(row.error); else rooms.push(row);
   });
-  if(!confirm(`确认批量安排 ${rooms.length} 个房间？\n日期：${bulkStart.value} 至 ${bulkEnd.value}`))return; const r=await api('/api/room_assignments/bulk',{start_date:bulkStart.value,end_date:bulkEnd.value,rooms,girl_ids:girls,note:'批量添加'}); await loadAll(); alert(`批量完成 ${r.count||0} 条，并已刷新确认`);
+  if(errors.length){alert(errors.join('\n'));return;}
+  if(!rooms.length){alert('请先填写批量安排内容');return;}
+  const preview=rooms.slice(0,5).map(r=>`${r.room_name||r.hotel_name||'无房间'}${r.room_no?'/'+r.room_no:''}｜${r.girl_name||'未安排女孩'}｜${r.shift_time||'00:00-04:00'}`).join('\n');
+  if(!confirm(`确认批量安排 ${rooms.length} 条？\n日期：${bulkStart.value} 至 ${bulkEnd.value}\n${preview}${rooms.length>5?'\n...':''}`))return;
+  const r=await api('/api/room_assignments/bulk',{start_date:bulkStart.value,end_date:bulkEnd.value,rooms,note:'批量添加'});
+  await loadAll();
+  alert(`批量完成 ${r.count||0} 条，并已刷新确认`);
 }
 function refreshRoomControls(){
   if(!window.roomDate)return; if(!roomDate.value)roomDate.value=todayStr; if(!bulkStart.value)bulkStart.value=todayStr; if(!bulkEnd.value)bulkEnd.value=todayStr; if(!roomMonth.value)roomMonth.value=todayStr.slice(0,7);
   roomPick.innerHTML=(data.hotel_rooms||[]).map(r=>`<option value="${r.hotel_name}|||${r.room_no}">${r.hotel_name} / ${r.room_no} / ${yen(r.daily_cost)}</option>`).join('');
   roomGirl.innerHTML='<option value="">不安排女孩</option>'+(data.girls||[]).map(g=>`<option value="${g.id}">${g.name}</option>`).join('');
+}
+function roomLabel(r){
+  if(String(r.hotel_name||'')==='无房间')return '无房间';
+  if(String(r.room_no||'')==='-')return r.hotel_name||'';
+  return `${r.hotel_name||''}/${r.room_no||''}`;
+}
+function roomShiftLabel(r){
+  const s=(data.schedules||[]).find(x=>String(x.schedule_date||'')===String(r.assignment_date||'')&&String(x.girl_id||'')===String(r.girl_id||'')&&String(x.note||'').includes('房间安排自动生成'));
+  return s?`${s.start_time||''}-${s.end_time||''}`:'';
 }
 
 let settlementOpen={}, settlementSelected=new Set();
@@ -1369,9 +1437,10 @@ function renderRooms(){
   table('hotelRoomsTable',data.hotel_rooms||[],[{k:'hotel_name',t:'酒店名'},{k:'room_no',t:'房间号'},{k:'daily_cost',t:'每日成本',f:yen},{k:'remark',t:'备注'}],'hotel_rooms','editHotelRoomDummy');
   document.querySelectorAll('#hotelRoomsTable button.danger').forEach((b,i)=>{const r=(data.hotel_rooms||[])[i]; if(r)b.setAttribute('onclick',`deleteHotelRoom(${r.id})`)});
   const m=roomMonth.value||todayStr.slice(0,7); const [yy,mm]=m.split('-').map(Number); const last=new Date(yy,mm,0).getDate(); let html='<div class="room-cal">';
-  for(let d=1;d<=last;d++){const ds=`${yy}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const rows=(data.room_assignments||[]).filter(x=>x.assignment_date===ds); const cost=rows.reduce((s,x)=>s+Number(x.daily_cost||0),0); html+=`<div class="room-day ${ds===todayStr?'today':''}"><div class="room-date">${d}日｜成本 ${yen(cost)}</div>`+rows.map(x=>`<div class="room-item">${x.hotel_name}/${x.room_no}<br>${x.girl_name||'未安排女孩'}｜${yen(x.daily_cost)}</div>`).join('')+'</div>';}
+  for(let d=1;d<=last;d++){const ds=`${yy}-${String(mm).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const rows=(data.room_assignments||[]).filter(x=>x.assignment_date===ds); const cost=rows.reduce((s,x)=>s+Number(x.daily_cost||0),0); html+=`<div class="room-day ${ds===todayStr?'today':''}"><div class="room-date">${d}日｜成本 ${yen(cost)}</div>`+rows.map(x=>`<div class="room-item">${roomLabel(x)}<br>${x.girl_name||'未安排女孩'}｜${roomShiftLabel(x)||'未写出勤'}｜${yen(x.daily_cost)}</div>`).join('')+'</div>';}
   roomCalendar.innerHTML=html+'</div>';
-  table('roomAssignmentsTable',data.room_assignments||[],[{k:'assignment_date',t:'日期'},{k:'hotel_name',t:'酒店'},{k:'room_no',t:'房号'},{k:'girl_name',t:'女孩'},{k:'daily_cost',t:'成本',f:yen},{k:'note',t:'备注'}],'room_assignments','editRoomAssignmentDummy');
+  const assignmentRows=(data.room_assignments||[]).map(r=>({...r,room_label:roomLabel(r),shift_label:roomShiftLabel(r)}));
+  table('roomAssignmentsTable',assignmentRows,[{k:'assignment_date',t:'日期'},{k:'room_label',t:'房间'},{k:'girl_name',t:'女孩'},{k:'shift_label',t:'出勤时间'},{k:'daily_cost',t:'成本',f:yen},{k:'note',t:'备注'}],'room_assignments','editRoomAssignmentDummy');
   document.querySelectorAll('#roomAssignmentsTable button.danger').forEach((b,i)=>{const r=(data.room_assignments||[])[i]; if(r)b.setAttribute('onclick',`deleteRoomAssignment(${r.id})`)});
 }
 function groupCost(filter){let m={};(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).forEach(r=>{const k=r.girl_name||'未安排房间';m[k]=(m[k]||0)+Number(r.daily_cost||0)});return m;}
@@ -1380,7 +1449,7 @@ function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(
 function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=auth&&auth.role==="user";kCustomers.textContent=isUser?"—":data.customers.length;kOrders.textContent=isUser?"—":data.orders.length;let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
  table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
- table("girlsTable",filteredGirls(),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
+ table("girlsTable",filteredGirls(),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
  renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();
  if(isUser){sDay.value=todayStr; sDay.disabled=true;}else{sDay.disabled=false;} let sd=sDay.value,sm=sMonth.value;
@@ -1405,7 +1474,7 @@ document.addEventListener("change",e=>{
   }
 });
 
-window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); applyRole(); if(auth) loadAll();});
+window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); loginMask.style.display='flex'; if(auth) loadAll(); else applyRole();});
 
 // ===== 客用出勤表：纯前端动态画面，不写数据库 =====
 let attRows = [];

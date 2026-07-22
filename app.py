@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -29,6 +29,7 @@ USERS = {
     "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
+ACTIVE_SESSIONS = {}
 PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
 
 @app.errorhandler(Exception)
@@ -71,7 +72,7 @@ def init_db():
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', customer_type_locked INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职',
+            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职', enrollment TEXT DEFAULT '',
             take_home_per_hour INTEGER DEFAULT 10000, list_price INTEGER DEFAULT 15000, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS orders(
@@ -137,6 +138,8 @@ def init_db():
             c.execute("ALTER TABLE girls ADD COLUMN girl_alias TEXT DEFAULT ''")
         if 'email' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
+        if 'enrollment' not in girl_cols:
+            c.execute("ALTER TABLE girls ADD COLUMN enrollment TEXT DEFAULT ''")
         c.execute("UPDATE quick_links SET group_name='网址' WHERE group_name='排班表'")
         c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
         c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
@@ -145,13 +148,20 @@ def init_db():
 def current_role():
     return request.headers.get('X-Alice-Role') or request.args.get('role') or ''
 
+def current_session_token():
+    return request.headers.get('X-Alice-Session') or request.args.get('session_token') or ''
+
 @app.before_request
 def require_login_for_api():
     path = request.path
     if path.startswith('/static/') or path in PUBLIC_PATHS:
         return None
-    if path.startswith('/api/') and current_role() not in ('boss','admin','user'):
-        return jsonify(ok=False, error='请先登录'), 401
+    if path.startswith('/api/'):
+        role = current_role()
+        if role not in ('boss','admin','user'):
+            return jsonify(ok=False, error='请先登录'), 401
+        if not current_session_token():
+            return jsonify(ok=False, error='登录已失效，请重新登录'), 401
     return None
 
 @app.route('/api/login', methods=['POST'])
@@ -161,7 +171,9 @@ def api_login():
     p = str(d.get('password') or '').strip()
     info = USERS.get(u)
     if info and info['password'] == p:
-        return jsonify(ok=True, username=u, role=info['role'], label=info['label'])
+        token = secrets.token_urlsafe(24)
+        ACTIVE_SESSIONS[token] = {'username': u, 'role': info['role']}
+        return jsonify(ok=True, username=u, role=info['role'], label=info['label'], session_token=token)
     return jsonify(ok=False, error='用户名或密码错误'), 401
 
 
@@ -1382,10 +1394,10 @@ def girls():
     d=request.json or {}
     with conn() as c:
         if d.get('id'):
-            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,enrollment=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
             recalc_girl(c,int(d['id']))
         else:
-            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
+            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,enrollment,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
             row=c.execute('SELECT id FROM girls WHERE name=?',(d.get('name'),)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
@@ -2006,7 +2018,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v29_basic_time_no_pm",
+            "version": "v30_login_room_enrollment",
             "port": 5057,
         })
 
@@ -2025,7 +2037,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v29_basic_time_no_pm",
+            "version": "v30_login_room_enrollment",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2302,20 +2314,73 @@ def api_customers_recalc_points():
     return jsonify(ok=True)
 
 
+NO_ROOM_HOTEL = '无房间'
+SINGLE_ROOM_NO = '-'
 
-def sync_room_assignment_to_schedule(c, assignment_date, girl_id, hotel_name, room_no):
+def _room_label(hotel_name, room_no):
+    hotel = str(hotel_name or '').strip()
+    room = str(room_no or '').strip()
+    if hotel == NO_ROOM_HOTEL:
+        return NO_ROOM_HOTEL
+    if room == SINGLE_ROOM_NO:
+        return hotel
+    return f"{hotel}-{room}" if hotel and room else (hotel or room or NO_ROOM_HOTEL)
+
+def _normalize_assignment_room(hotel_name='', room_no='', room_name='', girl_name='', idx=0):
+    room_name = str(room_name or '').strip()
+    hotel = str(hotel_name or '').strip()
+    room = str(room_no or '').strip()
+    no_terms = {'无', '无房间', '没有房间', 'なし', 'none', 'no'}
+    if room_name:
+        if room_name.lower() in no_terms:
+            room_name = ''
+        else:
+            return room_name, SINGLE_ROOM_NO, False
+    if not hotel or not room or hotel.lower() in no_terms or room.lower() in no_terms:
+        key = re.sub(r'\s+', '', str(girl_name or '').strip())[:40] or f"未安排{int(idx or 0) + 1}"
+        return NO_ROOM_HOTEL, key, True
+    return hotel, room, False
+
+def _room_shift_clock(value, fallback):
+    raw = str(value or '').strip().lower()
+    m = re.match(r'^(\d{1,2})(?:[:.](\d{1,2}))?\s*(am|pm)?$', raw)
+    if not m:
+        return fallback
+    h = int(m.group(1)); minute = int(m.group(2) or 0)
+    suffix = m.group(3)
+    if suffix == 'pm' and h < 12:
+        h += 12
+    if suffix == 'am' and h == 12:
+        h = 0
+    minute = max(0, min(59, minute))
+    return f"{h % 24:02d}:{minute:02d}"
+
+def parse_room_shift_time(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return '00:00', '04:00'
+    if _is_package_time(raw):
+        return '00:00', '05:00'
+    m = re.search(r'(\d{1,2}(?:[:.]\d{1,2})?\s*(?:am|pm)?)\s*(?:[-~ー～]|到|至)\s*(\d{1,2}(?:[:.]\d{1,2})?\s*(?:am|pm)?)', raw, re.I)
+    if not m:
+        return '00:00', '04:00'
+    return _room_shift_clock(m.group(1), '00:00'), _room_shift_clock(m.group(2), '04:00')
+
+def sync_room_assignment_to_schedule(c, assignment_date, girl_id, hotel_name, room_no, start_time=None, end_time=None):
     if not girl_id:
         return
     girl = c.execute("SELECT * FROM girls WHERE id=?", (int(girl_id),)).fetchone()
     if not girl:
         return
-    note = f"房间安排自动生成：{hotel_name}-{room_no}"
+    start_time = start_time or '00:00'
+    end_time = end_time or '04:00'
+    note = f"房间安排自动生成：{_room_label(hotel_name, room_no)}"
     old = c.execute("SELECT id FROM girl_schedules WHERE schedule_date=? AND girl_id=? AND note=?", (assignment_date, int(girl_id), note)).fetchone()
     price = int(girl['list_price'] or 15000)
     if old:
-        c.execute("""UPDATE girl_schedules SET girl_name=?, start_time='00:00', end_time='04:00', price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (girl['name'], price, old['id']))
+        c.execute("""UPDATE girl_schedules SET girl_name=?, start_time=?, end_time=?, price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (girl['name'], start_time, end_time, price, old['id']))
     else:
-        c.execute("""INSERT INTO girl_schedules(schedule_date,girl_id,girl_name,start_time,end_time,price,status,note) VALUES(?,?,?,?,?,?,?,?)""", (assignment_date, int(girl_id), girl['name'], '00:00', '04:00', price, '出勤', note))
+        c.execute("""INSERT INTO girl_schedules(schedule_date,girl_id,girl_name,start_time,end_time,price,status,note) VALUES(?,?,?,?,?,?,?,?)""", (assignment_date, int(girl_id), girl['name'], start_time, end_time, price, '出勤', note))
 
 @app.route('/api/hotel_rooms', methods=['POST'])
 def api_hotel_rooms():
@@ -2359,7 +2424,8 @@ def api_room_assignments():
             c.execute("""UPDATE room_assignments SET assignment_date=?, hotel_name=?, room_no=?, girl_id=?, girl_name=?, daily_cost=?, note=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""", (assignment_date, hotel, room, girl_id, girl_name, cost, d.get('note',''), int(d['id'])))
         else:
             c.execute("""INSERT OR REPLACE INTO room_assignments(assignment_date,hotel_name,room_no,girl_id,girl_name,daily_cost,note,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (assignment_date, hotel, room, girl_id, girl_name, cost, d.get('note','')))
-        sync_room_assignment_to_schedule(c, assignment_date, girl_id, hotel, room)
+        start_time, end_time = parse_room_shift_time(d.get('shift_time') or f"{d.get('start_time','')}-{d.get('end_time','')}")
+        sync_room_assignment_to_schedule(c, assignment_date, girl_id, hotel, room, start_time, end_time)
     return jsonify(ok=True)
 
 @app.route('/api/room_assignments/bulk', methods=['POST'])
@@ -2381,17 +2447,27 @@ def api_room_assignments_bulk():
         day = ds
         while day <= de:
             for idx, rr in enumerate(rooms):
-                hotel = str(rr.get('hotel_name') or '').strip(); room = str(rr.get('room_no') or '').strip()
-                if not hotel or not room: continue
-                r = c.execute('SELECT daily_cost FROM hotel_rooms WHERE hotel_name=? AND room_no=?', (hotel, room)).fetchone()
-                cost = int(rr.get('daily_cost') or (r['daily_cost'] if r else 0) or 0)
-                gid = int(girls[idx] if idx < len(girls) and girls[idx] else 0)
-                gname = ''
+                gname = str(rr.get('girl_name') or '').strip()
+                gid = int(rr.get('girl_id') or (girls[idx] if idx < len(girls) and girls[idx] else 0) or 0)
                 if gid:
-                    g = c.execute('SELECT * FROM girls WHERE id=?', (gid,)).fetchone(); gname = g['name'] if g else ''
-                c.execute("""INSERT OR IGNORE INTO hotel_rooms(hotel_name,room_no,daily_cost) VALUES(?,?,?)""", (hotel, room, cost))
-                c.execute("""INSERT OR REPLACE INTO room_assignments(assignment_date,hotel_name,room_no,girl_id,girl_name,daily_cost,note,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (str(day), hotel, room, gid, gname, cost, note))
-                sync_room_assignment_to_schedule(c, str(day), gid, hotel, room)
+                    g = c.execute('SELECT * FROM girls WHERE id=?', (gid,)).fetchone()
+                    gname = g['name'] if g else gname
+                elif gname:
+                    g = ensure_girl(c, gname)
+                    gid = int(g['id']) if g else 0
+                    gname = g['name'] if g else gname
+                hotel, room, no_room = _normalize_assignment_room(rr.get('hotel_name'), rr.get('room_no'), rr.get('room_name'), gname, idx)
+                r = None if no_room else c.execute('SELECT daily_cost FROM hotel_rooms WHERE hotel_name=? AND room_no=?', (hotel, room)).fetchone()
+                cost = 0 if no_room else int(rr.get('daily_cost') or (r['daily_cost'] if r else 0) or 0)
+                start_time, end_time = parse_room_shift_time(rr.get('shift_time') or f"{rr.get('start_time','')}-{rr.get('end_time','')}")
+                line_note = str(note or '').strip()
+                if gid:
+                    time_note = f"出勤 {start_time}-{end_time}"
+                    line_note = f"{line_note}；{time_note}" if line_note else time_note
+                if not no_room:
+                    c.execute("""INSERT OR IGNORE INTO hotel_rooms(hotel_name,room_no,daily_cost) VALUES(?,?,?)""", (hotel, room, cost))
+                c.execute("""INSERT OR REPLACE INTO room_assignments(assignment_date,hotel_name,room_no,girl_id,girl_name,daily_cost,note,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (str(day), hotel, room, gid, gname, cost, line_note))
+                sync_room_assignment_to_schedule(c, str(day), gid, hotel, room, start_time, end_time)
                 count += 1
             day += timedelta(days=1)
     return jsonify(ok=True, count=count)
