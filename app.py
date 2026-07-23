@@ -1931,6 +1931,8 @@ def api_chain_page():
             row = dict(sft)
             row['girl_id'] = g['id'] if g else 0
             row['price'] = int((g['list_price'] if g else 15000) or 15000)
+            row['girl_alias'] = (g['girl_alias'] if g else '') or ''
+            row['take_home_per_hour'] = int((g['take_home_per_hour'] if g else 10000) or 10000)
             out_shifts.append(row)
         if not girl_name and out_shifts:
             girl_name = out_shifts[0]['girl']
@@ -1960,7 +1962,7 @@ def api_chain_order():
         raw_amount = d.get('received_amount')
         amount = int(raw_amount) if str(raw_amount or '').strip() else int(round(base_price * calc_hours(service_time)))
         assert_no_duplicate_customer_name_for_chain(c, d.get('customer_raw') or '', d.get('id') or None)
-        create_or_update_order(c, {
+        payload = {
             'id': d.get('id') or None,
             'order_date': date_str,
             'service_time': service_time,
@@ -1972,7 +1974,10 @@ def api_chain_order():
             'settlement_status': d.get('settlement_status') or '未结算',
             'payment_method': d.get('payment_method') or '现金',
             'raw_text': d.get('raw_text') or ''
-        })
+        }
+        if 'girl_take_home' in d and str(d.get('girl_take_home') or '').strip() != '':
+            payload['girl_take_home'] = int(d.get('girl_take_home') or 0)
+        create_or_update_order(c, payload)
         auto_finish_reservations(c)
     return jsonify(ok=True)
 
@@ -2022,7 +2027,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v32_settlement_signoff",
+            "version": "v33_chain_alias_take_home",
             "port": 5057,
         })
 
@@ -2041,7 +2046,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v32_settlement_signoff",
+            "version": "v33_chain_alias_take_home",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

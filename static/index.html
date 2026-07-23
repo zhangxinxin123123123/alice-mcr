@@ -171,7 +171,7 @@ body.role-user #stats{display:none!important}
  </div>
  <div class="card"><h2 id="chainTitle">接龙录入</h2>
   <p class="note">格式等同导入：时间/价格/客人/备注。第一次预约：客人写用户名；第二次以后写客户ID；如果用户名本身是纯数字，写成 //123。</p>
-  <div class="form"><input id="coId" type="hidden"><input id="coTime" type="hidden"><select id="coStart" aria-label="开始时间"></select><select id="coEnd" aria-label="结束时间"></select><input id="coPrice" placeholder="价格 自动带女孩定价"><label class="small"><input id="coPlus1000" type="checkbox"> +1000</label><label class="small"><input id="coMinus1000" type="checkbox"> -1000</label><input id="coCustomer" placeholder="客户ID或新客用户名"><input id="coRemark" placeholder="备注"><select id="coStatus"><option>预约中</option><option>已结束</option><option>取消</option></select><button class="primary" onclick="saveChainOrder()">保存接龙预约</button><button class="soft" onclick="clearChainForm()">清空</button></div>
+  <div class="form"><input id="coId" type="hidden"><input id="coTime" type="hidden"><select id="coStart" aria-label="开始时间"></select><select id="coEnd" aria-label="结束时间"></select><input id="coPrice" placeholder="价格 自动带女孩定价"><input id="coTakeHome" placeholder="到手 自动带女孩到手" style="display:none"><label class="small"><input id="coPlus1000" type="checkbox"> +1000</label><label class="small"><input id="coMinus1000" type="checkbox"> -1000</label><input id="coCustomer" placeholder="客户ID或新客用户名"><input id="coRemark" placeholder="备注"><select id="coStatus"><option>预约中</option><option>已结束</option><option>取消</option></select><button class="primary" onclick="saveChainOrder()">保存接龙预约</button><button class="soft" onclick="clearChainForm()">清空</button></div>
   <div id="chainOrdersTable"></div>
  </div>
 
@@ -451,11 +451,12 @@ async function saveModalEdit(){if(!currentEdit)return;if(currentEdit.table==="or
 async function importChain(){let r=await api("/api/import_chain",{order_date:iDate.value,girl_id:iGirl.value,settlement_status:iSettle.value,text:chain.value});alert(r.ok?`录入成功：${r.count} 单｜女孩：${r.girl_name}`:(r.error||"导入失败"));await loadAll()}
 
 
-let chainState={date:"",girl_name:"",girl_id:"",price:0,orders:[],shifts:[]};
+let chainState={date:"",girl_name:"",girl_id:"",girl_alias:"",take_home_per_hour:10000,price:0,orders:[],shifts:[]};
 let chainFreeState={header:"空闲时间",lines:[],text:""};
 let chainFreeAvatars={};
 let chainFreeAvatarKey="";
 let chainPriceTouched=false;
+let chainTakeHomeTouched=false;
 const CHAIN_DEFAULT_START="20:00";
 const CHAIN_DEFAULT_END="21:00";
 function pad2(n){return String(n).padStart(2,"0");}
@@ -657,6 +658,17 @@ function chainAutoPrice(){
   const base=Number(chainState.price||15000)||15000;
   return Math.max(0, Math.round(base*chainBillableHours(chainServiceTime())) + chainPriceAdjustment());
 }
+function chainHasAlias(){return !!String(chainState.girl_alias||"").trim();}
+function chainAutoTakeHome(){
+  const base=Number(chainState.take_home_per_hour||0)||0;
+  return Math.max(0, Math.round(base*chainBillableHours(chainServiceTime())));
+}
+function refreshChainTakeHome(force=false){
+  if(!window.coTakeHome)return;
+  coTakeHome.style.display=chainHasAlias()?"":"none";
+  if(!chainHasAlias()){coTakeHome.value="";chainTakeHomeTouched=false;return;}
+  if(force || !chainTakeHomeTouched) coTakeHome.value=chainAutoTakeHome();
+}
 function chainPriceAdjustment(){
   return (window.coPlus1000&&coPlus1000.checked?1000:0) + (window.coMinus1000&&coMinus1000.checked?-1000:0);
 }
@@ -664,13 +676,14 @@ function refreshChainAutoPrice(force=false){
   if(!window.coPrice)return;
   syncChainTimeField(false);
   if(force || !chainPriceTouched) coPrice.value=chainAutoPrice();
+  refreshChainTakeHome(false);
 }
 function refreshChainGirlSelect(){
   if(!window.cGirl)return;
   const old=cGirl.value;
   const d=(window.cDate&&cDate.value)||todayStr;
   // 先用女孩表兜底；读取接龙页后会换成纯出勤当天女孩。
-  if(!cGirl.innerHTML){cGirl.innerHTML=(data.girls||[]).map(g=>`<option value="${g.name}" data-id="${g.id}" data-price="${g.list_price||15000}">${g.name}</option>`).join("");}
+  if(!cGirl.innerHTML){cGirl.innerHTML=(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}" data-id="${g.id}" data-price="${g.list_price||15000}" data-alias="${escHtml(g.girl_alias||'')}" data-take-home="${g.take_home_per_hour||10000}">${escHtml(g.name)}</option>`).join("");}
   if(old) cGirl.value=old;
 }
 async function loadChainPage(){
@@ -678,14 +691,17 @@ async function loadChainPage(){
   const j=await api('/api/chain_page',{date:cDate.value||todayStr,girl_name:cGirl.value||''});
   chainState=j;
   const old=cGirl.value || j.girl_name || '';
-  cGirl.innerHTML=(j.shifts||[]).map(s=>`<option value="${s.girl}" data-id="${s.girl_id||''}" data-price="${s.price||0}" ${s.girl===old?'selected':''}>${s.girl}｜${s.start||'?'}-${s.end||'?'}｜${yen(s.price||0)}</option>`).join('');
+  cGirl.innerHTML=(j.shifts||[]).map(s=>`<option value="${escHtml(s.girl)}" data-id="${s.girl_id||''}" data-price="${s.price||0}" data-alias="${escHtml(s.girl_alias||'')}" data-take-home="${s.take_home_per_hour||10000}" ${s.girl===old?'selected':''}>${escHtml(s.girl)}｜${s.start||'?'}-${s.end||'?'}｜${yen(s.price||0)}</option>`).join('');
   if(old && [...cGirl.options].some(o=>o.value===old)) cGirl.value=old;
   const opt=cGirl.selectedOptions[0];
   chainState.girl_name=cGirl.value||j.girl_name||'';
   chainState.girl_id=opt?opt.dataset.id:'';
   chainState.price=Number(opt?opt.dataset.price:15000)||15000;
+  chainState.girl_alias=opt?opt.dataset.alias:'';
+  chainState.take_home_per_hour=Number(opt?opt.dataset.takeHome:10000)||10000;
   if(window.coStart && !coStart.options.length) resetChainTimeToDefault();
   if(!coId.value) refreshChainAutoPrice(true);
+  refreshChainTakeHome(!coId.value);
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
   chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
@@ -703,8 +719,8 @@ function renderChainOrders(rows){
   });
   chainOrdersTable.innerHTML=h+'</tbody></table></div>';
 }
-function clearChainForm(){coId.value='';chainPriceTouched=false;if(window.coPlus1000)coPlus1000.checked=false;if(window.coMinus1000)coMinus1000.checked=false;resetChainTimeToDefault();refreshChainAutoPrice(true);coCustomer.value='';coRemark.value='';coStatus.value='预约中';}
-function editChainOrder(o){coId.value=o.id;const t=parseChainTimeRange(o.service_time||'');initChainTimeSelects(t.start,t.end);if(window.coPlus1000)coPlus1000.checked=false;if(window.coMinus1000)coMinus1000.checked=false;coPrice.value=o.received_amount||chainState.price||'';chainPriceTouched=true;coCustomer.value=o.customer_no||'';coRemark.value=o.remark||'';coStatus.value=o.order_status||'预约中';}
+function clearChainForm(){coId.value='';chainPriceTouched=false;chainTakeHomeTouched=false;if(window.coPlus1000)coPlus1000.checked=false;if(window.coMinus1000)coMinus1000.checked=false;resetChainTimeToDefault();refreshChainAutoPrice(true);refreshChainTakeHome(true);coCustomer.value='';coRemark.value='';coStatus.value='预约中';}
+function editChainOrder(o){coId.value=o.id;const t=parseChainTimeRange(o.service_time||'');initChainTimeSelects(t.start,t.end);if(window.coPlus1000)coPlus1000.checked=false;if(window.coMinus1000)coMinus1000.checked=false;coPrice.value=o.received_amount||chainState.price||'';chainPriceTouched=true;refreshChainTakeHome(true);if(window.coTakeHome&&chainHasAlias()){coTakeHome.value=o.girl_take_home||chainAutoTakeHome();chainTakeHomeTouched=true;}else{chainTakeHomeTouched=false;}coCustomer.value=o.customer_no||'';coRemark.value=o.remark||'';coStatus.value=o.order_status||'预约中';}
 async function saveChainOrder(){
   if(!cDate.value){alert('请选择日期');return;}
   if(!cGirl.value){alert('请选择女孩');return;}
@@ -713,7 +729,9 @@ async function saveChainOrder(){
   const minutes=chainIntervalMinutes(coTime.value);
   if(minutes!==null && minutes>7*60){alert(`预约时长超过7小时，请检查时间：${coTime.value}`);return;}
   if(!coCustomer.value){alert('请填写客户ID或新客用户名');return;}
-  await api('/api/chain_order',{id:coId.value||null,order_date:cDate.value,girl_id:chainState.girl_id,girl_name:cGirl.value,service_time:chainServiceTime(),received_amount:moneyInput(coPrice.value||chainAutoPrice()),customer_raw:coCustomer.value,remark:coRemark.value,order_status:coStatus.value,settlement_status:'未结算'});
+  const payload={id:coId.value||null,order_date:cDate.value,girl_id:chainState.girl_id,girl_name:cGirl.value,service_time:chainServiceTime(),received_amount:moneyInput(coPrice.value||chainAutoPrice()),customer_raw:coCustomer.value,remark:coRemark.value,order_status:coStatus.value,settlement_status:'未结算'};
+  if(window.coTakeHome&&chainHasAlias()) payload.girl_take_home=moneyInput(coTakeHome.value||chainAutoTakeHome());
+  await api('/api/chain_order',payload);
   clearChainForm();
   await loadAll();
   await loadChainPage();
@@ -1476,6 +1494,7 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
 document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ")renderSettlement()});
 document.addEventListener("input",e=>{if(e.target.id==="coPrice")chainPriceTouched=true;});
+document.addEventListener("input",e=>{if(e.target.id==="coTakeHome")chainTakeHomeTouched=true;});
 document.addEventListener("change",e=>{
   if(e.target.id==="coStart" || e.target.id==="coEnd"){syncChainTimeField();}
   if(e.target.id==="coPlus1000" || e.target.id==="coMinus1000"){
