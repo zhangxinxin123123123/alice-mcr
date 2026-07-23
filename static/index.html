@@ -36,6 +36,7 @@ body.role-user .user-hide{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
 body.role-user #stats{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
+.settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-amount{display:grid;gap:4px}.settle-line{display:flex;align-items:center;gap:8px;justify-content:space-between}.settle-line span{font-size:12px;opacity:.75}.settle-line b{color:#e75ca2}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:var(--ink)}
 
 .type-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-weight:800;font-size:12px;white-space:nowrap}
 .type-new{background:#e8fff3;color:#088044;border:1px solid #9be3bd}
@@ -126,8 +127,8 @@ body.role-user #stats{display:none!important}
  </section>
 
  <section id="settlement" class="panel"><div class="card"><h2>金额结算</h2>
-  <p class="note">按女孩汇总所有未结算订单。主行显示多日未结算合计；点“展开”可查看不同日期的未结算明细，并可勾选后批量改为已结算或未结算。</p>
-  <div class="form"><input id="settleGirlQ" placeholder="筛选女孩"><button class="soft" onclick="clearSettlementPick()">清空勾选</button><button class="primary" onclick="bulkSettleSettlement('已结算')">勾选改已结算</button><button class="soft" onclick="bulkSettleSettlement('未结算')">勾选改未结算</button></div>
+  <p class="note">按女孩汇总所有未结算订单。主行显示多日未结算合计；点“展开”可查看不同日期的未结算明细，勾选签收后再结算。</p>
+  <div class="form"><input id="settleGirlQ" placeholder="筛选女孩"><button class="soft" onclick="clearSettlementPick()">清空勾选</button><button class="primary" onclick="bulkSettleSettlement('已结算')">勾选结算</button><button class="primary" onclick="settleAllSettlement()">结算所有</button></div>
   <div id="settlementTable"></div></div>
  </section>
 
@@ -1376,32 +1377,42 @@ function settlementGroups(){
     const amt=Number(o.store_profit||0);
     gmap[g].total+=amt;
     const pm=String(o.payment_method||'现金');
-    if(pm && pm!=='现金'){gmap[g].nonCash=(gmap[g].nonCash||0)+amt;} gmap[g].count++; gmap[g].ids.push(Number(o.id));
-    gmap[g].dates[d]=gmap[g].dates[d]||{date:d,total:0,count:0,ids:[]};
-    gmap[g].dates[d].total+=Number(o.store_profit||0); gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
+    const isNonCash=pm && pm!=='现金';
+    if(isNonCash){gmap[g].nonCash=(gmap[g].nonCash||0)+amt;} gmap[g].count++; gmap[g].ids.push(Number(o.id));
+    gmap[g].dates[d]=gmap[g].dates[d]||{date:d,total:0,nonCash:0,count:0,ids:[]};
+    gmap[g].dates[d].total+=amt; if(isNonCash)gmap[g].dates[d].nonCash+=amt; gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
   });
+  Object.values(gmap).forEach(g=>{g.hasOverdue=Object.values(g.dates).some(d=>settlementDaysAgo(d.date)>3);});
   return Object.values(gmap).sort((a,b)=>b.total-a.total);
 }
+function settlementDaysAgo(d){if(!d)return 0; const a=new Date(`${todayStr}T00:00:00`), b=new Date(`${String(d).slice(0,10)}T00:00:00`); if(isNaN(a)||isNaN(b))return 0; return Math.floor((a-b)/86400000);}
+function settlementReceivable(x){return Number(x.total||0)-Number(x.nonCash||0);}
+function settlementIdsLiteral(ids){return JSON.stringify((ids||[]).map(x=>Number(x)).filter(Boolean));}
+function settlementChecked(ids){ids=(ids||[]).map(Number).filter(Boolean); return !!ids.length&&ids.every(id=>settlementSelected.has(id));}
+function settlementRowClass(ids,overdue){if(settlementChecked(ids))return 'settle-green'; return overdue?'settle-overdue blink':'settle-yellow';}
+function settlementSignControl(ids,label){const checked=settlementChecked(ids); return `<label class="settle-sign"><input type="checkbox" ${checked?'checked':''} onchange="toggleSettlementIds(${settlementIdsLiteral(ids)},this.checked)"> ${label}</label>`;}
+function settlementAmountCell(x,label){return `<div class="settle-amount"><div class="settle-line"><span>今日收益</span><b>${yen(x.total)}</b></div><div class="settle-line"><span>应收金额</span><b>${yen(settlementReceivable(x))}</b>${settlementSignControl(x.ids,label)}</div></div>`;}
 function renderSettlement(){
   if(!window.settlementTable)return;
   const groups=settlementGroups();
-  let html='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算天数</th><th>未结算单数</th><th>结算公式</th><th>选择</th></tr></thead><tbody>';
+  let html='<div class="table"><table><thead><tr><th>展开</th><th>女孩</th><th>未结算天数/日期</th><th>未结算单数</th><th>今日收益 / 应收金额</th></tr></thead><tbody>';
   groups.forEach(g=>{
-    const gid=encodeURIComponent(g.girl); const allChecked=g.ids.length&&g.ids.every(id=>settlementSelected.has(id));
-    html+=`<tr><td><button class="soft" onclick="settlementOpen['${gid}']=!settlementOpen['${gid}'];renderSettlement()">${settlementOpen[gid]?'收起':'展开'}</button></td><td>${g.girl}</td><td>${Object.keys(g.dates).length}</td><td>${g.count}</td><td><b>${yen(g.total)}</b><br><small>${yen(g.total)} - ${yen(g.nonCash||0)} = <b>${yen(g.total-(g.nonCash||0))}</b></small></td><td><input type="checkbox" ${allChecked?'checked':''} onchange="toggleSettlementIds([${g.ids.join(',')}],this.checked)"> 全选该女孩</td></tr>`;
+    const gid=encodeURIComponent(g.girl);
+    html+=`<tr class="${settlementRowClass(g.ids,g.hasOverdue)}"><td><button class="soft" onclick="settlementOpen['${gid}']=!settlementOpen['${gid}'];renderSettlement()">${settlementOpen[gid]?'收起':'展开'}</button></td><td>${escHtml(g.girl)}</td><td>${Object.keys(g.dates).length}</td><td>${g.count}</td><td>${settlementAmountCell(g,'签收该女孩')}</td></tr>`;
     if(settlementOpen[gid]){
       Object.values(g.dates).sort((a,b)=>String(b.date).localeCompare(a.date)).forEach(d=>{
-        const ck=d.ids.length&&d.ids.every(id=>settlementSelected.has(id));
-        html+=`<tr><td></td><td style="padding-left:28px">${g.girl}</td><td>${d.date}</td><td>${d.count}</td><td>${yen(d.total)}</td><td><input type="checkbox" ${ck?'checked':''} onchange="toggleSettlementIds([${d.ids.join(',')}],this.checked)"> 选择这一天</td></tr>`;
+        const overdue=settlementDaysAgo(d.date)>3;
+        html+=`<tr class="${settlementRowClass(d.ids,overdue)}"><td></td><td style="padding-left:28px">${escHtml(g.girl)}</td><td>${escHtml(d.date)}</td><td>${d.count}</td><td>${settlementAmountCell(d,'签收这一天')}</td></tr>`;
       });
     }
   });
-  if(!groups.length) html+='<tr><td colspan="6">暂无未结算金额</td></tr>';
+  if(!groups.length) html+='<tr><td colspan="5">全部结算</td></tr>';
   settlementTable.innerHTML=html+'</tbody></table></div>';
 }
-function toggleSettlementIds(ids,checked){ids.forEach(id=>checked?settlementSelected.add(Number(id)):settlementSelected.delete(Number(id)));renderSettlement();}
+function toggleSettlementIds(ids,checked){if(checked&&!confirm('确定是否签收？')){renderSettlement();return;} ids.forEach(id=>checked?settlementSelected.add(Number(id)):settlementSelected.delete(Number(id)));renderSettlement();}
 function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
-async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要修改的日期或女孩');return;} const r=await api('/api/orders/bulk_settle',{ids,settlement_status:status}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status=status}); settlementSelected.clear(); renderSettlement(); await loadAll();}
+async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要结算的日期或女孩');return;} const r=await api('/api/orders/bulk_settle',{ids,settlement_status:status}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status=status}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert(`勾选${status}完成`);}
+async function settleAllSettlement(){const ids=[...new Set(settlementGroups().flatMap(g=>g.ids).map(Number).filter(Boolean))]; if(!ids.length){alert('已经全部结算');return;} if(!confirm(`确定结算所有未结算金额吗？共 ${ids.length} 单`))return; const r=await api('/api/orders/bulk_settle',{ids,settlement_status:'已结算'}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status='已结算'}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert('全部结算完成');}
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function jsArg(v){return JSON.stringify(String(v??''));}
