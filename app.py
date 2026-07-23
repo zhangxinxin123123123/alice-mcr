@@ -1926,14 +1926,49 @@ def api_chain_page():
         shifts = pure_shift_rows_for_date(c, date_str)
         # 给每个纯出勤女孩补上女孩表价格/ID，接龙预约用这个自动定价。
         out_shifts = []
+        seen_shift_girls = set()
         for sft in shifts:
-            g = c.execute('SELECT * FROM girls WHERE name=?', (sft.get('girl') or '',)).fetchone()
+            shift_girl = str(sft.get('girl') or '').strip()
+            if shift_girl:
+                seen_shift_girls.add(shift_girl)
+            g = c.execute('SELECT * FROM girls WHERE name=?', (shift_girl,)).fetchone()
             row = dict(sft)
             row['girl_id'] = g['id'] if g else 0
             row['price'] = int((g['list_price'] if g else 15000) or 15000)
             row['girl_alias'] = (g['girl_alias'] if g else '') or ''
             row['take_home_per_hour'] = int((g['take_home_per_hour'] if g else 10000) or 10000)
             out_shifts.append(row)
+        order_girls = rows(c.execute("""SELECT girl_name, MIN(service_time) AS service_time, COUNT(*) AS order_count
+                                         FROM orders
+                                         WHERE order_date=? AND COALESCE(girl_name,'')<>''
+                                         GROUP BY girl_name
+                                         ORDER BY MIN(id) ASC""", (date_str,)).fetchall())
+        for og in order_girls:
+            order_girl = str(og.get('girl_name') or '').strip()
+            if not order_girl or order_girl in seen_shift_girls:
+                continue
+            g = c.execute('SELECT * FROM girls WHERE name=?', (order_girl,)).fetchone()
+            interval = _parse_interval_text(og.get('service_time') or '')
+            start_label = _fmt_free_minute(interval[0]) if interval else '订单'
+            end_label = _fmt_free_minute(interval[1], True) if interval else '订单'
+            out_shifts.append({
+                'id': f"orders_{order_girl}",
+                'raw_id': 0,
+                'date': date_str,
+                'girl': order_girl,
+                'start': start_label,
+                'end': end_label,
+                'tags': '订单',
+                'goldTags': '订单',
+                'source': 'orders',
+                'sort_order': 20000,
+                'order_count': int(og.get('order_count') or 0),
+                'girl_id': g['id'] if g else 0,
+                'price': int((g['list_price'] if g else 15000) or 15000),
+                'girl_alias': (g['girl_alias'] if g else '') or '',
+                'take_home_per_hour': int((g['take_home_per_hour'] if g else 10000) or 10000),
+            })
+            seen_shift_girls.add(order_girl)
         if not girl_name and out_shifts:
             girl_name = out_shifts[0]['girl']
         orders = rows(c.execute("""SELECT * FROM orders
@@ -2027,7 +2062,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v34_settlement_runtime_patch",
+            "version": "v35_chain_orders_shift_tags",
             "port": 5057,
         })
 
@@ -2046,7 +2081,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v34_settlement_runtime_patch",
+            "version": "v35_chain_orders_shift_tags",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

@@ -457,6 +457,7 @@ let chainFreeAvatars={};
 let chainFreeAvatarKey="";
 let chainPriceTouched=false;
 let chainTakeHomeTouched=false;
+let chainPendingGirl="";
 const CHAIN_DEFAULT_START="20:00";
 const CHAIN_DEFAULT_END="21:00";
 function pad2(n){return String(n).padStart(2,"0");}
@@ -686,12 +687,34 @@ function refreshChainGirlSelect(){
   if(!cGirl.innerHTML){cGirl.innerHTML=(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}" data-id="${g.id}" data-price="${g.list_price||15000}" data-alias="${escHtml(g.girl_alias||'')}" data-take-home="${g.take_home_per_hour||10000}">${escHtml(g.name)}</option>`).join("");}
   if(old) cGirl.value=old;
 }
+function chainShiftOptionLabel(s){
+  const source=s.source==="orders"?"订单":"出勤";
+  return `${s.girl}｜${s.start||'?'}-${s.end||'?'}｜${yen(s.price||0)}｜${source}`;
+}
+function chainAddGirlOptions(){
+  const used=new Set((chainState.shifts||[]).filter(s=>s.source!=="orders").map(s=>String(s.girl||"")));
+  return (data.girls||[]).filter(g=>g.name&&!used.has(String(g.name)));
+}
+function renderChainShiftHint(){
+  if(!window.chainShiftHint)return;
+  const shifts=chainState.shifts||[];
+  const tags=shifts.map(s=>{
+    const removable=s.source!=="orders"&&s.id;
+    const remove=removable?` <button class="danger" style="padding:2px 7px;border-radius:999px" title="删除今天出勤" data-id="${escHtml(s.id)}" data-girl="${escHtml(s.girl)}" onclick="removeChainShiftGirl(this.dataset.id,this.dataset.girl)">-</button>`:'';
+    const label=s.source==="orders"?`订单${s.order_count?` ${s.order_count}单`:''}`:`${s.start||''}-${s.end||''}`;
+    return `<span class="tag-pill">${escHtml(s.girl)} ${escHtml(label)} ${yen(s.price||0)}${remove}</span>`;
+  }).join(' ');
+  const opts=chainAddGirlOptions().map(g=>`<option value="${escHtml(g.name)}">${escHtml(g.name)}</option>`).join('');
+  const add=`<span class="tag-pill"><select id="chainAddGirl" style="padding:4px;border-radius:999px;max-width:160px">${opts}</select> <button class="primary" style="padding:2px 8px;border-radius:999px" title="增加今天出勤女孩" onclick="addChainShiftGirl()">+</button></span>`;
+  chainShiftHint.innerHTML=(shifts.length?`当天女孩：${tags} ${add}`:`这一天还没有出勤女孩。${add}`);
+}
 async function loadChainPage(){
   if(!window.cDate)return;
   const j=await api('/api/chain_page',{date:cDate.value||todayStr,girl_name:cGirl.value||''});
   chainState=j;
-  const old=cGirl.value || j.girl_name || '';
-  cGirl.innerHTML=(j.shifts||[]).map(s=>`<option value="${escHtml(s.girl)}" data-id="${s.girl_id||''}" data-price="${s.price||0}" data-alias="${escHtml(s.girl_alias||'')}" data-take-home="${s.take_home_per_hour||10000}" ${s.girl===old?'selected':''}>${escHtml(s.girl)}｜${s.start||'?'}-${s.end||'?'}｜${yen(s.price||0)}</option>`).join('');
+  const old=chainPendingGirl || cGirl.value || j.girl_name || '';
+  chainPendingGirl="";
+  cGirl.innerHTML=(j.shifts||[]).map(s=>`<option value="${escHtml(s.girl)}" data-id="${s.girl_id||''}" data-price="${s.price||0}" data-alias="${escHtml(s.girl_alias||'')}" data-take-home="${s.take_home_per_hour||10000}" ${s.girl===old?'selected':''}>${escHtml(chainShiftOptionLabel(s))}</option>`).join('');
   if(old && [...cGirl.options].some(o=>o.value===old)) cGirl.value=old;
   const opt=cGirl.selectedOptions[0];
   chainState.girl_name=cGirl.value||j.girl_name||'';
@@ -703,13 +726,32 @@ async function loadChainPage(){
   if(!coId.value) refreshChainAutoPrice(true);
   refreshChainTakeHome(!coId.value);
   chainTitle.textContent=`${cDate.value||todayStr} ${chainState.girl_name||''} 接龙录入`;
-  chainShiftHint.innerHTML=(j.shifts&&j.shifts.length)?`当天纯出勤：${j.shifts.map(s=>`<span class="tag-pill">${s.girl} ${s.start||''}-${s.end||''} ${yen(s.price||0)}</span>`).join(' ')}`:'这一天纯出勤表还没有女孩，请先去纯出勤表添加。';
+  renderChainShiftHint();
   if(window.chainFreeOut) chainFreeOut.value=(j.free&&j.free.text)||'';
   renderChainFreeDona(j.free);
   await refreshChainExports();
   renderChainOrders(j.orders||[]);
   setupChainImageTools();
   renderChainNamedImages();
+}
+async function addChainShiftGirl(){
+  const pick=document.getElementById("chainAddGirl");
+  const name=(pick&&pick.value)||prompt("输入女孩名");
+  if(!name)return;
+  const start=(window.coStart&&coStart.value)||CHAIN_DEFAULT_START;
+  const end=(window.coEnd&&coEnd.value)||addChainMinutes(start,60);
+  await api("/api/pure_shifts",{date:cDate.value||todayStr,girl:name,start,end,tags:""});
+  chainPendingGirl=name;
+  await loadAll();
+  await loadChainPage();
+}
+async function removeChainShiftGirl(id,girl){
+  if(!id||String(id).startsWith("orders_")){alert("这个女孩来自订单表，不能从这里删除。");return;}
+  if(!confirm(`删除 ${girl||''} 今天的出勤吗？订单不会删除。`))return;
+  await api("/api/pure_shifts/delete",{id});
+  if(cGirl.value===girl)chainPendingGirl="";
+  await loadAll();
+  await loadChainPage();
 }
 function renderChainOrders(rows){
   chainState.orders=rows||[];
