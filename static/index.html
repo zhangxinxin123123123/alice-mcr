@@ -753,11 +753,16 @@ async function removeChainShiftGirl(id,girl){
   await loadAll();
   await loadChainPage();
 }
+function chainCustomerRemark(o){
+  if(o.customer_remark)return o.customer_remark;
+  const c=(data.customers||[]).find(x=>String(x.id)===String(o.customer_id)||String(x.customer_no)===String(o.customer_no));
+  return c ? (c.remark||"") : "";
+}
 function renderChainOrders(rows){
   chainState.orders=rows||[];
-  let h='<div class="table"><table><thead><tr><th>序号</th><th>时间</th><th>价格</th><th>客户ID</th><th>客户名</th><th>备注</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+  let h='<div class="table"><table><thead><tr><th>序号</th><th>时间</th><th>价格</th><th>客户ID</th><th>客户名</th><th>客户备注</th><th>备注</th><th>状态</th><th>操作</th></tr></thead><tbody>';
   (rows||[]).forEach((o,i)=>{
-    h+=`<tr><td>${i+1}</td><td>${o.service_time||''}</td><td>${yen(o.received_amount||0)}</td><td>${o.customer_no||''}</td><td>${o.customer_name||''}</td><td>${o.remark||''}</td><td>${o.order_status||''}</td><td><button class="soft" onclick='editChainOrder(${JSON.stringify(o).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="cancelChainOrder(${o.id})">取消</button></td></tr>`;
+    h+=`<tr><td>${i+1}</td><td>${o.service_time||''}</td><td>${yen(o.received_amount||0)}</td><td>${o.customer_no||''}</td><td>${linkCustomerName(o.customer_name,o)}</td><td>${escHtml(chainCustomerRemark(o))}</td><td>${escHtml(o.remark||'')}</td><td>${o.order_status||''}</td><td><button class="soft" onclick='editChainOrder(${JSON.stringify(o).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="cancelChainOrder(${o.id})">取消</button></td></tr>`;
   });
   chainOrdersTable.innerHTML=h+'</tbody></table></div>';
 }

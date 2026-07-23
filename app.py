@@ -1971,9 +1971,11 @@ def api_chain_page():
             seen_shift_girls.add(order_girl)
         if not girl_name and out_shifts:
             girl_name = out_shifts[0]['girl']
-        orders = rows(c.execute("""SELECT * FROM orders
-            WHERE order_date=? AND girl_name=?
-            ORDER BY service_time ASC, id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
+        orders = rows(c.execute("""SELECT o.*, COALESCE(c.remark,'') AS customer_remark
+            FROM orders o
+            LEFT JOIN customers c ON c.id=o.customer_id
+            WHERE o.order_date=? AND o.girl_name=?
+            ORDER BY o.service_time ASC, o.id ASC""", (date_str, girl_name)).fetchall()) if girl_name else []
         free = build_chain_free_rows(c, date_str)
         return jsonify(ok=True, date=date_str, girl_name=girl_name, shifts=out_shifts, orders=orders, free=free)
 
@@ -2062,7 +2064,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v35_chain_orders_shift_tags",
+            "version": "v36_chain_customer_links",
             "port": 5057,
         })
 
@@ -2081,7 +2083,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v35_chain_orders_shift_tags",
+            "version": "v36_chain_customer_links",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
