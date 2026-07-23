@@ -1392,13 +1392,17 @@ def customers():
 @app.route('/api/girls',methods=['POST'])
 def girls():
     d=request.json or {}
+    name = str(d.get('name') or '').strip()
+    if not name:
+        return jsonify(ok=False, error='女孩名不能为空'), 400
+    init_db()
     with conn() as c:
         if d.get('id'):
-            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,enrollment=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,enrollment=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(name,d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
             recalc_girl(c,int(d['id']))
         else:
-            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,enrollment,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(d.get('name'),d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
-            row=c.execute('SELECT id FROM girls WHERE name=?',(d.get('name'),)).fetchone()
+            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,enrollment,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(name,d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
+            row=c.execute('SELECT id FROM girls WHERE name=?',(name,)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
 @app.route('/api/orders',methods=['POST'])
@@ -2018,7 +2022,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v30_login_room_enrollment",
+            "version": "v31_add_girl_button",
             "port": 5057,
         })
 
@@ -2037,7 +2041,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v30_login_room_enrollment",
+            "version": "v31_add_girl_button",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
