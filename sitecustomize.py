@@ -30,11 +30,12 @@ _JS = r'''
   function girlEmail(name){ var g=(D().girls||[]).find(function(x){ return clean(x.name)===clean(name); }); return (g && g.email) || ""; }
   function reportOf(date,girl){ return (D().settlement_reports||[]).find(function(x){ return clean(x.report_date)===clean(date) && clean(x.girl_name)===clean(girl); }); }
   function key(date,girl){ return date + "||" + girl; }
-  function formulaDefault(total, nonCash){ return Number(nonCash||0) ? "理论 " + money(total) + " - 非现金 " + money(nonCash) + " = " + money(Number(total||0)-Number(nonCash||0)) : "理论 " + money(total); }
+  function formulaDefault(total, nonCash){ return Number(nonCash||0) ? "理论 " + money(total) + " - 非现金支付 " + money(nonCash) + " = " + money(Number(total||0)-Number(nonCash||0)) : "理论 " + money(total); }
   function idKey(ids){ return (Array.isArray(ids)?ids:String(ids||"").split(",")).map(Number).filter(Boolean).sort(function(a,b){return a-b;}).join(","); }
   function reportMatchesRow(r,row){ return !!(r && idKey(r.order_ids) && idKey(r.order_ids)===idKey(row.ids)); }
   function val(row, field, fallback){ var k=key(row.date,row.girl); if(drafts[k] && drafts[k][field] !== undefined) return drafts[k][field]; var r=reportOf(row.date,row.girl); if(reportMatchesRow(r,row) && r[field] !== undefined && r[field] !== null && String(r[field]) !== "") return r[field]; return fallback; }
-  function actual(row){ return Number(val(row,"actual_settlement",Number(row.total||0)-Number(row.nonCash||0))||0); }
+  function draftVal(row, field){ var k=key(row.date,row.girl); return drafts[k] && drafts[k][field] !== undefined ? drafts[k][field] : undefined; }
+  function actual(row){ var d=draftVal(row,"actual_settlement"); return Number(d!==undefined ? d : Number(row.total||0)-Number(row.nonCash||0))||0; }
   function formula(row){ return String(val(row,"formula_text",formulaDefault(row.total,row.nonCash))||""); }
   async function post(url, body){
     if(typeof api === "function") return api(url, body);
@@ -80,7 +81,7 @@ _JS = r'''
   function isSettledOrder(o){ return clean((o||{}).settlement_status||"未结算")==="已结算"; }
   function selectedAll(ids){ ids=(ids||[]).map(Number).filter(Boolean); return ids.length&&ids.every(function(id){return selected.has(Number(id));}); }
   function addSettlementOrder(map,o){
-    var girl=o.girl_name||"未填写女孩", day=o.order_date||"", amt=Number(o.store_profit||0), pm=clean(o.payment_method||"现金"), non=pm&&pm!=="现金"?amt:0;
+    var girl=o.girl_name||"未填写女孩", day=o.order_date||"", amt=Number(o.store_profit||0), paid=Number(o.received_amount||0), pm=clean(o.payment_method||"现金"), non=pm&&pm!=="现金"?paid:0;
     map[girl]=map[girl]||{girl:girl,total:0,nonCash:0,count:0,ids:[],dates:{}};
     map[girl].total+=amt; map[girl].nonCash+=non; map[girl].count++; map[girl].ids.push(Number(o.id));
     map[girl].dates[day]=map[girl].dates[day]||{date:day,girl:girl,total:0,nonCash:0,count:0,ids:[]};
@@ -1009,7 +1010,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724c"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724d"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:

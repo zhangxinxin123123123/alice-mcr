@@ -2064,7 +2064,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v36_chain_customer_links",
+            "version": "v37_settlement_non_cash_paid",
             "port": 5057,
         })
 
@@ -2083,7 +2083,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v36_chain_customer_links",
+            "version": "v37_settlement_non_cash_paid",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2193,9 +2193,10 @@ def settlement_source_rows(c, report_date):
         girl = o['girl_name'] or '未填写女孩'
         grouped.setdefault(girl, {'girl_name': girl, 'theoretical_amount': 0, 'non_cash': 0, 'order_ids': []})
         amount = int(o['store_profit'] or 0)
+        paid = int(o['received_amount'] or 0)
         grouped[girl]['theoretical_amount'] += amount
         if str(o['payment_method'] or '现金') != '现金':
-            grouped[girl]['non_cash'] += amount
+            grouped[girl]['non_cash'] += paid
         grouped[girl]['order_ids'].append(str(o['id']))
     return list(grouped.values())
 

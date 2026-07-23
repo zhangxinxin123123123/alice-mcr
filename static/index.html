@@ -1440,12 +1440,13 @@ function settlementGroups(){
     const g=o.girl_name||'未填写女孩'; const d=o.order_date||'';
     gmap[g]=gmap[g]||{girl:g,total:0,nonCash:0,count:0,dates:{},ids:[]};
     const amt=Number(o.store_profit||0);
+    const paid=Number(o.received_amount||0);
     gmap[g].total+=amt;
     const pm=String(o.payment_method||'现金');
     const isNonCash=pm && pm!=='现金';
-    if(isNonCash){gmap[g].nonCash=(gmap[g].nonCash||0)+amt;} gmap[g].count++; gmap[g].ids.push(Number(o.id));
+    if(isNonCash){gmap[g].nonCash=(gmap[g].nonCash||0)+paid;} gmap[g].count++; gmap[g].ids.push(Number(o.id));
     gmap[g].dates[d]=gmap[g].dates[d]||{date:d,total:0,nonCash:0,count:0,ids:[]};
-    gmap[g].dates[d].total+=amt; if(isNonCash)gmap[g].dates[d].nonCash+=amt; gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
+    gmap[g].dates[d].total+=amt; if(isNonCash)gmap[g].dates[d].nonCash+=paid; gmap[g].dates[d].count++; gmap[g].dates[d].ids.push(Number(o.id));
   });
   Object.values(gmap).forEach(g=>{g.hasOverdue=Object.values(g.dates).some(d=>settlementDaysAgo(d.date)>3);});
   return Object.values(gmap).sort((a,b)=>b.total-a.total);
