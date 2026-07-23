@@ -2027,7 +2027,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v33_chain_alias_take_home",
+            "version": "v34_settlement_runtime_patch",
             "port": 5057,
         })
 
@@ -2046,7 +2046,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v33_chain_alias_take_home",
+            "version": "v34_settlement_runtime_patch",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2266,7 +2266,7 @@ def api_settlements_notify():
             return jsonify(ok=False, error='当天没有可通报的结算记录'), 400
         boss_lines = [f"当日结算通报 {report_date}", ""]
         for r in reports:
-            boss_lines.append(f"{r['girl_name']}：今日理论 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。公式：{r['formula_text'] or ''}")
+            boss_lines.append(f"{r['girl_name']}：今日收益 {int(r['theoretical_amount'] or 0)}，实给 {int(r['actual_settlement'] or 0)}。公式：{r['formula_text'] or ''}")
         boss_result = send_plain_email([BOSS_EMAIL], f"当日结算通报 {report_date}", "\n".join(boss_lines), smtp=smtp)
         girl_results = []
         now = datetime.now().isoformat(timespec='seconds')
