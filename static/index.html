@@ -33,8 +33,10 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .login-box h2{margin:0 0 8px;color:#e75ca2}.login-box input{width:100%;margin:8px 0}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
 body.role-user .user-hide{display:none!important}
+body.role-user .admin-only{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
 body.role-user #stats{display:none!important}
+body.role-user #settlement{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 .settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-amount{display:grid;gap:4px}.settle-line{display:flex;align-items:center;gap:8px;justify-content:space-between}.settle-line span{font-size:12px;opacity:.75}.settle-line b{color:#e75ca2}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:var(--ink)}
 
@@ -290,7 +292,7 @@ function applyRole(){
   roleBadge.textContent = auth.role==='boss' ? '老板模式' : (auth.role==='admin' ? '管理员模式' : '普通用户模式');
   if(auth.role==='user'){
     const current=document.querySelector('.panel.on');
-    if(current && (current.id==='home' || current.id==='stats')){
+    if(current && (current.id==='home' || current.id==='stats' || current.id==='settlement')){
       const ordersBtn=[...document.querySelectorAll('.nav button')].find(b=>b.textContent.includes('订单'));
       show('orders', ordersBtn || document.querySelector('.nav button:not(.user-hide)'));
     }
@@ -306,7 +308,7 @@ async function doLogin(){
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats"||id==="settlement")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  try{

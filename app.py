@@ -162,6 +162,8 @@ def require_login_for_api():
             return jsonify(ok=False, error='请先登录'), 401
         if not current_session_token():
             return jsonify(ok=False, error='登录已失效，请重新登录'), 401
+        if role == 'user' and (path.startswith('/api/settlements') or path == '/api/orders/bulk_settle'):
+            return jsonify(ok=False, error='普通用户不能查看金额结算'), 403
     return None
 
 @app.route('/api/login', methods=['POST'])
@@ -2064,7 +2066,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v38_settlement_recompute_formula",
+            "version": "v39_hide_settlement_for_users",
             "port": 5057,
         })
 
@@ -2083,7 +2085,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v38_settlement_recompute_formula",
+            "version": "v39_hide_settlement_for_users",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

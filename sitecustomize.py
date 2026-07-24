@@ -56,7 +56,7 @@ _JS = r'''
   function ensureStyle(){
     if(document.getElementById("aliceSettleStyle")) return;
     var s=document.createElement("style"); s.id="aliceSettleStyle";
-    s.textContent=".settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}.settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:#5d4566}.settle-amount-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settle-amount-input{width:120px}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}.login-alert-row{background:#fff1f2!important;color:#9f1239!important}.login-alert-badge{display:inline-block;border:1px solid #fb7185;border-radius:999px;background:#ffe4e6;color:#be123c;padding:2px 8px;font-weight:900}.user-admin-form{display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;align-items:center;margin:12px 0}.managed-username,.managed-pass{min-width:130px}.user-offline{color:#6b7280}.user-online{color:#15803d;font-weight:900}@media(max-width:760px){.settle-email-grid,.user-admin-form{grid-template-columns:1fr}}";
+    s.textContent="body.role-user .admin-only,body.role-user #settlement{display:none!important}.settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}.settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:#5d4566}.settle-amount-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settle-amount-input{width:120px}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}.login-alert-row{background:#fff1f2!important;color:#9f1239!important}.login-alert-badge{display:inline-block;border:1px solid #fb7185;border-radius:999px;background:#ffe4e6;color:#be123c;padding:2px 8px;font-weight:900}.user-admin-form{display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;align-items:center;margin:12px 0}.managed-username,.managed-pass{min-width:130px}.user-offline{color:#6b7280}.user-online{color:#15803d;font-weight:900}@media(max-width:760px){.settle-email-grid,.user-admin-form{grid-template-columns:1fr}}";
     document.head.appendChild(s);
   }
   function ensureSettlement(){
@@ -298,7 +298,7 @@ _JS = r'''
   function wrapLoginAuditShow(){
     var oldShow=window.show;
     if(typeof oldShow==="function"&&!oldShow.__loginAuditWrapped){
-      var showWrapped=function(id,btn){ if(id==="loginAudit"&&!isBoss()){alert("只有老板可以查看登录检测");return;} var r=oldShow.apply(this,arguments); if(id==="loginAudit")setTimeout(loadLoginAudit,50); return r; };
+      var showWrapped=function(id,btn){ if(id==="loginAudit"&&!isBoss()){alert("只有老板可以查看登录检测");return;} if(id==="settlement"&&auth&&auth.role==="user"){alert("普通用户不能查看金额结算");return;} var r=oldShow.apply(this,arguments); if(id==="loginAudit")setTimeout(loadLoginAudit,50); return r; };
       showWrapped.__loginAuditWrapped=true;
       window.show=showWrapped;
     }
@@ -742,6 +742,8 @@ def _install(module):
         username = (request.headers.get("X-Alice-User") or "").strip()
         if role in ("boss", "admin", "user") and not token:
             return jsonify(ok=False, error="登录已失效，请重新登录"), 401
+        if role == "user" and (request.path.startswith("/api/settlements") or request.path == "/api/orders/bulk_settle"):
+            return jsonify(ok=False, error="普通用户不能查看金额结算"), 403
         try:
             now = _now_jst()
             with conn() as c:
@@ -1010,7 +1012,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724e"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724f"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
