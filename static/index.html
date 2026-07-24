@@ -28,24 +28,30 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
 
-body.login-active{min-height:100vh;overflow:hidden;background:#f9dbe8}
+body.login-active{min-height:100vh;overflow:hidden;background:#0f0710}
 body.login-active .app,body.login-active .modal{display:none!important}
 body:not(.login-active) .login-mask{display:none!important}
-.login-mask{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:flex-end;padding:clamp(18px,5vw,60px);overflow:auto;background:linear-gradient(90deg,rgba(255,247,251,.42) 0%,rgba(255,247,251,.20) 46%,rgba(255,247,251,.82) 100%),url("/static/alice_login_bg.png") center/cover no-repeat}
-.login-panel{width:min(430px,100%);display:grid;gap:14px}
+.login-mask{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:clamp(18px,5vw,60px);overflow:hidden;background:#0f0710}
+.login-bg,.login-overlay{position:absolute;inset:0;pointer-events:none}.login-bg{background-position:center;background-size:cover;background-repeat:no-repeat;transform:scale(1.04);animation:loginSlowZoom 28s ease-in-out infinite alternate;will-change:transform}.login-overlay{background:radial-gradient(circle at center,rgba(255,247,251,.30),rgba(255,247,251,.10) 42%,rgba(15,7,16,.46) 100%),linear-gradient(180deg,rgba(255,214,234,.18),rgba(217,200,255,.16))}
+@keyframes loginSlowZoom{from{transform:scale(1.04)}to{transform:scale(1.14)}}
+.login-panel{position:relative;z-index:1;width:min(430px,100%);display:grid;gap:14px}
 .login-brand{padding:18px 20px;border:2px solid rgba(255,255,255,.62);border-radius:24px;background:rgba(255,255,255,.30);box-shadow:0 18px 45px rgba(206,83,148,.24);backdrop-filter:blur(10px)}
 .login-kicker{display:inline-block;margin-bottom:7px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.80);color:#d94f9f;font-size:12px;font-weight:900;letter-spacing:.06em}
 .login-brand h1{margin:0;color:white;font-size:38px;line-height:1.05;text-shadow:0 3px 16px rgba(184,64,126,.55)}
 .login-brand p{margin:8px 0 0;color:white;font-weight:900;text-shadow:0 2px 10px rgba(184,64,126,.45)}
 .login-box{width:100%;background:rgba(255,255,255,.94);border:2px solid rgba(255,182,219,.86);border-radius:24px;padding:24px;box-shadow:0 20px 50px rgba(178,88,138,.28);backdrop-filter:blur(12px)}
 .login-box h2{margin:0 0 14px;color:#d94f9f;font-size:24px}.login-field{display:block;margin:12px 0}.login-field span{display:block;margin-bottom:6px;font-size:13px;font-weight:900;color:#7a5571}.login-field input{width:100%;margin:0;background:#fffafd}.login-submit{width:100%;margin-top:8px}.login-submit:disabled{opacity:.65;cursor:wait}.login-message{min-height:20px;margin:12px 0 0;font-size:13px;font-weight:900;color:#7a5571}.login-message.is-error{color:#d6003d}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
-@media(max-width:760px){.login-mask{justify-content:center;align-items:flex-end;padding:18px;background-position:center top}.login-brand{padding:14px 16px}.login-brand h1{font-size:30px}.login-box{padding:20px;border-radius:22px}}
+@media(max-width:760px){.login-mask{padding:18px}.login-bg{background-position:center top}.login-brand{padding:14px 16px}.login-brand h1{font-size:30px}.login-box{padding:20px;border-radius:22px}}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
 body.role-user .user-hide{display:none!important}
-body.role-user .admin-only{display:none!important}
 body.role-user .stat-chart-only{display:none!important}
 body.role-user #stats{display:none!important}
 body.role-user #settlement{display:none!important}
+body.role-user #loginAudit{display:none!important}
+body.role-admin .admin-hide{display:none!important}
+body.role-admin #home{display:none!important}
+body.role-admin #loginAudit{display:none!important}
+body:not(.role-boss) .boss-only{display:none!important}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 .settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-amount{display:grid;gap:4px}.settle-line{display:flex;align-items:center;gap:8px;justify-content:space-between}.settle-line span{font-size:12px;opacity:.75}.settle-line b{color:#e75ca2}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:var(--ink)}
 
@@ -78,6 +84,8 @@ body.role-user #settlement{display:none!important}
 </head>
 <body class="login-active">
 <div class="login-mask" id="loginMask">
+  <div class="login-bg" id="loginBg"></div>
+  <div class="login-overlay"></div>
   <div class="login-panel">
     <div class="login-brand">
       <span class="login-kicker">ALICE MCR</span>
@@ -97,11 +105,11 @@ body.role-user #settlement{display:none!important}
 <aside class="side">
  <div class="logo"><h1>爱丽丝学院</h1><p>v14+ · 纯出勤表静态页版 · 5057</p></div>
  <div class="nav">
-  <button class="on user-hide" onclick="show('home',this)">🏫 学院总览</button>
+  <button class="on user-hide admin-hide" onclick="show('home',this)">🏫 学院总览</button>
   <button class="admin-only" onclick="show('orders',this)">🧾 订单/预约</button>
   <button class="admin-only" onclick="show('customers',this)">🐰 客户表</button>
   <button class="admin-only" onclick="show('girls',this)">🎀 女孩表</button>
-  <button class="admin-only" onclick="show('settlement',this)">💴 金额结算</button>
+  <button class="admin-only user-hide" onclick="show('settlement',this)">💴 金额结算</button>
   <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
   <button class="admin-only" onclick="show('advanceReserve',this)">📅 提前预约表</button>
@@ -122,7 +130,7 @@ body.role-user #settlement{display:none!important}
  </div>
  <div class="card small" id="dbInfo">🌸 正在启动并读取数据库...</div>
 
- <section id="home" class="panel on user-hide">
+ <section id="home" class="panel on user-hide admin-hide">
   <div class="grid"><div class="card">今日店铺收益<div class="num" id="kToday">¥0</div></div><div class="card admin-only">本月店铺收益<div class="num" id="kMonth">¥0</div></div><div class="card">客户数<div class="num" id="kCustomers">0</div></div><div class="card">订单数<div class="num" id="kOrders">0</div></div></div>
   <div class="split"><div class="card"><h2 id="homeDayTitle">今日总收益按女孩</h2><div id="homeDayHead" class="chart-head"></div><canvas id="homeDay"></canvas><div id="homeDayTable"></div></div><div class="card admin-only"><h2>本月店铺收益按女孩</h2><div id="homeMonthHead" class="chart-head"></div><canvas id="homeMonth"></canvas></div></div>
  </section>
@@ -270,6 +278,8 @@ let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedu
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
 let authVerified=false;
 if(auth&&!auth.session_token){localStorage.removeItem("alice_auth");auth=null;}
+const LOGIN_BACKGROUNDS=["/static/login_bg_01.jpg","/static/login_bg_02.jpg","/static/login_bg_03.jpg","/static/login_bg_04.jpg","/static/login_bg_05.jpg","/static/login_bg_06.jpg","/static/login_bg_07.jpg","/static/login_bg_08.jpg","/static/login_bg_09.jpg"];
+let loginCuePlayed=false, loginCueFallbackArmed=false;
 function authHeaders(){
   if(!auth)return {};
   const h={"X-Alice-Role":auth.role};
@@ -285,12 +295,68 @@ function setLoginActive(active,message){
     loginMsg.classList.toggle('is-error', !!message && !String(message).includes('正在'));
   }
 }
+function chooseLoginBackground(){
+  if(!window.loginBg)return;
+  const bg=LOGIN_BACKGROUNDS[Math.floor(Math.random()*LOGIN_BACKGROUNDS.length)];
+  loginBg.style.backgroundImage=`url("${bg}")`;
+}
+function playLoginCue(){
+  if(loginCuePlayed)return;
+  const AudioCtx=window.AudioContext||window.webkitAudioContext;
+  if(!AudioCtx){return;}
+  let ctx;
+  try{ctx=new AudioCtx();}catch(e){armLoginCueFallback();return;}
+  const startSound=()=>{
+    if(loginCuePlayed)return;
+    loginCuePlayed=true;
+    const master=ctx.createGain();
+    master.gain.setValueAtTime(0.0001,ctx.currentTime);
+    master.gain.exponentialRampToValueAtTime(0.16,ctx.currentTime+0.03);
+    master.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.72);
+    master.connect(ctx.destination);
+    [880,1174.66,1567.98].forEach((freq,i)=>{
+      const osc=ctx.createOscillator();
+      const gain=ctx.createGain();
+      const t=ctx.currentTime+i*0.11;
+      osc.type='sine';
+      osc.frequency.setValueAtTime(freq,t);
+      gain.gain.setValueAtTime(0.0001,t);
+      gain.gain.exponentialRampToValueAtTime(0.9,t+0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001,t+0.36);
+      osc.connect(gain);
+      gain.connect(master);
+      osc.start(t);
+      osc.stop(t+0.4);
+    });
+    setTimeout(()=>ctx.close().catch(()=>{}),900);
+  };
+  if(ctx.state==='suspended'){
+    ctx.resume().then(startSound).catch(armLoginCueFallback);
+    setTimeout(()=>{if(!loginCuePlayed)armLoginCueFallback();},260);
+  }else{
+    startSound();
+  }
+}
+function armLoginCueFallback(){
+  if(loginCueFallbackArmed||loginCuePlayed)return;
+  loginCueFallbackArmed=true;
+  const retry=()=>{loginCueFallbackArmed=false;playLoginCue();};
+  window.addEventListener('pointerdown',retry,{once:true});
+  window.addEventListener('keydown',retry,{once:true});
+}
+function roleBlockedPage(id){
+  const role=auth&&auth.role;
+  if(role==='user')return id==='home'||id==='stats'||id==='settlement'||id==='loginAudit';
+  if(role==='admin')return id==='home'||id==='loginAudit';
+  return false;
+}
 function clearAuthAndShowLogin(message){
   authVerified=false;
   auth=null;
   localStorage.removeItem("alice_auth");
   setLoginActive(true,message||'');
-  document.body.classList.remove('role-user','role-boss');
+  playLoginCue();
+  document.body.classList.remove('role-user','role-admin','role-boss');
   if(window.roleBadge)roleBadge.textContent='未登录';
 }
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
@@ -311,13 +377,13 @@ function applyRole(){
   if(!auth||!authVerified){setLoginActive(true);return;}
   setLoginActive(false);
   document.body.classList.toggle('role-user', auth.role==='user');
+  document.body.classList.toggle('role-admin', auth.role==='admin');
+  document.body.classList.toggle('role-boss', auth.role==='boss');
   roleBadge.textContent = auth.role==='boss' ? '老板模式' : (auth.role==='admin' ? '管理员模式' : '普通用户模式');
-  if(auth.role==='user'){
-    const current=document.querySelector('.panel.on');
-    if(current && (current.id==='home' || current.id==='stats' || current.id==='settlement')){
-      const ordersBtn=[...document.querySelectorAll('.nav button')].find(b=>b.textContent.includes('订单'));
-      show('orders', ordersBtn || document.querySelector('.nav button:not(.user-hide)'));
-    }
+  const current=document.querySelector('.panel.on');
+  if(current && roleBlockedPage(current.id)){
+    const ordersBtn=[...document.querySelectorAll('.nav button')].find(b=>b.textContent.includes('订单'));
+    show('orders', ordersBtn || document.querySelector('.nav button'));
   }
 }
 async function doLogin(){
@@ -342,7 +408,7 @@ async function doLogin(){
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(auth&&auth.role==="user"&&(id==="home"||id==="stats"||id==="settlement")){alert("普通用户不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  try{
@@ -1592,7 +1658,7 @@ document.addEventListener("change",e=>{
   }
 });
 
-window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); setLoginActive(true); if(auth) loadAll(); else applyRole();});
+window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); chooseLoginBackground(); setLoginActive(true); if(auth) loadAll(); else {playLoginCue(); applyRole();}});
 
 // ===== 客用出勤表：纯前端动态画面，不写数据库 =====
 let attRows = [];
