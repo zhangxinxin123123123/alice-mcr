@@ -269,13 +269,24 @@ _JS = r'''
       }catch(e){}
     };
     window.doLogin=async function(){
-      var r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
-      var j=await r.json().catch(function(){return {ok:false,error:"登录失败"};});
-      if(!r.ok||!j.ok){alert(j.error||"登录失败");return;}
-      auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
-      localStorage.setItem("alice_auth",JSON.stringify(auth));
-      applyRole();
-      await loadAll();
+      var btn=document.getElementById("loginSubmit");
+      if(btn)btn.disabled=true;
+      if(typeof setLoginActive==="function")setLoginActive(true,"正在登录...");
+      try{
+        var r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
+        var j=await r.json().catch(function(){return {ok:false,error:"登录失败"};});
+        if(!r.ok||!j.ok){ if(typeof setLoginActive==="function")setLoginActive(true,j.error||"登录失败"); else alert(j.error||"登录失败"); return; }
+        auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
+        authVerified=false;
+        localStorage.setItem("alice_auth",JSON.stringify(auth));
+        if(typeof setLoginActive==="function")setLoginActive(true,"正在读取数据...");
+        await loadAll();
+      }catch(e){
+        if(typeof setLoginActive==="function")setLoginActive(true,"登录失败，请稍后再试"); else alert("登录失败");
+        console.error(e);
+      }finally{
+        if(btn)btn.disabled=false;
+      }
     };
     window.logout=async function(){
       try{ if(auth&&auth.session_token){ await fetch("/api/login/logout",{method:"POST",headers:Object.assign({"Content-Type":"application/json"},authHeaders()),body:JSON.stringify({session_token:auth.session_token})}); } }catch(e){}
@@ -1012,7 +1023,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724f"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724g"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:

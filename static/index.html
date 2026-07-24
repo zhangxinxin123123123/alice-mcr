@@ -28,9 +28,18 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
 
-.login-mask{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff);display:flex;align-items:center;justify-content:center;padding:20px}
-.login-box{width:min(420px,94vw);background:white;border:3px solid var(--line);border-radius:28px;padding:24px;box-shadow:0 18px 40px #b68bac33}
-.login-box h2{margin:0 0 8px;color:#e75ca2}.login-box input{width:100%;margin:8px 0}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
+body.login-active{min-height:100vh;overflow:hidden;background:#f9dbe8}
+body.login-active .app,body.login-active .modal{display:none!important}
+body:not(.login-active) .login-mask{display:none!important}
+.login-mask{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:flex-end;padding:clamp(18px,5vw,60px);overflow:auto;background:linear-gradient(90deg,rgba(255,247,251,.42) 0%,rgba(255,247,251,.20) 46%,rgba(255,247,251,.82) 100%),url("/static/alice_login_bg.png") center/cover no-repeat}
+.login-panel{width:min(430px,100%);display:grid;gap:14px}
+.login-brand{padding:18px 20px;border:2px solid rgba(255,255,255,.62);border-radius:24px;background:rgba(255,255,255,.30);box-shadow:0 18px 45px rgba(206,83,148,.24);backdrop-filter:blur(10px)}
+.login-kicker{display:inline-block;margin-bottom:7px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.80);color:#d94f9f;font-size:12px;font-weight:900;letter-spacing:.06em}
+.login-brand h1{margin:0;color:white;font-size:38px;line-height:1.05;text-shadow:0 3px 16px rgba(184,64,126,.55)}
+.login-brand p{margin:8px 0 0;color:white;font-weight:900;text-shadow:0 2px 10px rgba(184,64,126,.45)}
+.login-box{width:100%;background:rgba(255,255,255,.94);border:2px solid rgba(255,182,219,.86);border-radius:24px;padding:24px;box-shadow:0 20px 50px rgba(178,88,138,.28);backdrop-filter:blur(12px)}
+.login-box h2{margin:0 0 14px;color:#d94f9f;font-size:24px}.login-field{display:block;margin:12px 0}.login-field span{display:block;margin-bottom:6px;font-size:13px;font-weight:900;color:#7a5571}.login-field input{width:100%;margin:0;background:#fffafd}.login-submit{width:100%;margin-top:8px}.login-submit:disabled{opacity:.65;cursor:wait}.login-message{min-height:20px;margin:12px 0 0;font-size:13px;font-weight:900;color:#7a5571}.login-message.is-error{color:#d6003d}.login-tip{font-size:12px;line-height:1.6;opacity:.8}.role-badge{padding:9px 14px;border-radius:999px;background:#fff0f7;border:2px solid var(--line);font-weight:900}
+@media(max-width:760px){.login-mask{justify-content:center;align-items:flex-end;padding:18px;background-position:center top}.login-brand{padding:14px 16px}.login-brand h1{font-size:30px}.login-box{padding:20px;border-radius:22px}}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
 body.role-user .user-hide{display:none!important}
 body.role-user .admin-only{display:none!important}
@@ -67,15 +76,21 @@ body.role-user #settlement{display:none!important}
 @media(max-width:950px){.pure-shift-frame{height:calc(100vh - 120px);min-height:720px}.free-dona-wrap{grid-template-columns:1fr}.free-dona-card{width:100%;max-width:360px;margin:0 auto}}
 </style>
 </head>
-<body>
+<body class="login-active">
 <div class="login-mask" id="loginMask">
-  <div class="login-box">
-    <h2>🎀 爱丽丝学院 MCR 登录</h2>
-    <p class="login-tip">欢迎使用😘</p>
-    <input id="loginUser" placeholder="用户名">
-    <input id="loginPass" type="password" placeholder="密码">
-    <button class="primary" style="width:100%;margin-top:8px" onclick="doLogin()">登录进入</button>
-    <p class="login-tip">默认账号： user</p>
+  <div class="login-panel">
+    <div class="login-brand">
+      <span class="login-kicker">ALICE MCR</span>
+      <h1>爱丽丝学院</h1>
+      <p>管理后台</p>
+    </div>
+    <form class="login-box" onsubmit="event.preventDefault();doLogin();">
+      <h2>登录</h2>
+      <label class="login-field"><span>账号</span><input id="loginUser" autocomplete="username" placeholder="请输入账号"></label>
+      <label class="login-field"><span>密码</span><input id="loginPass" type="password" autocomplete="current-password" placeholder="请输入密码"></label>
+      <button id="loginSubmit" class="primary login-submit" type="submit">进入系统</button>
+      <p id="loginMsg" class="login-message" aria-live="polite"></p>
+    </form>
   </div>
 </div>
 <div class="app">
@@ -262,14 +277,21 @@ function authHeaders(){
   if(auth.username)h["X-Alice-User"]=auth.username;
   return h;
 }
+function setLoginActive(active,message){
+  document.body.classList.toggle('login-active', !!active);
+  if(window.loginMask)loginMask.style.display=active?'flex':'none';
+  if(window.loginMsg){
+    loginMsg.textContent=message||'';
+    loginMsg.classList.toggle('is-error', !!message && !String(message).includes('正在'));
+  }
+}
 function clearAuthAndShowLogin(message){
   authVerified=false;
   auth=null;
   localStorage.removeItem("alice_auth");
-  if(window.loginMask)loginMask.style.display='flex';
+  setLoginActive(true,message||'');
   document.body.classList.remove('role-user','role-boss');
   if(window.roleBadge)roleBadge.textContent='未登录';
-  if(message&&window.dbInfo)dbInfo.innerHTML=`请先登录：${escapeHtml(message)}`;
 }
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
@@ -286,8 +308,8 @@ async function api(url,body){
 }
 
 function applyRole(){
-  if(!auth||!authVerified){loginMask.style.display='flex';return;}
-  loginMask.style.display='none';
+  if(!auth||!authVerified){setLoginActive(true);return;}
+  setLoginActive(false);
   document.body.classList.toggle('role-user', auth.role==='user');
   roleBadge.textContent = auth.role==='boss' ? '老板模式' : (auth.role==='admin' ? '管理员模式' : '普通用户模式');
   if(auth.role==='user'){
@@ -299,12 +321,24 @@ function applyRole(){
   }
 }
 async function doLogin(){
-  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
-  const j=await r.json().catch(()=>({ok:false,error:'登录失败'}));
-  if(!r.ok || !j.ok){alert(j.error||'登录失败');return;}
-  auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
-  localStorage.setItem('alice_auth',JSON.stringify(auth));
-  await loadAll();
+  const btn=window.loginSubmit;
+  if(btn)btn.disabled=true;
+  setLoginActive(true,'正在登录...');
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
+    const j=await r.json().catch(()=>({ok:false,error:'登录失败'}));
+    if(!r.ok || !j.ok){setLoginActive(true,j.error||'登录失败');return;}
+    auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
+    authVerified=false;
+    localStorage.setItem('alice_auth',JSON.stringify(auth));
+    setLoginActive(true,'正在读取数据...');
+    await loadAll();
+  }catch(e){
+    setLoginActive(true,'登录失败，请稍后再试');
+    console.error(e);
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
@@ -323,6 +357,7 @@ async function loadAll(){
   }
   if(text.trim().startsWith("<")){
     dbInfo.innerHTML="❌ 后端返回了 HTML，不是 JSON。<br>这通常说明你打开的不是 Flask 接口，或旧服务还在运行。<br>请打开：<b>http://127.0.0.1:5057/api/all</b><br>如果看到网页而不是 JSON，把那个页面截图发我。";
+    setLoginActive(true,'读取数据失败：服务器返回了网页，不是数据接口');
     debugText.textContent=text.slice(0,1000);
     return false;
   }
@@ -331,6 +366,7 @@ async function loadAll(){
     throw new Error((data&&data.error)||`读取失败 HTTP ${r.status}`);
   }
   authVerified=true;
+  setLoginActive(false);
   let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
   debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>v17 接龙预约</b>｜端口：<b>5057</b>`;
@@ -338,6 +374,7 @@ async function loadAll(){
   return true;
  }catch(e){
   dbInfo.innerHTML=`❌ 读取失败：${e.message}<br>请确认黑窗口显示 Running on http://127.0.0.1:5057，并打开 /api/all 看是否是 JSON。`;
+  if(!authVerified)setLoginActive(true,`读取数据失败：${e.message}`);
   console.error(e);
   return false;
  }
@@ -1555,7 +1592,7 @@ document.addEventListener("change",e=>{
   }
 });
 
-window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); loginMask.style.display='flex'; if(auth) loadAll(); else applyRole();});
+window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); setLoginActive(true); if(auth) loadAll(); else applyRole();});
 
 // ===== 客用出勤表：纯前端动态画面，不写数据库 =====
 let attRows = [];
