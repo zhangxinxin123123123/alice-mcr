@@ -295,7 +295,7 @@ let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedu
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
 let authVerified=false;
 if(auth&&!auth.session_token){localStorage.removeItem("alice_auth");auth=null;}
-const LOGIN_BACKGROUNDS=["/static/login_bg_01.jpg","/static/login_bg_02.jpg","/static/login_bg_03.jpg","/static/login_bg_04.jpg","/static/login_bg_05.jpg","/static/login_bg_06.jpg","/static/login_bg_07.jpg","/static/login_bg_08.jpg"];
+const LOGIN_BACKGROUNDS=["/static/login_bg_01.jpg","/static/login_bg_02.jpg","/static/login_bg_03.jpg","/static/login_bg_04.jpg","/static/login_bg_05.jpg","/static/login_bg_06.jpg","/static/login_bg_07.jpg","/static/login_bg_08.jpg","/static/login_bg_09.jpg","/static/login_bg_10.jpg","/static/login_bg_11.jpg","/static/login_bg_12.jpg","/static/login_bg_13.jpg","/static/login_bg_14.jpg","/static/login_bg_15.jpg","/static/login_bg_16.jpg","/static/login_bg_17.jpg","/static/login_bg_18.jpg"];
 let loginCuePlayed=false, loginCueFallbackArmed=false;
 function authHeaders(){
   if(!auth)return {};
