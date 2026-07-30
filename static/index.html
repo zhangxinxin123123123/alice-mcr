@@ -1439,6 +1439,7 @@ function customerPointExpire(c){
   if(!os.length || Number(c.points||0)<=0) return {txt:'—',cls:''};
   const last=os[0].order_date; const expire=new Date(last); expire.setDate(expire.getDate()+30);
   const left=Math.ceil((expire-new Date(todayStr))/86400000);
+  if(left<=0) return {txt:'已过期',cls:'warn-red blink'};
   if(left<=5) return {txt:`${left}天后过期`,cls:'warn-red blink'};
   if(left<=10) return {txt:`${left}天后过期`,cls:'warn-red'};
   if(left<=15) return {txt:`${left}天后过期`,cls:'warn-yellow'};

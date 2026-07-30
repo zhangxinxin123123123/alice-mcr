@@ -1177,16 +1177,80 @@ def recalc_girl(c,gid):
         h=float(o['hours'] or calc_hours(o['service_time'])); th=take_home(g,h); prof=round_yen_1000_half_up(int(o['received_amount'] or 0)-th)
         c.execute('UPDATE orders SET girl_name=?, girl_take_home=?, store_profit=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',(g['name'],th,prof,o['id']))
 
+def tokyo_today_date():
+    if ZoneInfo:
+        try:
+            return datetime.now(ZoneInfo("Asia/Tokyo")).date()
+        except Exception:
+            pass
+    return (datetime.utcnow() + timedelta(hours=9)).date()
+
+def parse_order_day(value):
+    text = str(value or '').strip()[:10]
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except Exception:
+        return None
+
+def active_customer_points(c, customer_id, today=None):
+    today = today or tokyo_today_date()
+    cancel_text = '\u53d6\u6d88'
+    order_rows = c.execute("""
+        SELECT order_date, COALESCE(points,0) AS points, COALESCE(received_amount,0) AS received_amount
+        FROM orders
+        WHERE customer_id=?
+          AND COALESCE(order_date,'')<>''
+          AND COALESCE(order_status,'') NOT LIKE ?
+        ORDER BY substr(order_date,1,10), id
+    """, (customer_id, f"%{cancel_text}%")).fetchall()
+    active_points = 0
+    total_points = 0
+    total_spent = 0
+    last_day = None
+    for row in order_rows:
+        day = parse_order_day(row['order_date'])
+        if not day:
+            continue
+        if last_day and (day - last_day).days >= 30:
+            active_points = 0
+        pts = int(row['points'] or 0)
+        active_points += pts
+        total_points += pts
+        total_spent += int(row['received_amount'] or 0)
+        last_day = day
+    expired = bool(last_day and (today - last_day).days >= 30)
+    if expired:
+        active_points = 0
+    return active_points, total_points, total_spent, last_day, expired
+
+def expire_customer_points(c, customer_id=None):
+    if customer_id:
+        ids = [int(customer_id)]
+    else:
+        ids = [int(r['id']) for r in c.execute("SELECT id FROM customers").fetchall()]
+    today = tokyo_today_date()
+    changed = 0
+    for cid in ids:
+        current = c.execute("SELECT COALESCE(points,0) AS points FROM customers WHERE id=?", (cid,)).fetchone()
+        if not current:
+            continue
+        active_pts, total_pts, spent, _last_day, expired = active_customer_points(c, cid, today)
+        current_pts = int(current['points'] or 0)
+        if current_pts != active_pts and (expired or active_pts < current_pts):
+            c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (active_pts, total_pts, spent, cid))
+            changed += 1
+    return changed
+
 def recalc_customer_points(c, customer_id=None, update_types=True):
     if customer_id:
         ids = [customer_id]
     else:
         ids = [r["id"] for r in c.execute("SELECT id FROM customers").fetchall()]
     for cid in ids:
-        row = c.execute("SELECT COALESCE(SUM(points),0) AS pts, COALESCE(SUM(received_amount),0) AS spent FROM orders WHERE customer_id=?", (cid,)).fetchone()
-        pts = int(row["pts"] or 0)
-        spent = int(row["spent"] or 0)
-        c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, pts, spent, cid))
+        pts, total_pts, spent, _last_day, _expired = active_customer_points(c, cid)
+        c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, total_pts, spent, cid))
     if update_types:
         update_customer_type_by_history(c, None)
 
@@ -1357,6 +1421,7 @@ def all_data():
     init_db()
     with conn() as c:
         auto_finish_reservations(c)
+        expire_customer_points(c, None)
         update_customer_type_by_history(c, None)
         return jsonify({
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
@@ -2066,7 +2131,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v43_more_login_backgrounds",
+            "version": "v44_points_expiry_settlement_persist",
             "port": 5057,
         })
 
@@ -2085,7 +2150,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v43_more_login_backgrounds",
+            "version": "v44_points_expiry_settlement_persist",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

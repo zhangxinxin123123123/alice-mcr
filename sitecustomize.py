@@ -35,8 +35,8 @@ _JS = r'''
   function reportMatchesRow(r,row){ return !!(r && idKey(r.order_ids) && idKey(r.order_ids)===idKey(row.ids)); }
   function val(row, field, fallback){ var k=key(row.date,row.girl); if(drafts[k] && drafts[k][field] !== undefined) return drafts[k][field]; var r=reportOf(row.date,row.girl); if(reportMatchesRow(r,row) && r[field] !== undefined && r[field] !== null && String(r[field]) !== "") return r[field]; return fallback; }
   function draftVal(row, field){ var k=key(row.date,row.girl); return drafts[k] && drafts[k][field] !== undefined ? drafts[k][field] : undefined; }
-  function actual(row){ var d=draftVal(row,"actual_settlement"); return Number(d!==undefined ? d : Number(row.total||0)-Number(row.nonCash||0))||0; }
-  function formula(row){ var d=draftVal(row,"formula_text"); return String(d!==undefined ? d : formulaDefault(row.total,row.nonCash)); }
+  function actual(row){ return Number(val(row,"actual_settlement",Number(row.total||0)-Number(row.nonCash||0)))||0; }
+  function formula(row){ return String(val(row,"formula_text",formulaDefault(row.total,row.nonCash))); }
   async function post(url, body){
     if(typeof api === "function") return api(url, body);
     var r=await fetch(url,{method:"POST",headers:Object.assign({"Content-Type":"application/json"},H()),body:JSON.stringify(body||{})});
@@ -1026,7 +1026,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260724j"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260731a"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
