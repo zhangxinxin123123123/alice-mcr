@@ -84,7 +84,7 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS settlement_reports(
             id INTEGER PRIMARY KEY AUTOINCREMENT, report_date TEXT NOT NULL, girl_name TEXT NOT NULL,
             theoretical_amount INTEGER DEFAULT 0, actual_settlement INTEGER DEFAULT 0, formula_text TEXT DEFAULT '',
-            order_ids TEXT DEFAULT '', boss_email TEXT DEFAULT '', girl_email TEXT DEFAULT '',
+            order_ids TEXT DEFAULT '', signed_order_ids TEXT DEFAULT '', boss_email TEXT DEFAULT '', girl_email TEXT DEFAULT '',
             sent_to_boss_at TEXT DEFAULT '', sent_to_girl_at TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(report_date, girl_name))""")
@@ -131,6 +131,9 @@ def init_db():
         customer_cols = [r[1] for r in c.execute('PRAGMA table_info(customers)').fetchall()]
         if 'customer_type_locked' not in customer_cols:
             c.execute("ALTER TABLE customers ADD COLUMN customer_type_locked INTEGER DEFAULT 0")
+        report_cols = [r[1] for r in c.execute('PRAGMA table_info(settlement_reports)').fetchall()]
+        if 'signed_order_ids' not in report_cols:
+            c.execute("ALTER TABLE settlement_reports ADD COLUMN signed_order_ids TEXT DEFAULT ''")
         girl_cols = [r[1] for r in c.execute('PRAGMA table_info(girls)').fetchall()]
         if 'list_price' not in girl_cols:
             c.execute('ALTER TABLE girls ADD COLUMN list_price INTEGER DEFAULT 15000')
@@ -2131,7 +2134,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v44_points_expiry_settlement_persist",
+            "version": "v45_persist_settlement_signoff",
             "port": 5057,
         })
 
@@ -2150,7 +2153,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v44_points_expiry_settlement_persist",
+            "version": "v45_persist_settlement_signoff",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2304,19 +2307,107 @@ def api_settlements_save():
             actual = int(item.get('actual_settlement') if item.get('actual_settlement') is not None else theoretical)
             formula = str(item.get('formula_text') or '').strip()
             order_ids = ','.join(str(x) for x in (item.get('order_ids') or []))
-            c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,boss_email,girl_email,updated_at)
-                         VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+            signed_order_ids = ','.join(str(x) for x in (item.get('signed_order_ids') or []))
+            c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,signed_order_ids,boss_email,girl_email,updated_at)
+                         VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
                          ON CONFLICT(report_date,girl_name) DO UPDATE SET
                            theoretical_amount=excluded.theoretical_amount,
                            actual_settlement=excluded.actual_settlement,
                            formula_text=excluded.formula_text,
                            order_ids=excluded.order_ids,
+                           signed_order_ids=excluded.signed_order_ids,
                            boss_email=excluded.boss_email,
                            girl_email=excluded.girl_email,
                            updated_at=CURRENT_TIMESTAMP""",
-                      (report_date, girl_name, theoretical, actual, formula, order_ids, BOSS_EMAIL, girl_email))
+                      (report_date, girl_name, theoretical, actual, formula, order_ids, signed_order_ids, BOSS_EMAIL, girl_email))
             saved += 1
     return jsonify(ok=True, saved=saved)
+
+def parse_id_csv(value):
+    ids = set()
+    for part in str(value or '').split(','):
+        try:
+            v = int(part)
+        except Exception:
+            continue
+        if v > 0:
+            ids.add(v)
+    return ids
+
+def settlement_formula_for_group(theoretical, non_cash):
+    return settlement_formula_text(theoretical, non_cash)
+
+def is_cash_payment_method(value):
+    text = str(value or '').strip().lower()
+    if not text:
+        return True
+    non_cash_keys = (
+        'paypay', 'pay pay', 'wechat', 'weixin', 'alipay', 'linepay', 'line pay',
+        'rakuten', 'rmb', '\u5fae\u4fe1', '\u652f\u4ed8\u5b9d', '\u4eba\u6c11\u5e01'
+    )
+    return not any(k in text for k in non_cash_keys)
+
+@app.route('/api/settlements/sign', methods=['POST'])
+def api_settlements_sign():
+    init_db()
+    d = request.json or {}
+    checked = bool(d.get('checked'))
+    ids = []
+    for x in d.get('ids') or []:
+        try:
+            v = int(x)
+        except Exception:
+            continue
+        if v > 0 and v not in ids:
+            ids.append(v)
+    if not ids:
+        return jsonify(ok=True, saved=0)
+    with conn() as c:
+        q = ','.join('?' for _ in ids)
+        order_rows = rows(c.execute(f"SELECT id,order_date,girl_name,store_profit,received_amount,payment_method FROM orders WHERE id IN ({q})", ids).fetchall())
+        grouped = {}
+        for o in order_rows:
+            day = str(o.get('order_date') or '').strip()
+            girl = str(o.get('girl_name') or '').strip() or '未填写女孩'
+            if not day or not girl:
+                continue
+            key = (day, girl)
+            g = grouped.setdefault(key, {'ids': [], 'theoretical': 0, 'non_cash': 0})
+            g['ids'].append(int(o['id']))
+            g['theoretical'] += int(o.get('store_profit') or 0)
+            if not is_cash_payment_method(o.get('payment_method')):
+                g['non_cash'] += int(o.get('received_amount') or 0)
+        saved = 0
+        for (day, girl), g in grouped.items():
+            old = c.execute("SELECT * FROM settlement_reports WHERE report_date=? AND girl_name=?", (day, girl)).fetchone()
+            signed = parse_id_csv(old['signed_order_ids'] if old and 'signed_order_ids' in old.keys() else '')
+            target = set(g['ids'])
+            if checked:
+                signed.update(target)
+            else:
+                signed.difference_update(target)
+            order_ids = str(old['order_ids']) if old and old['order_ids'] else ','.join(str(x) for x in g['ids'])
+            signed_ids = ','.join(str(x) for x in sorted(signed))
+            theoretical = int(old['theoretical_amount']) if old and old['theoretical_amount'] is not None else int(g['theoretical'])
+            default_actual = int(g['theoretical']) - int(g['non_cash'])
+            actual = int(old['actual_settlement']) if old and old['actual_settlement'] is not None else default_actual
+            formula = str(old['formula_text']) if old and old['formula_text'] else settlement_formula_for_group(g['theoretical'], g['non_cash'])
+            g_row = c.execute('SELECT email FROM girls WHERE name=?', (girl,)).fetchone()
+            girl_email = (old['girl_email'] if old and 'girl_email' in old.keys() else '') or (g_row['email'] if g_row and 'email' in g_row.keys() else '') or ''
+            c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,signed_order_ids,boss_email,girl_email,updated_at)
+                         VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(report_date,girl_name) DO UPDATE SET
+                           theoretical_amount=excluded.theoretical_amount,
+                           actual_settlement=excluded.actual_settlement,
+                           formula_text=excluded.formula_text,
+                           order_ids=excluded.order_ids,
+                           signed_order_ids=excluded.signed_order_ids,
+                           boss_email=excluded.boss_email,
+                           girl_email=excluded.girl_email,
+                           updated_at=CURRENT_TIMESTAMP""",
+                      (day, girl, theoretical, actual, formula, order_ids, signed_ids, BOSS_EMAIL, girl_email))
+            saved += 1
+    return jsonify(ok=True, saved=saved, checked=checked)
 
 def send_plain_email(to_addrs, subject, body, display_name='Alice MCR', smtp=None):
     to_addrs = [x for x in to_addrs if x]

@@ -37,6 +37,8 @@ _JS = r'''
   function draftVal(row, field){ var k=key(row.date,row.girl); return drafts[k] && drafts[k][field] !== undefined ? drafts[k][field] : undefined; }
   function actual(row){ return Number(val(row,"actual_settlement",Number(row.total||0)-Number(row.nonCash||0)))||0; }
   function formula(row){ return String(val(row,"formula_text",formulaDefault(row.total,row.nonCash))); }
+  function parseIds(v){ return String(v||"").split(",").map(Number).filter(Boolean); }
+  function hydrateSelectedFromReports(){ selected.clear(); (D().settlement_reports||[]).forEach(function(r){ parseIds(r.signed_order_ids).forEach(function(id){ selected.add(id); }); }); }
   async function post(url, body){
     if(typeof api === "function") return api(url, body);
     var r=await fetch(url,{method:"POST",headers:Object.assign({"Content-Type":"application/json"},H()),body:JSON.stringify(body||{})});
@@ -50,6 +52,7 @@ _JS = r'''
       var j=await r.json();
       D().settlement_reports=j.settlements||[];
       D().settlement_boss_email=j.boss_email||bossDefault;
+      hydrateSelectedFromReports();
     }catch(e){ D().settlement_reports=D().settlement_reports||[]; D().settlement_boss_email=bossDefault; }
   }
   window.loadSettlementReports = loadReports;
@@ -102,10 +105,11 @@ _JS = r'''
     if(!ds.length) return "";
     return ds[0] === ds[ds.length-1] ? ds[0] : ds[0]+" 至 "+ds[ds.length-1];
   }
-  function rowsForSave(){ var out=[]; groups().forEach(function(g){ Object.values(g.dates).forEach(function(r){ out.push({girl_name:g.girl,theoretical_amount:Number(r.total||0),actual_settlement:actual(r),formula_text:formula(r),order_ids:r.ids,girl_email:girlEmail(g.girl)}); }); }); return out; }
+  function signedIdsForRow(row){ return (row.ids||[]).map(Number).filter(function(id){ return selected.has(id); }); }
+  function rowsForSave(){ var out=[]; groups().forEach(function(g){ Object.values(g.dates).forEach(function(r){ out.push({girl_name:g.girl,theoretical_amount:Number(r.total||0),actual_settlement:actual(r),formula_text:formula(r),order_ids:r.ids,signed_order_ids:signedIdsForRow(r),girl_email:girlEmail(g.girl)}); }); }); return out; }
   window.setSettlementDraft=function(date,girl,field,value){ var k=key(date,girl); drafts[k]=drafts[k]||{}; drafts[k][field]=field==="actual_settlement"?Number(value||0):value; };
-  window.toggleSettlementIds=function(ids,checked){ if(checked&&!confirm("确定是否签收？")){ renderSettlement(); return; } ids.map(Number).filter(Boolean).forEach(function(id){ checked?selected.add(id):selected.delete(id); }); renderSettlement(); };
-  window.clearSettlementPick=function(){ selected.clear(); renderSettlement(); };
+  window.toggleSettlementIds=async function(ids,checked){ ids=(ids||[]).map(Number).filter(Boolean); if(checked&&!confirm("确定是否签收？")){ renderSettlement(); return; } ids.forEach(function(id){ checked?selected.add(id):selected.delete(id); }); renderSettlement(); try{ await post("/api/settlements/sign",{ids:ids,checked:!!checked}); await loadReports(); renderSettlement(); }catch(e){ alert("保存签收失败："+(e&&e.message?e.message:e)); await loadReports(); renderSettlement(); } };
+  window.clearSettlementPick=async function(){ var ids=Array.from(selected).map(Number).filter(Boolean); if(!ids.length){ renderSettlement(); return; } if(!confirm("确定清空全部签收状态？"))return; selected.clear(); renderSettlement(); try{ await post("/api/settlements/sign",{ids:ids,checked:false}); await loadReports(); renderSettlement(); }catch(e){ alert("清空签收失败："+(e&&e.message?e.message:e)); await loadReports(); renderSettlement(); } };
   function checkedSettlementIds(){
     var ids=new Set(Array.from(selected).map(Number).filter(Boolean));
     document.querySelectorAll("#settlePatchRoot .check-settle:checked").forEach(function(c){
@@ -607,6 +611,7 @@ def _install(module):
                 actual_settlement INTEGER DEFAULT 0,
                 formula_text TEXT DEFAULT '',
                 order_ids TEXT DEFAULT '',
+                signed_order_ids TEXT DEFAULT '',
                 boss_email TEXT DEFAULT '',
                 girl_email TEXT DEFAULT '',
                 sent_to_boss_at TEXT DEFAULT '',
@@ -618,6 +623,9 @@ def _install(module):
             cols = [r[1] for r in c.execute("PRAGMA table_info(girls)").fetchall()]
             if cols and "email" not in cols:
                 c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
+            report_cols = [r[1] for r in c.execute("PRAGMA table_info(settlement_reports)").fetchall()]
+            if report_cols and "signed_order_ids" not in report_cols:
+                c.execute("ALTER TABLE settlement_reports ADD COLUMN signed_order_ids TEXT DEFAULT ''")
             c.execute("""CREATE TABLE IF NOT EXISTS login_sessions(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT DEFAULT '',
@@ -953,12 +961,13 @@ def _install(module):
                 actual = int(float(item.get("actual_settlement") or 0))
                 formula = str(item.get("formula_text") or "")
                 order_ids = ",".join(str(x) for x in (item.get("order_ids") or []))
+                signed_order_ids = ",".join(str(x) for x in (item.get("signed_order_ids") or []))
                 g_email = str(item.get("girl_email") or girl_email(c, girl) or "")
                 old = c.execute("SELECT id FROM settlement_reports WHERE report_date=? AND girl_name=?", (report_date, girl)).fetchone()
                 if old:
-                    c.execute("""UPDATE settlement_reports SET theoretical_amount=?,actual_settlement=?,formula_text=?,order_ids=?,boss_email=?,girl_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (theory, actual, formula, order_ids, BOSS_EMAIL, g_email, old["id"]))
+                    c.execute("""UPDATE settlement_reports SET theoretical_amount=?,actual_settlement=?,formula_text=?,order_ids=?,signed_order_ids=?,boss_email=?,girl_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (theory, actual, formula, order_ids, signed_order_ids, BOSS_EMAIL, g_email, old["id"]))
                 else:
-                    c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,boss_email,girl_email) VALUES(?,?,?,?,?,?,?,?)""", (report_date, girl, theory, actual, formula, order_ids, BOSS_EMAIL, g_email))
+                    c.execute("""INSERT INTO settlement_reports(report_date,girl_name,theoretical_amount,actual_settlement,formula_text,order_ids,signed_order_ids,boss_email,girl_email) VALUES(?,?,?,?,?,?,?,?,?)""", (report_date, girl, theory, actual, formula, order_ids, signed_order_ids, BOSS_EMAIL, g_email))
                 saved += 1
         return jsonify(ok=True, saved=saved)
 
@@ -1026,7 +1035,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260731a"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260731b"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:
