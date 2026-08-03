@@ -151,6 +151,7 @@ body:not(.role-boss) .boss-only{display:none!important}
   <div class="grid"><div class="card">今日店铺收益<div class="num" id="kToday">¥0</div></div><div class="card admin-only">本月店铺收益<div class="num" id="kMonth">¥0</div></div><div class="card">客户数<div class="num" id="kCustomers">0</div></div><div class="card">订单数<div class="num" id="kOrders">0</div></div></div>
   <div class="split"><div class="card"><h2 id="homeDayTitle">今日总收益按女孩</h2><div id="homeDayHead" class="chart-head"></div><canvas id="homeDay"></canvas><div id="homeDayTable"></div></div><div class="card admin-only"><h2>本月店铺收益按女孩</h2><div id="homeMonthHead" class="chart-head"></div><canvas id="homeMonth"></canvas></div></div>
   <div class="split payment-chart"><div class="card"><h2>今日支付构成</h2><div id="homeDayPaymentHead" class="chart-head"></div><canvas id="homeDayPayment"></canvas></div><div class="card admin-only"><h2>本月支付构成</h2><div id="homeMonthPaymentHead" class="chart-head"></div><canvas id="homeMonthPayment"></canvas></div></div>
+  <div class="split payment-chart"><div class="card"><h2>今日店铺收益扇形图</h2><div id="homeDayShopHead" class="chart-head"></div><canvas id="homeDayShop"></canvas></div><div class="card admin-only"><h2>本月店铺收益扇形图</h2><div id="homeMonthShopHead" class="chart-head"></div><canvas id="homeMonthShop"></canvas></div></div>
  </section>
 
  <section id="orders" class="panel"><div class="card"><h2>订单 / 预约</h2>
@@ -281,7 +282,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 
  
  <section id="stats" class="panel">
-  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas><div id="netDayChartTable"></div></div></div><div class="split payment-chart stat-chart-only"><div class="card"><h2>日支付构成</h2><div id="dayPaymentHead" class="chart-head"></div><canvas id="dayPayment"></canvas></div><div class="card"><h2>月支付构成</h2><div id="monthPaymentHead" class="chart-head"></div><canvas id="monthPayment"></canvas></div></div><div class="split vertical stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card month-date-card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas><div id="monthDateRows" class="month-date-rows"></div></div><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas><div id="netMonthChartTable"></div></div></div>
+  <div class="split stat-chart-only"><div class="card"><h2 id="dayChartTitle">日总收益按女孩</h2><input id="sDay" type="date" onchange="render()"><div id="dayChartHead" class="chart-head"></div><canvas id="dayChart"></canvas><div id="dayChartTable"></div></div><div class="card"><h2>日成本按女孩/房间</h2><div id="netDayChartHead" class="chart-head"></div><canvas id="netDayChart"></canvas><div id="netDayChartTable"></div></div></div><div class="split payment-chart stat-chart-only"><div class="card"><h2>日支付构成</h2><div id="dayPaymentHead" class="chart-head"></div><canvas id="dayPayment"></canvas></div><div class="card"><h2>月支付构成</h2><div id="monthPaymentHead" class="chart-head"></div><canvas id="monthPayment"></canvas></div></div><div class="split payment-chart stat-chart-only"><div class="card"><h2>日店铺收益扇形图</h2><div id="dayShopHead" class="chart-head"></div><canvas id="dayShop"></canvas></div><div class="card"><h2>月店铺收益扇形图</h2><div id="monthShopHead" class="chart-head"></div><canvas id="monthShop"></canvas></div></div><div class="split vertical stat-chart-only"><div class="card"><h2>月店铺收益按女孩</h2><input id="sMonth" type="month" onchange="render()"><div id="monthChartHead" class="chart-head"></div><canvas id="monthChart"></canvas></div><div class="card month-date-card"><h2>月店铺收益按日期</h2><div id="monthDateChartHead" class="chart-head"></div><canvas id="monthDateChart"></canvas><div id="monthDateRows" class="month-date-rows"></div></div><div class="card"><h2>月成本按女孩/房间</h2><div id="netMonthChartHead" class="chart-head"></div><canvas id="netMonthChart"></canvas><div id="netMonthChartTable"></div></div></div>
   <div class="card"><h2>日收益表</h2><div id="dailyTable"></div></div>
  </section>
 
@@ -1214,6 +1215,21 @@ function fixedGirlColor(name){
 }
 function group(filter){let m={};data.orders.filter(filter).forEach(o=>{const val=(auth&&auth.role==="user")?Number(o.received_amount||0):Number(o.store_profit||0);m[o.girl_name]=(m[o.girl_name]||0)+val});return m}
 function groupByDate(filter){let m={};data.orders.filter(filter).forEach(o=>{m[o.order_date]=(m[o.order_date]||0)+Number(o.store_profit||0)});return m}
+function shopNameFromOrder(o){
+  const text=[o.remark,o.remark2,o.raw_text].map(v=>String(v||"")).join(" ");
+  if(text.includes("软甜"))return "软甜";
+  if(text.includes("喵喵"))return "喵喵";
+  return "爱丽丝";
+}
+function groupShopRevenue(filter){
+  const m={};
+  data.orders.filter(filter).forEach(o=>{
+    const val=(auth&&auth.role==="user")?Number(o.received_amount||0):Number(o.store_profit||0);
+    const shop=shopNameFromOrder(o);
+    m[shop]=(m[shop]||0)+val;
+  });
+  return m;
+}
 function revenueBreakdownText(name, amount, meta={}, isTotal=false){
   const pay = Number(isTotal ? (meta.payTotal||0) : ((meta.payByGirl||{})[name]||0));
   const rmb = Number(isTotal ? (meta.rmbTotal||0) : ((meta.rmbByGirl||{})[name]||0));
@@ -1280,6 +1296,9 @@ function chart(id,map,meta={}){
 function paymentColor(name){
   return {"现金":"#9be7c0","PayPay":"#8fd3ff","人民币支付":"#ff8fc7","其他非现金":"#ffd36e","暂无数据":"#e5e7eb"}[name]||fixedGirlColor(name);
 }
+function shopColor(name){
+  return {"爱丽丝":"#ff8fc7","软甜":"#d9c8ff","喵喵":"#8fd3ff","暂无数据":"#e5e7eb"}[name]||fixedGirlColor(name);
+}
 function paymentChart(id,meta={}){
   const ctx=document.getElementById(id); if(!ctx)return; if(charts[id])charts[id].destroy();
   const pay=Number(meta.payTotal||0), rmb=Number(meta.rmbTotal||0), other=Number(meta.otherNonCashTotal||0);
@@ -1304,6 +1323,26 @@ function paymentChart(id,meta={}){
     head.innerHTML=parts.join(" ｜ ");
   }
   charts[id]=new Chart(ctx,{type:"pie",data:{labels,datasets:[{data:displayItems.map(x=>Number(x.value||0)),backgroundColor:displayItems.map(x=>paymentColor(x.name))}]},options:{layout:{padding:12},plugins:{pieValueLabelPlugin:{display:items.length>0},title:{display:true,text:`支付构成 ${yen(total)}`},legend:{position:"bottom"},tooltip:{callbacks:{label:function(context){const item=displayItems[context.dataIndex]||{};const v=Number(item.displayValue!==undefined?item.displayValue:item.value||0);const pct=total ? (v/total*100).toFixed(1) : "0.0";return `${item.name||context.label}：${yen(v)}（${pct}%）`;}}}}}});
+}
+function shopRevenueChart(id,map,meta={}){
+  const ctx=document.getElementById(id); if(!ctx)return; if(charts[id])charts[id].destroy();
+  const order=["爱丽丝","软甜","喵喵"];
+  const items=order.map(name=>({name,value:Number((map||{})[name]||0)})).filter(x=>x.value>0);
+  Object.keys(map||{}).filter(name=>!order.includes(name)&&Number(map[name]||0)>0).forEach(name=>items.push({name,value:Number(map[name]||0)}));
+  const total=items.reduce((s,x)=>s+Number(x.value||0),0);
+  const displayItems=items.length?items:[{name:"暂无数据",value:1,displayValue:0}];
+  const labels=displayItems.map(x=>{
+    const v=Number(x.displayValue!==undefined?x.displayValue:x.value);
+    const pct=total ? (v/total*100).toFixed(1) : "0.0";
+    return `${x.name}｜${yen(v)}｜${pct}%`;
+  });
+  const head=document.getElementById(id+"Head");
+  if(head){
+    const parts=[`<b>店铺收益：${yen(total)}</b>`,`爱丽丝：${yen((map||{})["爱丽丝"]||0)}`,`软甜：${yen((map||{})["软甜"]||0)}`,`喵喵：${yen((map||{})["喵喵"]||0)}`];
+    if(meta.orderCount!==undefined)parts.push(`订单：${Number(meta.orderCount||0)}单`);
+    head.innerHTML=parts.join(" ｜ ");
+  }
+  charts[id]=new Chart(ctx,{type:"pie",data:{labels,datasets:[{data:displayItems.map(x=>Number(x.value||0)),backgroundColor:displayItems.map(x=>shopColor(x.name))}]},options:{layout:{padding:12},plugins:{pieValueLabelPlugin:{display:items.length>0},title:{display:true,text:`店铺收益扇形图 ${yen(total)}`},legend:{position:"bottom"},tooltip:{callbacks:{label:function(context){const item=displayItems[context.dataIndex]||{};const v=Number(item.displayValue!==undefined?item.displayValue:item.value||0);const pct=total ? (v/total*100).toFixed(1) : "0.0";return `${item.name||context.label}：${yen(v)}（${pct}%）`;}}}}}});
 }
 function barChart(id,map,meta={}){
   let ctx=document.getElementById(id); if(!ctx)return; if(charts[id])charts[id].destroy();
@@ -1696,11 +1735,11 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
  renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();
  if(isUser){sDay.value=todayStr; sDay.disabled=true;}else{sDay.disabled=false;} let sd=sDay.value,sm=sMonth.value;
- const homeDayMap=group(o=>o.order_date===todayStr); const homeDayMeta=chartMeta(o=>o.order_date===todayStr,homeDayMap); chart("homeDay",homeDayMap,homeDayMeta); paymentChart("homeDayPayment",homeDayMeta); renderRevenueTable("homeDayTable",homeDayMap,homeDayMeta);
- if(!isUser){const homeMonthMap=group(o=>String(o.order_date).startsWith(month)); const homeMonthMeta=chartMeta(o=>String(o.order_date).startsWith(month),homeMonthMap); chart("homeMonth",homeMonthMap,homeMonthMeta); paymentChart("homeMonthPayment",homeMonthMeta);}
- const dayMap=group(o=>o.order_date===sd); const dayMeta=chartMeta(o=>o.order_date===sd,dayMap); chart("dayChart",dayMap,dayMeta); paymentChart("dayPayment",dayMeta); renderRevenueTable("dayChartTable",dayMap,dayMeta);
+ const homeDayFilter=o=>o.order_date===todayStr; const homeDayMap=group(homeDayFilter); const homeDayMeta=chartMeta(homeDayFilter,homeDayMap); chart("homeDay",homeDayMap,homeDayMeta); paymentChart("homeDayPayment",homeDayMeta); shopRevenueChart("homeDayShop",groupShopRevenue(homeDayFilter),homeDayMeta); renderRevenueTable("homeDayTable",homeDayMap,homeDayMeta);
+ if(!isUser){const homeMonthFilter=o=>String(o.order_date).startsWith(month); const homeMonthMap=group(homeMonthFilter); const homeMonthMeta=chartMeta(homeMonthFilter,homeMonthMap); chart("homeMonth",homeMonthMap,homeMonthMeta); paymentChart("homeMonthPayment",homeMonthMeta); shopRevenueChart("homeMonthShop",groupShopRevenue(homeMonthFilter),homeMonthMeta);}
+ const dayFilter=o=>o.order_date===sd; const dayMap=group(dayFilter); const dayMeta=chartMeta(dayFilter,dayMap); chart("dayChart",dayMap,dayMeta); paymentChart("dayPayment",dayMeta); shopRevenueChart("dayShop",groupShopRevenue(dayFilter),dayMeta); renderRevenueTable("dayChartTable",dayMap,dayMeta);
  if(!isUser){
-   const monthMap=group(o=>String(o.order_date).startsWith(sm)); const monthMeta=chartMeta(o=>String(o.order_date).startsWith(sm),monthMap); chart("monthChart",monthMap,monthMeta); paymentChart("monthPayment",monthMeta);
+   const monthFilter=o=>String(o.order_date).startsWith(sm); const monthMap=group(monthFilter); const monthMeta=chartMeta(monthFilter,monthMap); chart("monthChart",monthMap,monthMeta); paymentChart("monthPayment",monthMeta); shopRevenueChart("monthShop",groupShopRevenue(monthFilter),monthMeta);
    const netDayMap=groupCost(o=>o.order_date===sd); chart("netDayChart",netDayMap,costMeta(o=>o.order_date===sd,netDayMap)); renderCostNetTable("netDayChartTable",netDayMap,o=>o.order_date===sd);
    const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); const monthDateCostMap=groupCostByDate(o=>String(o.order_date).startsWith(sm)); monthDateRevenueCostChart("monthDateChart",monthDateMap,monthDateCostMap);
  }
