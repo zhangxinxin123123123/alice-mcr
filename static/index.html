@@ -224,6 +224,11 @@ body:not(.role-boss) .boss-only{display:none!important}
   <div id="chainImageDrop" class="chain-image-drop" tabindex="0"><b>拖拽图片到这里</b><br><span class="note">也可以点击这里后 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
   <div id="chainImageList" class="chain-image-list"></div>
  </div>
+ <div class="card"><h2>女孩脸部白光</h2>
+  <p class="note">把女孩照片拖到下面区域，系统会自动在脸部加白色圆光遮挡，并生成可复制、可下载的图片。</p>
+  <div id="chainFaceGlowDrop" class="chain-image-drop" tabindex="0"><b>拖拽图片到这里</b><br><span class="note">也可以点击这里后 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
+  <div id="chainFaceGlowList" class="chain-image-list"></div>
+ </div>
  <div class="card"><h2>微信格式输出</h2>
   <div class="split"><div><h3>完整版（内部用：含客户ID和名字）</h3><textarea id="chainFullOut" readonly></textarea></div><div><h3>普通版（给女孩/群里看）</h3><textarea id="chainBasicOut" readonly></textarea></div></div>
   <h3 style="margin-top:14px">全部女孩空闲时间</h3>
@@ -954,7 +959,7 @@ async function copyChainFreeTable(){
 }
 
 
-let chainNamedImages=[];
+let chainNamedImages=[], chainFaceGlowImages=[], activeChainImageTool='named';
 function formatChainNameTime(clock){
   const t=normalizeChainClock(clock||CHAIN_DEFAULT_START);
   return `${Number(t.slice(0,2))}:${t.slice(3,5)}`;
@@ -966,23 +971,39 @@ function currentChainEmployeeName(){
 }
 function setupChainImageTools(){
   const drop=document.getElementById('chainImageDrop');
-  if(!drop || drop.dataset.ready)return;
-  drop.dataset.ready='1';
-  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
-  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
-  drop.addEventListener('drop',e=>handleChainImageFiles(e.dataTransfer&&e.dataTransfer.files));
-  drop.addEventListener('click',()=>drop.focus());
+  const faceDrop=document.getElementById('chainFaceGlowDrop');
+  bindChainImageDrop(drop,'named',handleChainImageFiles);
+  bindChainImageDrop(faceDrop,'face',handleChainFaceGlowFiles);
+  if(document.body.dataset.chainImagePasteReady)return;
+  document.body.dataset.chainImagePasteReady='1';
   document.addEventListener('paste',e=>{
     if(!document.getElementById('chainReserve')?.classList.contains('on'))return;
     const items=[...(e.clipboardData?.items||[])];
     const files=items.filter(i=>i.type&&i.type.startsWith('image/')).map(i=>i.getAsFile()).filter(Boolean);
-    if(files.length){e.preventDefault();handleChainImageFiles(files);}
+    if(files.length){
+      e.preventDefault();
+      (activeChainImageTool==='face'?handleChainFaceGlowFiles:handleChainImageFiles)(files);
+    }
   });
+}
+function bindChainImageDrop(drop,tool,handler){
+  if(!drop || drop.dataset.ready)return;
+  drop.dataset.ready='1';
+  ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();activeChainImageTool=tool;drop.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+  drop.addEventListener('drop',e=>{activeChainImageTool=tool;handler(e.dataTransfer&&e.dataTransfer.files);});
+  drop.addEventListener('click',()=>{activeChainImageTool=tool;drop.focus();});
+  drop.addEventListener('focus',()=>{activeChainImageTool=tool;});
 }
 function handleChainImageFiles(files){
   files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
   if(!files.length){alert('请拖入或粘贴图片文件');return;}
   files.forEach(file=>makeNamedImage(file,currentChainEmployeeName()));
+}
+function handleChainFaceGlowFiles(files){
+  files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
+  if(!files.length){alert('请拖入或粘贴图片文件');return;}
+  files.forEach(file=>makeFaceGlowImage(file));
 }
 function makeNamedImage(file,name){
   const img=new Image();
@@ -1011,6 +1032,72 @@ function makeNamedImage(file,name){
   };
   img.onerror=()=>alert('图片读取失败');
   img.src=URL.createObjectURL(file);
+}
+function makeFaceGlowImage(file){
+  const img=new Image();
+  img.onload=async ()=>{
+    const canvas=document.createElement('canvas');
+    canvas.width=img.naturalWidth||img.width; canvas.height=img.naturalHeight||img.height;
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const faceBox=await detectChainFaceBox(canvas);
+    drawFaceWhiteGlow(ctx,canvas.width,canvas.height,faceBox);
+    const dataUrl=canvas.toDataURL('image/png');
+    const base=safeFileName((file&&file.name?file.name.replace(/\.[^.]+$/,''):'face_glow')||'face_glow');
+    chainFaceGlowImages.unshift({name:base,dataUrl,filename:`${base}_face_glow.png`});
+    renderChainFaceGlowImages();
+  };
+  img.onerror=()=>alert('图片读取失败');
+  img.src=URL.createObjectURL(file);
+}
+async function detectChainFaceBox(canvas){
+  try{
+    if(!('FaceDetector' in window))return fallbackChainFaceBox(canvas.width,canvas.height);
+    const detector=new FaceDetector({fastMode:true,maxDetectedFaces:1});
+    const faces=await detector.detect(canvas);
+    if(faces&&faces.length){
+      const f=faces[0].boundingBox||faces[0];
+      return {x:f.x||f.left||0,y:f.y||f.top||0,width:f.width||0,height:f.height||0,detected:true};
+    }
+  }catch(e){}
+  return fallbackChainFaceBox(canvas.width,canvas.height);
+}
+function fallbackChainFaceBox(width,height){
+  const portrait=height>=width;
+  const boxW=portrait?width*.32:width*.22;
+  const boxH=boxW*1.2;
+  return {
+    x:width*.5-boxW/2,
+    y:height*(portrait ? .23 : .18),
+    width:boxW,
+    height:boxH,
+    detected:false
+  };
+}
+function drawFaceWhiteGlow(ctx,width,height,box){
+  const b=box||fallbackChainFaceBox(width,height);
+  const cx=b.x+b.width*.5;
+  const cy=b.y+b.height*(b.detected ? .60 : .57);
+  const rx=Math.max(width*.105,b.width*.55);
+  const ry=Math.max(height*.045,b.height*.29);
+  ctx.save();
+  ctx.globalCompositeOperation='source-over';
+  const grad=ctx.createRadialGradient(cx,cy,Math.max(1,Math.min(rx,ry)*.12),cx,cy,Math.max(rx,ry)*1.25);
+  grad.addColorStop(0,'rgba(255,255,255,1)');
+  grad.addColorStop(.54,'rgba(255,255,255,.98)');
+  grad.addColorStop(.82,'rgba(255,255,255,.55)');
+  grad.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.filter=`blur(${Math.max(3,Math.round(Math.min(rx,ry)*.08))}px)`;
+  ctx.beginPath();
+  ctx.ellipse(cx,cy,rx*1.12,ry*1.12,0,0,Math.PI*2);
+  ctx.fillStyle=grad;
+  ctx.fill();
+  ctx.filter='none';
+  ctx.beginPath();
+  ctx.ellipse(cx,cy,rx*.9,ry*.9,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,.96)';
+  ctx.fill();
+  ctx.restore();
 }
 function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
 function colorDistance(a,b){
@@ -1106,6 +1193,10 @@ function renderChainNamedImages(){
   const box=document.getElementById('chainImageList'); if(!box)return;
   box.innerHTML=chainNamedImages.map((it,i)=>`<div class="chain-image-card"><img src="${it.dataUrl}" title="点击复制图片" onclick="copyChainNamedImage(${i})"><div class="hint">${it.name}｜点击图片复制</div><div class="acts"><button class="primary" onclick="copyChainNamedImage(${i})">复制图片</button><button class="soft" onclick="downloadChainNamedImage(${i})">下载</button><button class="danger" onclick="deleteChainNamedImage(${i})">删除</button></div></div>`).join('') || '<p class="note">还没有生成图片。</p>';
 }
+function renderChainFaceGlowImages(){
+  const box=document.getElementById('chainFaceGlowList'); if(!box)return;
+  box.innerHTML=chainFaceGlowImages.map((it,i)=>`<div class="chain-image-card"><img src="${it.dataUrl}" title="点击复制图片" onclick="copyChainFaceGlowImage(${i})"><div class="hint">${it.name}｜脸部白光｜点击图片复制</div><div class="acts"><button class="primary" onclick="copyChainFaceGlowImage(${i})">复制图片</button><button class="soft" onclick="downloadChainFaceGlowImage(${i})">下载</button><button class="danger" onclick="deleteChainFaceGlowImage(${i})">删除</button></div></div>`).join('') || '<p class="note">还没有生成图片。</p>';
+}
 async function copyChainNamedImage(i){
   const it=chainNamedImages[i]; if(!it)return;
   try{
@@ -1118,6 +1209,18 @@ async function copyChainNamedImage(i){
 }
 function downloadChainNamedImage(i){const it=chainNamedImages[i]; if(!it)return; const a=document.createElement('a'); a.href=it.dataUrl; a.download=it.filename; a.click();}
 function deleteChainNamedImage(i){chainNamedImages.splice(i,1);renderChainNamedImages();}
+async function copyChainFaceGlowImage(i){
+  const it=chainFaceGlowImages[i]; if(!it)return;
+  try{
+    const blob=await (await fetch(it.dataUrl)).blob();
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    alert('已复制图片');
+  }catch(e){
+    alert('当前浏览器不支持直接复制图片，请使用下载按钮。');
+  }
+}
+function downloadChainFaceGlowImage(i){const it=chainFaceGlowImages[i]; if(!it)return; const a=document.createElement('a'); a.href=it.dataUrl; a.download=it.filename; a.click();}
+function deleteChainFaceGlowImage(i){chainFaceGlowImages.splice(i,1);renderChainFaceGlowImages();}
 
 function renderImportCheck(){if(!window.importCheck)return;const d=iDate.value||todayStr;const ym=d.slice(0,7);const days=new Date(Number(ym.slice(0,4)),Number(ym.slice(5,7)),0).getDate();const has=new Set((data.orders||[]).filter(o=>String(o.order_date||"").startsWith(ym)).map(o=>o.order_date));let html=`<b>${ym} 接龙录入检查：</b><br>`;for(let i=1;i<=days;i++){const day=`${ym}-${String(i).padStart(2,"0")}`;html+=`<span class="${has.has(day)?"done-day":"missing-day"}">${i}${has.has(day)?"✓":"未录"}</span>`;}importCheck.innerHTML=html;}
 
