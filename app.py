@@ -10,7 +10,7 @@ from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response
 APP_DIR=Path(__file__).resolve().parent
 DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db' if Path('/var/data').exists() else str(APP_DIR/'alice_academy_mcr.db')))
 BOSS_EMAIL=os.environ.get('ALICE_BOSS_EMAIL','xinxinzhang330@gmail.com')
@@ -113,7 +113,8 @@ def init_db():
             source_url TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_praises(
             id INTEGER PRIMARY KEY AUTOINCREMENT, girl_id INTEGER DEFAULT 0, girl_name TEXT NOT NULL,
-            source_name TEXT DEFAULT '', image_path TEXT NOT NULL,
+            source_name TEXT DEFAULT '', image_path TEXT NOT NULL, image_mime TEXT DEFAULT 'image/png',
+            image_blob BLOB,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_girl_praises_girl ON girl_praises(girl_id, girl_name, created_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_accounts(
@@ -150,6 +151,11 @@ def init_db():
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
         if 'enrollment' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN enrollment TEXT DEFAULT ''")
+        praise_cols = [r[1] for r in c.execute('PRAGMA table_info(girl_praises)').fetchall()]
+        if 'image_mime' not in praise_cols:
+            c.execute("ALTER TABLE girl_praises ADD COLUMN image_mime TEXT DEFAULT 'image/png'")
+        if 'image_blob' not in praise_cols:
+            c.execute("ALTER TABLE girl_praises ADD COLUMN image_blob BLOB")
         c.execute("""UPDATE girl_praises
                      SET image_path='/girl_praises/' || substr(image_path, length('/static/girl_praises/') + 1),
                          updated_at=CURRENT_TIMESTAMP
@@ -1450,6 +1456,17 @@ def girl_praise_file(filename):
         path = folder / name
         if path.exists() and path.is_file():
             return send_from_directory(folder, name)
+    try:
+        init_db()
+        with conn() as c:
+            row = c.execute("""SELECT image_blob, image_mime FROM girl_praises
+                               WHERE image_path IN (?,?)
+                               ORDER BY updated_at DESC, id DESC LIMIT 1""",
+                            ('/girl_praises/' + name, '/static/girl_praises/' + name)).fetchone()
+        if row and row['image_blob']:
+            return Response(bytes(row['image_blob']), mimetype=row['image_mime'] or 'image/png')
+    except Exception:
+        traceback.print_exc()
     return 'Not found', 404
 @app.route('/api/all')
 def all_data():
@@ -1476,7 +1493,10 @@ def all_data():
             'customer_accounts':rows(c.execute('SELECT * FROM customer_accounts ORDER BY id DESC').fetchall()),
             'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall()),
             'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall()),
-            'girl_praises':rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+            'girl_praises':rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
+                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
+                                                    COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
                                              LEFT JOIN girls g ON g.id=gp.girl_id
                                              ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())})
@@ -1521,20 +1541,29 @@ def api_girl_praises():
             if girl_name:
                 g = c.execute('SELECT id,name FROM girls WHERE name=?', (girl_name,)).fetchone()
                 if g:
-                    data = rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                    data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
+                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
+                                                    COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
                                              LEFT JOIN girls g ON g.id=gp.girl_id
                                              WHERE gp.girl_id=? OR gp.girl_name=?
                                              ORDER BY gp.created_at DESC, gp.id DESC''',
                                           (g['id'], girl_name)).fetchall())
                 else:
-                    data = rows(c.execute('''SELECT gp.*, gp.girl_name AS display_girl_name
+                    data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
+                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
+                                                    gp.girl_name AS display_girl_name
                                              FROM girl_praises gp
                                              WHERE gp.girl_name=?
                                              ORDER BY gp.created_at DESC, gp.id DESC''',
                                           (girl_name,)).fetchall())
             else:
-                data = rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
+                                                gp.image_mime, gp.created_at, gp.updated_at,
+                                                CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
+                                                COALESCE(g.name, gp.girl_name) AS display_girl_name
                                          FROM girl_praises gp
                                          LEFT JOIN girls g ON g.id=gp.girl_id
                                          ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())
@@ -1558,13 +1587,17 @@ def api_girl_praises():
     if len(raw) > 20 * 1024 * 1024:
         return jsonify(ok=False, error='图片超过20MB，保存失败'), 400
     ext = '.png'
+    mime = 'image/png'
     header_l = header.lower()
     if 'jpeg' in header_l or 'jpg' in header_l:
         ext = '.jpg'
+        mime = 'image/jpeg'
     elif 'webp' in header_l:
         ext = '.webp'
+        mime = 'image/webp'
     elif 'gif' in header_l:
         ext = '.gif'
+        mime = 'image/gif'
     GIRL_PRAISE_DIR.mkdir(parents=True, exist_ok=True)
     with conn() as c:
         g = c.execute('SELECT id,name FROM girls WHERE name=?', (girl_name,)).fetchone()
@@ -1575,10 +1608,13 @@ def api_girl_praises():
         path = GIRL_PRAISE_DIR / filename
         path.write_bytes(raw)
         rel = '/girl_praises/' + filename
-        cur = c.execute('''INSERT INTO girl_praises(girl_id,girl_name,source_name,image_path,created_at,updated_at)
-                           VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)''',
-                        (g['id'], g['name'], source_name or '客人好评', rel))
-        row = c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+        cur = c.execute('''INSERT INTO girl_praises(girl_id,girl_name,source_name,image_path,image_mime,image_blob,created_at,updated_at)
+                           VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)''',
+                        (g['id'], g['name'], source_name or '客人好评', rel, mime, sqlite3.Binary(raw)))
+        row = c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
+                                  gp.image_mime, gp.created_at, gp.updated_at,
+                                  CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
+                                  COALESCE(g.name, gp.girl_name) AS display_girl_name
                            FROM girl_praises gp
                            LEFT JOIN girls g ON g.id=gp.girl_id
                            WHERE gp.id=?''', (cur.lastrowid,)).fetchone()
@@ -2243,7 +2279,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v51_persistent_praise_images",
+            "version": "v52_girl_photo_drive_link",
             "port": 5057,
         })
 
@@ -2262,7 +2298,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v51_persistent_praise_images",
+            "version": "v52_girl_photo_drive_link",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

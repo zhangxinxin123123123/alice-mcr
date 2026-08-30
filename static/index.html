@@ -167,7 +167,7 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="girls" class="panel"><div class="card"><h2>女孩表</h2><p class="note">女孩名作为业务主键，可以修改，但不能和已有女孩重名。改名成功会同步更新关联订单。</p>
-  <div class="form"><input id="qGirlName" placeholder="女孩名"><select id="qGirlType"><option value="">女孩类型全部</option></select><input id="qGirlRemark" placeholder="备注/标签/联系方式"><button class="soft" onclick="clearGirlQuery()">清空筛选</button><button class="primary" onclick="addGirl()">新增女孩</button></div>
+  <div class="form"><input id="qGirlName" placeholder="女孩名"><select id="qGirlType"><option value="">女孩类型全部</option></select><input id="qGirlRemark" placeholder="备注/标签/联系方式"><button class="soft" onclick="clearGirlQuery()">清空筛选</button><button class="soft" onclick="openGirlPhotoDrive()">女孩照片</button><button class="primary" onclick="addGirl()">新增女孩</button></div>
   <div id="girlsTable"></div></div>
  </section>
 
@@ -315,6 +315,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 <div class="modal" id="editModal"><div class="box"><h2 id="editTitle">编辑</h2><div id="editFields" class="form"></div><button class="primary" onclick="saveModalEdit()">保存修改</button> <button class="soft" onclick="closeModal()">取消</button></div></div>
 
 <script>
+const GIRL_PHOTO_DRIVE_URL="https://drive.google.com/drive/folders/15czcxDKT-8r6QNH6JP8qpmBa5qZfPwGt?usp=sharing";
 let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[],girl_praises:[]}, charts={}, currentEdit=null;
 let currentPraiseGirl=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
@@ -529,6 +530,7 @@ function girlPraiseCell(v,g){
   const count=Number(g.__praises||0);
   return `<button class="soft" onclick="openGirlPraiseFolderById(${Number(g.id)||0})">查看${count?`(${count})`:''}</button>`;
 }
+function openGirlPhotoDrive(){window.open(GIRL_PHOTO_DRIVE_URL,"_blank","noopener,noreferrer");}
 function girlsNavButton(){return [...document.querySelectorAll(".nav button")].find(b=>b.textContent.includes("女孩表")) || document.querySelector(".nav button");}
 function openGirlPraiseFolderById(id){
   const g=(data.girls||[]).find(x=>Number(x.id)===Number(id));
