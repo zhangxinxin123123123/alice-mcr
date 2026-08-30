@@ -26,7 +26,7 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .chain-image-drop.drag{background:#fff0f7;outline:3px solid var(--pink)}
 .chain-image-drop b{color:#e75ca2}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
-.praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
+.praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-tile.missing img{object-fit:contain;padding:14px;background:#fff0f7}.praise-tile.missing .praise-meta::after{content:"图片文件已丢失，请从接龙预约重新保存";color:#d6003d;font-weight:900}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
 
 body.login-active{min-height:100vh;overflow:hidden;background:#fff2f8}
@@ -539,8 +539,9 @@ function openGirlPraiseFolderById(id){
 function backToGirlsTable(){show("girls", girlsNavButton());}
 function findPraise(id){return (data.girl_praises||[]).find(p=>Number(p.id)===Number(id));}
 function praiseUrl(p){
-  const url=String((p&&p.image_path)||"");
+  let url=String((p&&p.image_path)||"");
   if(!url)return "";
+  if(url.startsWith("/static/girl_praises/"))url=url.replace("/static/girl_praises/","/girl_praises/");
   return url+(url.includes("?")?"&":"?")+"v="+encodeURIComponent(p.updated_at||p.created_at||p.id||Date.now());
 }
 function renderGirlPraiseFolder(){
@@ -556,24 +557,41 @@ function renderGirlPraiseFolder(){
     const id=Number(p.id);
     const src=praiseUrl(p);
     const name=escHtml(p.source_name||p.display_girl_name||p.girl_name||"客人好评");
-    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" onclick="copyPraiseImage(${id})"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button></div></div>`;
+    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button></div></div>`;
   }).join("");
 }
 async function copyImageFromUrl(url){
-  const blob=await fetch(url,{cache:"no-store"}).then(r=>r.blob());
-  await navigator.clipboard.write([new ClipboardItem({[blob.type||"image/png"]:blob})]);
+  const r=await fetch(url,{cache:"no-store"});
+  if(!r.ok)throw new Error(`图片读取失败 HTTP ${r.status}`);
+  const blob=await r.blob();
+  const type=blob.type||r.headers.get("content-type")||"";
+  if(!type.startsWith("image/"))throw new Error("服务器返回的不是图片");
+  await navigator.clipboard.write([new ClipboardItem({[type||"image/png"]:blob})]);
 }
 async function copyPraiseImage(id){
   const p=findPraise(id); if(!p)return;
   try{await copyImageFromUrl(praiseUrl(p)); alert("已复制图片");}
   catch(e){alert("当前浏览器不支持直接复制图片，请使用下载按钮。");}
 }
-function downloadPraiseImage(id){
+async function downloadPraiseImage(id){
   const p=findPraise(id); if(!p)return;
-  const a=document.createElement("a");
-  a.href=praiseUrl(p);
-  a.download=`${safeFileName(p.source_name||p.display_girl_name||p.girl_name||"客人好评")}_praise.png`;
-  a.click();
+  try{
+    const url=praiseUrl(p);
+    const r=await fetch(url,{cache:"no-store"});
+    if(!r.ok)throw new Error(`图片读取失败 HTTP ${r.status}`);
+    const blob=await r.blob();
+    if(!(blob.type||"").startsWith("image/"))throw new Error("服务器返回的不是图片");
+    const a=document.createElement("a");
+    const objectUrl=URL.createObjectURL(blob);
+    a.href=objectUrl;
+    a.download=`${safeFileName(p.source_name||p.display_girl_name||p.girl_name||"客人好评")}_praise.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),1500);
+  }catch(e){
+    alert((e&&e.message)||"下载失败，请重新保存这张图片");
+  }
 }
 function currentPraiseRows(){return currentPraiseGirl?praiseRowsForGirl(currentPraiseGirl):[];}
 async function copyLatestPraiseImage(){
@@ -584,7 +602,7 @@ async function copyLatestPraiseImage(){
 function downloadAllPraiseImages(){
   const rows=currentPraiseRows();
   if(!rows.length){alert("还没有可下载的好评图片");return;}
-  rows.forEach((p,i)=>setTimeout(()=>downloadPraiseImage(p.id),i*160));
+  rows.forEach((p,i)=>setTimeout(()=>downloadPraiseImage(p.id),i*180));
 }
 
 let sortState = {};

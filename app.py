@@ -19,7 +19,8 @@ ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rs
 TOKYO_YY_BASE_URL=os.environ.get('TOKYO_YY_BASE_URL','https://tokyo-yy.com').rstrip('/')
 TOKYO_ALICE_SHOP_ID=os.environ.get('TOKYO_ALICE_SHOP_ID','\u7231\u4e3d\u4e1d\u5b66\u56ed')
 AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
-GIRL_PRAISE_DIR=APP_DIR/'static'/'girl_praises'
+LEGACY_GIRL_PRAISE_DIR=APP_DIR/'static'/'girl_praises'
+GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/'girl_praises'))
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
@@ -149,10 +150,25 @@ def init_db():
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
         if 'enrollment' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN enrollment TEXT DEFAULT ''")
+        c.execute("""UPDATE girl_praises
+                     SET image_path='/girl_praises/' || substr(image_path, length('/static/girl_praises/') + 1),
+                         updated_at=CURRENT_TIMESTAMP
+                     WHERE image_path LIKE '/static/girl_praises/%'""")
         c.execute("UPDATE quick_links SET group_name='网址' WHERE group_name='排班表'")
         c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
         c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
         c.execute("UPDATE quick_links SET title='常用短语' WHERE title='固定短语'")
+
+    try:
+        GIRL_PRAISE_DIR.mkdir(parents=True, exist_ok=True)
+        if LEGACY_GIRL_PRAISE_DIR.exists():
+            for old in LEGACY_GIRL_PRAISE_DIR.iterdir():
+                if old.is_file():
+                    new = GIRL_PRAISE_DIR / old.name
+                    if not new.exists():
+                        new.write_bytes(old.read_bytes())
+    except Exception:
+        traceback.print_exc()
 
 def current_role():
     return request.headers.get('X-Alice-Role') or request.args.get('role') or ''
@@ -1425,6 +1441,16 @@ def create_or_update_order(c,d):
 def index(): return send_from_directory(APP_DIR/'static','index.html')
 @app.route('/reserve')
 def reserve_page(): return send_from_directory(APP_DIR/'static','reserve.html')
+@app.route('/girl_praises/<path:filename>')
+def girl_praise_file(filename):
+    name = Path(str(filename or '')).name
+    if name != filename or not re.fullmatch(r'[0-9a-f]{16,64}\.(?:png|jpg|jpeg|webp|gif)', name, re.I):
+        return 'Not found', 404
+    for folder in (GIRL_PRAISE_DIR, LEGACY_GIRL_PRAISE_DIR):
+        path = folder / name
+        if path.exists() and path.is_file():
+            return send_from_directory(folder, name)
+    return 'Not found', 404
 @app.route('/api/all')
 def all_data():
     init_db()
@@ -1548,7 +1574,7 @@ def api_girl_praises():
         filename = hashlib.sha1(key_src.encode('utf-8')).hexdigest()[:24] + ext
         path = GIRL_PRAISE_DIR / filename
         path.write_bytes(raw)
-        rel = '/static/girl_praises/' + filename
+        rel = '/girl_praises/' + filename
         cur = c.execute('''INSERT INTO girl_praises(girl_id,girl_name,source_name,image_path,created_at,updated_at)
                            VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)''',
                         (g['id'], g['name'], source_name or '客人好评', rel))
@@ -2217,7 +2243,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v50_calligraphy_name_overlay",
+            "version": "v51_persistent_praise_images",
             "port": 5057,
         })
 
@@ -2236,7 +2262,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v50_calligraphy_name_overlay",
+            "version": "v51_persistent_praise_images",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
