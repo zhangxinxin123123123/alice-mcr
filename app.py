@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -19,6 +19,7 @@ ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rs
 TOKYO_YY_BASE_URL=os.environ.get('TOKYO_YY_BASE_URL','https://tokyo-yy.com').rstrip('/')
 TOKYO_ALICE_SHOP_ID=os.environ.get('TOKYO_ALICE_SHOP_ID','\u7231\u4e3d\u4e1d\u5b66\u56ed')
 AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
+GIRL_PRAISE_DIR=APP_DIR/'static'/'girl_praises'
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
@@ -109,6 +110,11 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS girl_avatar_cache(
             girl_name TEXT PRIMARY KEY, neko_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '',
             source_url TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS girl_praises(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, girl_id INTEGER DEFAULT 0, girl_name TEXT NOT NULL,
+            source_name TEXT DEFAULT '', image_path TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_girl_praises_girl ON girl_praises(girl_id, girl_name, created_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, line_name TEXT NOT NULL, phone TEXT NOT NULL,
             status TEXT DEFAULT '待审核', member_level TEXT DEFAULT 'svip', customer_id INTEGER DEFAULT 0,
@@ -1443,7 +1449,11 @@ def all_data():
             'room_assignments':rows(c.execute('SELECT * FROM room_assignments ORDER BY assignment_date DESC, hotel_name, room_no').fetchall()),
             'customer_accounts':rows(c.execute('SELECT * FROM customer_accounts ORDER BY id DESC').fetchall()),
             'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall()),
-            'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall())})
+            'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall()),
+            'girl_praises':rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                                             FROM girl_praises gp
+                                             LEFT JOIN girls g ON g.id=gp.girl_id
+                                             ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())})
 @app.route('/api/customers',methods=['POST'])
 def customers():
     d=request.json or {}
@@ -1475,6 +1485,79 @@ def girls():
             row=c.execute('SELECT id FROM girls WHERE name=?',(name,)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
+
+@app.route('/api/girl_praises', methods=['GET', 'POST'])
+def api_girl_praises():
+    init_db()
+    if request.method == 'GET':
+        girl_name = str(request.args.get('girl_name') or '').strip()
+        with conn() as c:
+            if girl_name:
+                g = c.execute('SELECT id,name FROM girls WHERE name=?', (girl_name,)).fetchone()
+                if g:
+                    data = rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                                             FROM girl_praises gp
+                                             LEFT JOIN girls g ON g.id=gp.girl_id
+                                             WHERE gp.girl_id=? OR gp.girl_name=?
+                                             ORDER BY gp.created_at DESC, gp.id DESC''',
+                                          (g['id'], girl_name)).fetchall())
+                else:
+                    data = rows(c.execute('''SELECT gp.*, gp.girl_name AS display_girl_name
+                                             FROM girl_praises gp
+                                             WHERE gp.girl_name=?
+                                             ORDER BY gp.created_at DESC, gp.id DESC''',
+                                          (girl_name,)).fetchall())
+            else:
+                data = rows(c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                                         FROM girl_praises gp
+                                         LEFT JOIN girls g ON g.id=gp.girl_id
+                                         ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())
+        return jsonify(ok=True, praises=data)
+
+    d = request.json or {}
+    girl_name = str(d.get('girl_name') or '').strip()
+    image_data = str(d.get('image_data') or '').strip()
+    source_name = str(d.get('source_name') or '').strip()
+    if not girl_name:
+        return jsonify(ok=False, error='女孩名不能为空'), 400
+    if not image_data.startswith('data:image/'):
+        return jsonify(ok=False, error='图片数据格式不正确'), 400
+    try:
+        header, b64 = image_data.split(',', 1)
+        raw = base64.b64decode(b64, validate=True)
+    except Exception:
+        return jsonify(ok=False, error='图片数据解析失败'), 400
+    if len(raw) < 100:
+        return jsonify(ok=False, error='图片数据太小，保存失败'), 400
+    if len(raw) > 20 * 1024 * 1024:
+        return jsonify(ok=False, error='图片超过20MB，保存失败'), 400
+    ext = '.png'
+    header_l = header.lower()
+    if 'jpeg' in header_l or 'jpg' in header_l:
+        ext = '.jpg'
+    elif 'webp' in header_l:
+        ext = '.webp'
+    elif 'gif' in header_l:
+        ext = '.gif'
+    GIRL_PRAISE_DIR.mkdir(parents=True, exist_ok=True)
+    with conn() as c:
+        g = c.execute('SELECT id,name FROM girls WHERE name=?', (girl_name,)).fetchone()
+        if not g:
+            return jsonify(ok=False, error=f'女孩不存在：{girl_name}'), 400
+        key_src = f"{g['id']}|{g['name']}|{datetime.now(timezone.utc).isoformat()}|{secrets.token_hex(8)}"
+        filename = hashlib.sha1(key_src.encode('utf-8')).hexdigest()[:24] + ext
+        path = GIRL_PRAISE_DIR / filename
+        path.write_bytes(raw)
+        rel = '/static/girl_praises/' + filename
+        cur = c.execute('''INSERT INTO girl_praises(girl_id,girl_name,source_name,image_path,created_at,updated_at)
+                           VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)''',
+                        (g['id'], g['name'], source_name or '客人好评', rel))
+        row = c.execute('''SELECT gp.*, COALESCE(g.name, gp.girl_name) AS display_girl_name
+                           FROM girl_praises gp
+                           LEFT JOIN girls g ON g.id=gp.girl_id
+                           WHERE gp.id=?''', (cur.lastrowid,)).fetchone()
+    return jsonify(ok=True, praise=dict(row))
+
 @app.route('/api/orders',methods=['POST'])
 def orders():
     with conn() as c: create_or_update_order(c, request.json or {})
@@ -2134,7 +2217,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v48_face_glow_image_tool",
+            "version": "v49_girl_praise_gallery",
             "port": 5057,
         })
 
@@ -2153,7 +2236,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v48_face_glow_image_tool",
+            "version": "v49_girl_praise_gallery",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

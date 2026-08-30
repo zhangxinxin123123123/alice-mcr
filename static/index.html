@@ -26,6 +26,7 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .chain-image-drop.drag{background:#fff0f7;outline:3px solid var(--pink)}
 .chain-image-drop b{color:#e75ca2}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
+.praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
 
 body.login-active{min-height:100vh;overflow:hidden;background:#fff2f8}
@@ -242,8 +243,24 @@ body:not(.role-boss) .boss-only{display:none!important}
       <div class="free-dona-sub"><span>空闲女孩</span><span id="chainFreeDonaCount">0</span></div>
       <div class="free-dona-list" id="chainFreeDonaList"><div class="free-dona-empty">暂无空闲时间</div></div>
     </div>
-  </div>
+ </div>
  </div></section>
+
+
+ <section id="girlPraiseFolder" class="panel">
+  <div class="card">
+    <div class="praise-folder-head">
+      <button class="soft" onclick="backToGirlsTable()">返回女孩表</button>
+      <h2 id="girlPraiseTitle">客人好评</h2>
+      <div class="praise-folder-tools">
+        <button class="soft" onclick="loadAll().then(renderGirlPraiseFolder)">刷新</button>
+        <button class="primary" onclick="copyLatestPraiseImage()">复制最新</button>
+        <button class="soft" onclick="downloadAllPraiseImages()">下载全部</button>
+      </div>
+    </div>
+    <div id="girlPraiseGrid" class="praise-folder-grid"></div>
+  </div>
+ </section>
 
 
  
@@ -298,7 +315,8 @@ body:not(.role-boss) .boss-only{display:none!important}
 <div class="modal" id="editModal"><div class="box"><h2 id="editTitle">编辑</h2><div id="editFields" class="form"></div><button class="primary" onclick="saveModalEdit()">保存修改</button> <button class="soft" onclick="closeModal()">取消</button></div></div>
 
 <script>
-let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[]}, charts={}, currentEdit=null;
+let data={customers:[],girls:[],orders:[],recharges:[],points:[],enums:[],schedules:[],hotel_rooms:[],room_assignments:[],customer_accounts:[],customer_reservations:[],quick_links:[],girl_praises:[]}, charts={}, currentEdit=null;
+let currentPraiseGirl=null;
 let auth=JSON.parse(localStorage.getItem("alice_auth")||"null");
 let authVerified=false;
 if(auth&&!auth.session_token){localStorage.removeItem("alice_auth");auth=null;}
@@ -432,7 +450,7 @@ async function doLogin(){
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  try{
@@ -458,7 +476,7 @@ async function loadAll(){
   authVerified=true;
   setLoginActive(false);
   let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
-  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
+  debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length,girl_praises:(data.girl_praises||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>v17 接龙预约</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
   return true;
@@ -497,6 +515,77 @@ function filteredOrders(){return data.orders.filter(o=>(!qOrderDate.value||o.ord
 function filteredCustomers(){return data.customers.filter(c=>match(c.customer_no,qCustomerNo.value)&&match(c.name,qCustomerName.value)&&(!qCustomerType.value||c.customer_type===qCustomerType.value)&&match((c.source||"")+" "+(c.contact||"")+" "+(c.remark||"")+" "+(c.remark2||""),qCustomerRemark.value))}
 function filteredGirls(){return data.girls.filter(g=>match(g.name,qGirlName.value)&&(!qGirlType.value||g.girl_type===qGirlType.value)&&match((g.enrollment||"")+" "+(g.contact||"")+" "+(g.tags||"")+" "+(g.remark||"")+" "+(g.remark2||""),qGirlRemark.value))}
 function clearOrderQuery(){qOrderDate.value="";qOrderGirl.value="";qOrderCustomer.value="";qOrderRemark.value="";qOrderSettle.value="";render()}function clearCustomerQuery(){qCustomerNo.value="";qCustomerName.value="";qCustomerType.value="";qCustomerRemark.value="";render()}function clearGirlQuery(){qGirlName.value="";qGirlType.value="";qGirlRemark.value="";render()}
+
+function praiseRowsForGirl(g){
+  const id=Number((g&&g.id)||0);
+  const name=String((g&&(g.name||g.girl_name||g.display_girl_name))||"").trim();
+  return (data.girl_praises||[]).filter(p=>{
+    const pid=Number(p.girl_id||0);
+    const pname=String(p.display_girl_name||p.girl_name||"").trim();
+    return (id&&pid===id) || (name&&pname===name);
+  }).sort((a,b)=>String(b.created_at||"").localeCompare(String(a.created_at||"")) || Number(b.id||0)-Number(a.id||0));
+}
+function girlPraiseCell(v,g){
+  const count=Number(g.__praises||0);
+  return `<button class="soft" onclick="openGirlPraiseFolderById(${Number(g.id)||0})">查看${count?`(${count})`:''}</button>`;
+}
+function girlsNavButton(){return [...document.querySelectorAll(".nav button")].find(b=>b.textContent.includes("女孩表")) || document.querySelector(".nav button");}
+function openGirlPraiseFolderById(id){
+  const g=(data.girls||[]).find(x=>Number(x.id)===Number(id));
+  if(!g){alert("没有找到这个女孩");return;}
+  currentPraiseGirl={id:Number(g.id),name:g.name};
+  show("girlPraiseFolder");
+}
+function backToGirlsTable(){show("girls", girlsNavButton());}
+function findPraise(id){return (data.girl_praises||[]).find(p=>Number(p.id)===Number(id));}
+function praiseUrl(p){
+  const url=String((p&&p.image_path)||"");
+  if(!url)return "";
+  return url+(url.includes("?")?"&":"?")+"v="+encodeURIComponent(p.updated_at||p.created_at||p.id||Date.now());
+}
+function renderGirlPraiseFolder(){
+  const title=document.getElementById("girlPraiseTitle"), grid=document.getElementById("girlPraiseGrid");
+  if(!title||!grid)return;
+  const g=currentPraiseGirl || (data.girls&&data.girls[0] ? {id:data.girls[0].id,name:data.girls[0].name} : null);
+  if(!g){title.textContent="客人好评"; grid.innerHTML='<div class="praise-empty">还没有女孩资料。</div>'; return;}
+  currentPraiseGirl=g;
+  const rows=praiseRowsForGirl(g);
+  title.textContent=`${g.name||""} 客人好评`;
+  if(!rows.length){grid.innerHTML='<div class="praise-empty">这个女孩还没有保存客人好评图片。</div>';return;}
+  grid.innerHTML=rows.map(p=>{
+    const id=Number(p.id);
+    const src=praiseUrl(p);
+    const name=escHtml(p.source_name||p.display_girl_name||p.girl_name||"客人好评");
+    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" onclick="copyPraiseImage(${id})"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button></div></div>`;
+  }).join("");
+}
+async function copyImageFromUrl(url){
+  const blob=await fetch(url,{cache:"no-store"}).then(r=>r.blob());
+  await navigator.clipboard.write([new ClipboardItem({[blob.type||"image/png"]:blob})]);
+}
+async function copyPraiseImage(id){
+  const p=findPraise(id); if(!p)return;
+  try{await copyImageFromUrl(praiseUrl(p)); alert("已复制图片");}
+  catch(e){alert("当前浏览器不支持直接复制图片，请使用下载按钮。");}
+}
+function downloadPraiseImage(id){
+  const p=findPraise(id); if(!p)return;
+  const a=document.createElement("a");
+  a.href=praiseUrl(p);
+  a.download=`${safeFileName(p.source_name||p.display_girl_name||p.girl_name||"客人好评")}_praise.png`;
+  a.click();
+}
+function currentPraiseRows(){return currentPraiseGirl?praiseRowsForGirl(currentPraiseGirl):[];}
+async function copyLatestPraiseImage(){
+  const rows=currentPraiseRows();
+  if(!rows.length){alert("还没有可复制的好评图片");return;}
+  await copyPraiseImage(rows[0].id);
+}
+function downloadAllPraiseImages(){
+  const rows=currentPraiseRows();
+  if(!rows.length){alert("还没有可下载的好评图片");return;}
+  rows.forEach((p,i)=>setTimeout(()=>downloadPraiseImage(p.id),i*160));
+}
 
 let sortState = {};
 function smartVal(v){
@@ -964,8 +1053,11 @@ function formatChainNameTime(clock){
   const t=normalizeChainClock(clock||CHAIN_DEFAULT_START);
   return `${Number(t.slice(0,2))}:${t.slice(3,5)}`;
 }
+function currentChainGirlName(){
+  return String((window.cGirl&&cGirl.value)||chainState.girl_name||"").trim();
+}
 function currentChainEmployeeName(){
-  const name=(window.cGirl&&cGirl.value)||chainState.girl_name||'员工';
+  const name=currentChainGirlName()||'员工';
   const start=(window.coStart&&coStart.value)||parseChainTimeRange(window.coTime&&coTime.value||'').start||CHAIN_DEFAULT_START;
   return `${formatChainNameTime(start)}-${name}`;
 }
@@ -998,14 +1090,15 @@ function bindChainImageDrop(drop,tool,handler){
 function handleChainImageFiles(files){
   files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
   if(!files.length){alert('请拖入或粘贴图片文件');return;}
-  files.forEach(file=>makeNamedImage(file,currentChainEmployeeName()));
+  const girlName=currentChainGirlName();
+  files.forEach(file=>makeNamedImage(file,currentChainEmployeeName(),girlName));
 }
 function handleChainFaceGlowFiles(files){
   files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
   if(!files.length){alert('请拖入或粘贴图片文件');return;}
   files.forEach(file=>makeFaceGlowImage(file));
 }
-function makeNamedImage(file,name){
+function makeNamedImage(file,name,girlName){
   const img=new Image();
   img.onload=()=>{
     const canvas=document.createElement('canvas');
@@ -1027,7 +1120,7 @@ function makeNamedImage(file,name){
     ctx.lineWidth=Math.max(2,Math.round(fontSize*.08)); ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.strokeText(text,canvas.width/2,canvas.height-pad*1.35);
     ctx.fillStyle='white'; ctx.fillText(text,canvas.width/2,canvas.height-pad*1.35);
     const dataUrl=canvas.toDataURL('image/png');
-    chainNamedImages.unshift({name,dataUrl,filename:`${safeFileName(name)}_named.png`});
+    chainNamedImages.unshift({name,girlName:girlName||currentChainGirlName(),dataUrl,filename:`${safeFileName(name)}_named.png`,saved:false});
     renderChainNamedImages();
   };
   img.onerror=()=>alert('图片读取失败');
@@ -1191,7 +1284,7 @@ function mosaicGuestAvatars(ctx,width,height){
 function safeFileName(s){return String(s||'employee').replace(/[\/:*?"<>|\s]+/g,'_').slice(0,40)||'employee';}
 function renderChainNamedImages(){
   const box=document.getElementById('chainImageList'); if(!box)return;
-  box.innerHTML=chainNamedImages.map((it,i)=>`<div class="chain-image-card"><img src="${it.dataUrl}" title="点击复制图片" onclick="copyChainNamedImage(${i})"><div class="hint">${it.name}｜点击图片复制</div><div class="acts"><button class="primary" onclick="copyChainNamedImage(${i})">复制图片</button><button class="soft" onclick="downloadChainNamedImage(${i})">下载</button><button class="danger" onclick="deleteChainNamedImage(${i})">删除</button></div></div>`).join('') || '<p class="note">还没有生成图片。</p>';
+  box.innerHTML=chainNamedImages.map((it,i)=>`<div class="chain-image-card"><img src="${it.dataUrl}" title="点击复制图片" onclick="copyChainNamedImage(${i})"><div class="hint">${escHtml(it.name)}｜${escHtml(it.girlName||"未选女孩")}｜点击图片复制</div><div class="acts"><button class="primary" onclick="copyChainNamedImage(${i})">复制图片</button><button class="soft" onclick="saveChainNamedImage(${i})" ${it.saved?'disabled':''}>${it.saved?'已保存':'保存图片'}</button><button class="soft" onclick="downloadChainNamedImage(${i})">下载</button><button class="danger" onclick="deleteChainNamedImage(${i})">删除</button></div></div>`).join('') || '<p class="note">还没有生成图片。</p>';
 }
 function renderChainFaceGlowImages(){
   const box=document.getElementById('chainFaceGlowList'); if(!box)return;
@@ -1208,6 +1301,18 @@ async function copyChainNamedImage(i){
   }
 }
 function downloadChainNamedImage(i){const it=chainNamedImages[i]; if(!it)return; const a=document.createElement('a'); a.href=it.dataUrl; a.download=it.filename; a.click();}
+async function saveChainNamedImage(i){
+  const it=chainNamedImages[i]; if(!it)return;
+  if(it.saved){alert('这张图片已经保存过了');return;}
+  const girlName=String(it.girlName||currentChainGirlName()).trim();
+  if(!girlName){alert('请先选择女孩，再保存好评图片');return;}
+  const r=await api('/api/girl_praises',{girl_name:girlName,image_data:it.dataUrl,source_name:it.name});
+  it.saved=true;
+  it.savedId=r.praise&&r.praise.id;
+  renderChainNamedImages();
+  await loadAll();
+  alert('已保存到女孩表的客人好评');
+}
 function deleteChainNamedImage(i){chainNamedImages.splice(i,1);renderChainNamedImages();}
 async function copyChainFaceGlowImage(i){
   const it=chainFaceGlowImages[i]; if(!it)return;
@@ -1834,9 +1939,9 @@ function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(
 function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=auth&&auth.role==="user";kCustomers.textContent=isUser?"—":data.customers.length;kOrders.textContent=isUser?"—":data.orders.length;let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
  table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
- table("girlsTable",filteredGirls(),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
+ table("girlsTable",filteredGirls().map(g=>({...g,__praises:praiseRowsForGirl(g).length})),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"__praises",t:"客人好评",f:girlPraiseCell},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
- renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();
+ renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();if(document.getElementById("girlPraiseFolder")?.classList.contains("on"))renderGirlPraiseFolder();
  if(isUser){sDay.value=todayStr; sDay.disabled=true;}else{sDay.disabled=false;} let sd=sDay.value,sm=sMonth.value;
  const homeDayFilter=o=>o.order_date===todayStr; const homeDayMap=group(homeDayFilter); const homeDayMeta=chartMeta(homeDayFilter,homeDayMap); chart("homeDay",homeDayMap,homeDayMeta); paymentChart("homeDayPayment",homeDayMeta); shopRevenueChart("homeDayShop",groupShopRevenue(homeDayFilter),homeDayMeta); renderRevenueTable("homeDayTable",homeDayMap,homeDayMeta);
  if(!isUser){const homeMonthFilter=o=>String(o.order_date).startsWith(month); const homeMonthMap=group(homeMonthFilter); const homeMonthMeta=chartMeta(homeMonthFilter,homeMonthMap); chart("homeMonth",homeMonthMap,homeMonthMeta); paymentChart("homeMonthPayment",homeMonthMeta); shopRevenueChart("homeMonthShop",groupShopRevenue(homeMonthFilter),homeMonthMeta);}
