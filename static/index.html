@@ -561,7 +561,7 @@ function renderGirlPraiseFolder(){
     const id=Number(p.id);
     const src=praiseUrl(p);
     const name=escHtml(p.source_name||p.display_girl_name||p.girl_name||"客人好评");
-    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button></div></div>`;
+    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button><button class="danger" onclick="deletePraiseImage(${id})">删除</button></div></div>`;
   }).join("");
 }
 async function copyImageFromUrl(url){
@@ -607,6 +607,16 @@ function downloadAllPraiseImages(){
   const rows=currentPraiseRows();
   if(!rows.length){alert("还没有可下载的好评图片");return;}
   rows.forEach((p,i)=>setTimeout(()=>downloadPraiseImage(p.id),i*180));
+}
+async function deletePraiseImage(id){
+  const p=findPraise(id);
+  if(!p)return;
+  const name=p.source_name||p.display_girl_name||p.girl_name||"这张好评图片";
+  if(!confirm(`确认删除 ${name} 吗？删除后女孩表里也不会再显示。`))return;
+  await api('/api/girl_praises',{delete_id:id});
+  data.girl_praises=(data.girl_praises||[]).filter(x=>Number(x.id)!==Number(id));
+  renderGirlPraiseFolder();
+  render();
 }
 
 let sortState = {};

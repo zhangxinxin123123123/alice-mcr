@@ -1468,6 +1468,19 @@ def girl_praise_file(filename):
     except Exception:
         traceback.print_exc()
     return 'Not found', 404
+
+def remove_girl_praise_file(image_path):
+    name = Path(str(image_path or '')).name
+    if not re.fullmatch(r'[0-9a-f]{16,64}\.(?:png|jpg|jpeg|webp|gif)', name, re.I):
+        return
+    for folder in (GIRL_PRAISE_DIR, LEGACY_GIRL_PRAISE_DIR):
+        try:
+            base = folder.resolve()
+            path = (folder / name).resolve()
+            if path.parent == base and path.exists() and path.is_file():
+                path.unlink()
+        except Exception:
+            traceback.print_exc()
 @app.route('/api/all')
 def all_data():
     init_db()
@@ -1570,6 +1583,17 @@ def api_girl_praises():
         return jsonify(ok=True, praises=data)
 
     d = request.json or {}
+    delete_id = d.get('delete_id')
+    if delete_id:
+        with conn() as c:
+            row = c.execute('SELECT id,image_path FROM girl_praises WHERE id=?', (delete_id,)).fetchone()
+            if not row:
+                return jsonify(ok=False, error='图片不存在或已删除'), 404
+            image_path = row['image_path']
+            c.execute('DELETE FROM girl_praises WHERE id=?', (delete_id,))
+        remove_girl_praise_file(image_path)
+        return jsonify(ok=True, deleted_id=int(delete_id))
+
     girl_name = str(d.get('girl_name') or '').strip()
     image_data = str(d.get('image_data') or '').strip()
     source_name = str(d.get('source_name') or '').strip()
@@ -2279,7 +2303,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v54_colored_name_overlay",
+            "version": "v55_delete_praise_images",
             "port": 5057,
         })
 
@@ -2298,7 +2322,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v54_colored_name_overlay",
+            "version": "v55_delete_praise_images",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
