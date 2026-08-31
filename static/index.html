@@ -1138,15 +1138,77 @@ const CHAIN_NAME_FONT_STACK='"STXingkai","华文行楷","LiSu","隶书","KaiTi",
 function setChainNameFont(ctx,size){
   ctx.font=`700 ${Math.round(size)}px ${CHAIN_NAME_FONT_STACK}`;
 }
+function chainEstimatedImageTextSize(width,height){
+  return clampNumber(Math.min(width,height)*.032,12,24);
+}
 function chainNameBaseFontSize(ctx,width,height,text){
-  let size=Math.round(clampNumber(Math.min(width*.078,height*.055),20,72));
-  const maxW=width*.74;
+  const estimatedText=chainEstimatedImageTextSize(width,height);
+  let size=Math.round(clampNumber(estimatedText*3.5,34,Math.min(width*.18,height*.16,132)));
+  const minSize=Math.max(24,Math.round(estimatedText*2.45));
+  const maxW=width*.78;
   for(let i=0;i<22;i++){
     setChainNameFont(ctx,size);
-    if(ctx.measureText(text).width<=maxW || size<=18)break;
+    if(ctx.measureText(text).width<=maxW || size<=minSize)break;
     size-=2;
   }
-  return Math.max(18,size);
+  return Math.max(minSize,size);
+}
+function chainNameColorKey(text){
+  const clean=String(text||'员工').trim();
+  const parts=clean.split(/[-－—–]/).map(s=>s.trim()).filter(Boolean);
+  return parts.length>1?parts[parts.length-1]:clean;
+}
+function chainNameHash(text){
+  let h=2166136261;
+  String(text||'员工').split('').forEach(ch=>{h^=ch.charCodeAt(0);h=Math.imul(h,16777619);});
+  return h>>>0;
+}
+function hslToRgb(h,s,l){
+  h=((h%360)+360)%360; s/=100; l/=100;
+  const c=(1-Math.abs(2*l-1))*s, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;}else if(h<120){r=x;g=c;}else if(h<180){g=c;b=x;}else if(h<240){g=x;b=c;}else if(h<300){r=x;b=c;}else{r=c;b=x;}
+  return [r,g,b].map(v=>Math.round((v+m)*255));
+}
+function rgbCss(c,a=.98){return `rgba(${c[0]},${c[1]},${c[2]},${a})`;}
+function relativeLum(c){
+  const conv=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);};
+  return .2126*conv(c[0])+.7152*conv(c[1])+.0722*conv(c[2]);
+}
+function contrastRatio(a,b){
+  const l1=relativeLum(a), l2=relativeLum(b);
+  return (Math.max(l1,l2)+.05)/(Math.min(l1,l2)+.05);
+}
+function sampleRectAverageColor(img,width,height,rect){
+  const x0=Math.max(0,Math.floor(rect.x)), y0=Math.max(0,Math.floor(rect.y));
+  const x1=Math.min(width-1,Math.ceil(rect.x+rect.w)), y1=Math.min(height-1,Math.ceil(rect.y+rect.h));
+  const step=Math.max(2,Math.round(Math.min(rect.w,rect.h)/16));
+  const data=img.data;
+  let n=0,r=0,g=0,b=0;
+  for(let y=y0;y<=y1;y+=step){
+    for(let x=x0;x<=x1;x+=step){
+      const i=(y*width+x)*4;
+      if(data[i+3]<20)continue;
+      r+=data[i];g+=data[i+1];b+=data[i+2];n++;
+    }
+  }
+  return n?[Math.round(r/n),Math.round(g/n),Math.round(b/n)]:[255,255,255];
+}
+function chainNameTextColors(ctx,width,height,rect,text){
+  let bg=[255,255,255];
+  try{bg=sampleRectAverageColor(ctx.getImageData(0,0,width,height),width,height,rect);}catch(e){}
+  const hash=chainNameHash(chainNameColorKey(text));
+  const hue=(hash%360+Math.floor(hash/360)%43)%360;
+  const sat=76+(hash%18);
+  const lights=[18,24,32,42,54,66,78,88];
+  let best={rgb:hslToRgb(hue,sat,32),score:-1};
+  lights.forEach(l=>{
+    const rgb=hslToRgb(hue,sat,l);
+    const score=contrastRatio(rgb,bg)*12+colorDistance(rgb,bg)/24;
+    if(score>best.score)best={rgb,score};
+  });
+  const stroke=relativeLum(best.rgb)>.46?[20,18,22]:[255,255,255];
+  return {fill:rgbCss(best.rgb,.98),stroke:rgbCss(stroke,.76)};
 }
 function chainNameTextRect(ctx,text,cx,cy,size,width){
   setChainNameFont(ctx,size);
@@ -1225,7 +1287,13 @@ function drawChainCalligraphyName(ctx,width,height,text){
   setChainNameFont(ctx,place.size||fontSize);
   ctx.textAlign='center';
   ctx.textBaseline='middle';
-  ctx.fillStyle='rgba(15,15,15,.96)';
+  const colors=chainNameTextColors(ctx,width,height,place,text);
+  ctx.lineJoin='round';
+  ctx.miterLimit=2;
+  ctx.lineWidth=Math.max(2,Math.round((place.size||fontSize)*.052));
+  ctx.strokeStyle=colors.stroke;
+  ctx.strokeText(text,place.cx,place.cy,place.maxWidth||width*.82);
+  ctx.fillStyle=colors.fill;
   ctx.fillText(text,place.cx,place.cy,place.maxWidth||width*.82);
   ctx.restore();
 }
