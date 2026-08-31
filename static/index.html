@@ -24,7 +24,7 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 
 .chain-image-drop{margin-top:12px;border:3px dashed var(--line);border-radius:22px;background:#fffafd;padding:18px;text-align:center;cursor:pointer;transition:.15s}
 .chain-image-drop.drag{background:#fff0f7;outline:3px solid var(--pink)}
-.chain-image-drop b{color:#e75ca2}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
+.chain-image-drop b{color:#e75ca2}.chain-upload-chip{display:inline-block;margin:8px 0 4px;padding:8px 14px;border-radius:999px;background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white;font-weight:900;box-shadow:0 8px 18px #ff8fc733}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
 .praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-tile.missing img{object-fit:contain;padding:14px;background:#fff0f7}.praise-tile.missing .praise-meta::after{content:"图片文件已丢失，请从接龙预约重新保存";color:#d6003d;font-weight:900}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
 @media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
@@ -221,13 +221,15 @@ body:not(.role-boss) .boss-only{display:none!important}
  </div>
 
  <div class="card"><h2>员工图片加名字</h2>
-  <p class="note">选择上面的员工后，把剪贴板图片直接粘贴到本页，或把图片拖到下面区域。系统会自动把员工名字加到图片底部，并生成可复制、可下载的图片。</p>
-  <div id="chainImageDrop" class="chain-image-drop" tabindex="0"><b>拖拽图片到这里</b><br><span class="note">也可以点击这里后 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
+  <p class="note">选择上面的员工后，可以从本地/手机相册上传、粘贴剪贴板图片，或把图片拖到下面区域。系统会自动把员工名字加到图片底部，并生成可复制、可下载的图片。</p>
+  <input id="chainImageFile" type="file" accept="image/*" multiple style="display:none">
+  <div id="chainImageDrop" class="chain-image-drop" tabindex="0" role="button"><b>点击上传本地图片</b><br><span class="chain-upload-chip">选择图片</span><br><span class="note">手机可直接选相册；电脑也支持拖拽图片到这里，或 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
   <div id="chainImageList" class="chain-image-list"></div>
  </div>
  <div class="card"><h2>女孩脸部白光</h2>
-  <p class="note">把女孩照片拖到下面区域，系统会自动在脸部加白色圆光遮挡，并生成可复制、可下载的图片。</p>
-  <div id="chainFaceGlowDrop" class="chain-image-drop" tabindex="0"><b>拖拽图片到这里</b><br><span class="note">也可以点击这里后 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
+  <p class="note">从本地/手机相册上传女孩照片，或拖拽、粘贴图片，系统会自动在脸部加白色圆光遮挡，并生成可复制、可下载的图片。</p>
+  <input id="chainFaceGlowFile" type="file" accept="image/*" multiple style="display:none">
+  <div id="chainFaceGlowDrop" class="chain-image-drop" tabindex="0" role="button"><b>点击上传本地图片</b><br><span class="chain-upload-chip">选择图片</span><br><span class="note">手机可直接选相册；电脑也支持拖拽图片到这里，或 Ctrl+V / ⌘V 粘贴剪贴板图片</span></div>
   <div id="chainFaceGlowList" class="chain-image-list"></div>
  </div>
  <div class="card"><h2>微信格式输出</h2>
@@ -1084,8 +1086,10 @@ function currentChainEmployeeName(){
 function setupChainImageTools(){
   const drop=document.getElementById('chainImageDrop');
   const faceDrop=document.getElementById('chainFaceGlowDrop');
-  bindChainImageDrop(drop,'named',handleChainImageFiles);
-  bindChainImageDrop(faceDrop,'face',handleChainFaceGlowFiles);
+  bindChainImagePicker(document.getElementById('chainImageFile'),'named',handleChainImageFiles);
+  bindChainImagePicker(document.getElementById('chainFaceGlowFile'),'face',handleChainFaceGlowFiles);
+  bindChainImageDrop(drop,'named',handleChainImageFiles,document.getElementById('chainImageFile'));
+  bindChainImageDrop(faceDrop,'face',handleChainFaceGlowFiles,document.getElementById('chainFaceGlowFile'));
   if(document.body.dataset.chainImagePasteReady)return;
   document.body.dataset.chainImagePasteReady='1';
   document.addEventListener('paste',e=>{
@@ -1098,24 +1102,35 @@ function setupChainImageTools(){
     }
   });
 }
-function bindChainImageDrop(drop,tool,handler){
+function bindChainImagePicker(input,tool,handler){
+  if(!input || input.dataset.ready)return;
+  input.dataset.ready='1';
+  input.addEventListener('change',e=>{
+    activeChainImageTool=tool;
+    const files=e.target.files;
+    if(files&&files.length)handler(files);
+    input.value='';
+  });
+}
+function bindChainImageDrop(drop,tool,handler,input){
   if(!drop || drop.dataset.ready)return;
   drop.dataset.ready='1';
   ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();activeChainImageTool=tool;drop.classList.add('drag');}));
   ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
   drop.addEventListener('drop',e=>{activeChainImageTool=tool;handler(e.dataTransfer&&e.dataTransfer.files);});
-  drop.addEventListener('click',()=>{activeChainImageTool=tool;drop.focus();});
+  drop.addEventListener('click',()=>{activeChainImageTool=tool;drop.focus(); if(input)input.click();});
+  drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();activeChainImageTool=tool;drop.focus(); if(input)input.click();}});
   drop.addEventListener('focus',()=>{activeChainImageTool=tool;});
 }
 function handleChainImageFiles(files){
   files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
-  if(!files.length){alert('请拖入或粘贴图片文件');return;}
+  if(!files.length){alert('请选择、拖入或粘贴图片文件');return;}
   const girlName=currentChainGirlName();
   files.forEach(file=>makeNamedImage(file,currentChainEmployeeName(),girlName));
 }
 function handleChainFaceGlowFiles(files){
   files=[...(files||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
-  if(!files.length){alert('请拖入或粘贴图片文件');return;}
+  if(!files.length){alert('请选择、拖入或粘贴图片文件');return;}
   files.forEach(file=>makeFaceGlowImage(file));
 }
 function clampNumber(n,min,max){return Math.max(min,Math.min(max,n));}
