@@ -9,10 +9,10 @@
 :root{--pink:#ff8fc7;--pink2:#ffd6ea;--lav:#d9c8ff;--ink:#5d4566;--line:#f0c6dc;--danger:#ff6e92}
 *{box-sizing:border-box}body{margin:0;font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff)}
 .app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{padding:20px;background:rgba(255,255,255,.85);border-right:2px dashed var(--line)}
-.logo{padding:18px;border-radius:24px;background:linear-gradient(135deg,var(--pink),var(--lav));color:white;text-align:center;box-shadow:0 12px 28px #ff8fc755}.logo h1{margin:0;font-size:23px}.logo p{margin:8px 0 0;font-size:12px}
+.logo{padding:18px;border-radius:24px;background:linear-gradient(135deg,var(--pink),var(--lav));color:white;text-align:center;box-shadow:0 12px 28px #ff8fc755}.logo h1{margin:0;font-size:23px}.logo p{margin:8px 0 0;font-size:12px}.logo-link{display:block;text-decoration:none;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}.logo-link:hover{transform:translateY(-2px);box-shadow:0 16px 32px #ff8fc766}
 .nav button{width:100%;margin:7px 0;padding:11px;border:0;border-radius:18px;background:white;color:var(--ink);font-weight:800;text-align:left;cursor:pointer;box-shadow:0 5px 14px #d7a9c422}.nav button.on{outline:2px solid var(--pink);background:linear-gradient(90deg,var(--pink2),#fff)}
 .main{padding:22px}.top{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap}.pill{padding:9px 14px;border-radius:999px;background:white;border:2px solid var(--line);font-weight:800}
-.panel{display:none}.panel.on{display:block}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}.card{background:rgba(255,255,255,.94);border:2px solid var(--line);border-radius:25px;padding:18px;box-shadow:0 10px 24px #b68bac1c;margin-bottom:16px}
+.panel{display:none}.panel.on{display:block}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}.card{background:rgba(255,255,255,.94);border:2px solid var(--line);border-radius:25px;padding:18px;box-shadow:0 10px 24px #b68bac1c;margin-bottom:16px}.card-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.card-title-row h2{margin:0}
 .num{font-size:26px;font-weight:900;color:#e75ca2;margin-top:8px}
 .chart-head{margin:8px 0 10px;padding:9px 12px;border:2px solid var(--line);border-radius:16px;background:#fffafd;font-size:13px;font-weight:900;line-height:1.6;color:var(--ink)}
 .chart-head b{color:#e75ca2}.form{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:12px 0}
@@ -122,7 +122,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 </div>
 <div class="app">
 <aside class="side">
- <div class="logo"><h1>爱丽丝学院</h1><p>v14+ · 纯出勤表静态页版 · 5057</p></div>
+ <a class="logo logo-link" href="https://ailisi99.com/" target="_blank" rel="noopener noreferrer" title="打开爱丽丝官网"><h1>爱丽丝学院</h1><p>v14+ · 纯出勤表静态页版 · 5057</p></a>
  <div class="nav">
   <button class="on user-hide admin-hide" onclick="show('home',this)">🏫 学院总览</button>
   <button class="admin-only" onclick="show('orders',this)">🧾 订单/预约</button>
@@ -168,8 +168,8 @@ body:not(.role-boss) .boss-only{display:none!important}
   <div id="customersTable"></div></div>
  </section>
 
- <section id="girls" class="panel"><div class="card"><h2>女孩表</h2><p class="note">女孩名作为业务主键，可以修改，但不能和已有女孩重名。改名成功会同步更新关联订单。</p>
-  <div class="form"><input id="qGirlName" placeholder="女孩名"><select id="qGirlType"><option value="">女孩类型全部</option></select><input id="qGirlRemark" placeholder="备注/标签/联系方式"><button class="soft" onclick="clearGirlQuery()">清空筛选</button><button class="soft" onclick="openGirlPhotoDrive()">女孩照片</button><button class="primary" onclick="addGirl()">新增女孩</button></div>
+ <section id="girls" class="panel"><div class="card"><div class="card-title-row"><h2>女孩表</h2><button class="soft" type="button" onclick="openGirlPhotoDrive()">📷 女孩照片</button></div><p class="note">女孩名作为业务主键，可以修改，但不能和已有女孩重名。改名成功会同步更新关联订单。</p>
+  <div class="form"><input id="qGirlName" placeholder="女孩名"><select id="qGirlType"><option value="">女孩类型全部</option></select><input id="qGirlRemark" placeholder="备注/标签/联系方式"><button class="soft" onclick="clearGirlQuery()">清空筛选</button><button class="primary" onclick="addGirl()">新增女孩</button></div>
   <div id="girlsTable"></div></div>
  </section>
 
