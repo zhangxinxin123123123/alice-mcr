@@ -276,6 +276,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <input id="tgWebsite" placeholder="官方网站 https://...">
     <input id="tgHotel" placeholder="推荐酒店 https://...">
     <input id="tgSupportUsername" placeholder="人工客服 Telegram username，例如 AliceService">
+    <input id="tgPointRate" type="number" min="1" placeholder="每积分抵扣日元，默认 1">
     <input id="tgHotelTimeout" type="number" min="30" placeholder="酒店资料时限/秒">
    </div>
    <button class="primary" onclick="saveTelegramSettings()">保存 Bot 设置</button>
@@ -739,12 +740,12 @@ function renderAdvanceReserve(){
   accRows.forEach(a=>{h+=`<tr><td>${a.id}</td><td>${a.username||''}</td><td>${a.line_name||''}</td><td>${a.phone||''}</td><td>${a.status||''}</td><td>${a.member_level||'svip'}</td><td>${a.created_at||''}</td><td>${a.action}</td></tr>`});
   customerAccountTable.innerHTML=h+'</tbody></table></div>';
   const rows=(data.customer_reservations||[]).filter(r=>!arDate.value||r.reserve_date===arDate.value);
-  let rhtml='<div class="table"><table><thead><tr><th>日期</th><th>女孩</th><th>时间</th><th>用户名</th><th>LINE</th><th>手机</th><th>状态</th><th>价格</th><th>备注</th><th>操作</th></tr></thead><tbody>';
-  rows.forEach(r=>{rhtml+=`<tr><td>${r.reserve_date}</td><td>${r.girl_name}</td><td>${r.start_time}-${r.end_time}</td><td>${r.username||''}</td><td>${r.line_name||''}</td><td>${r.phone||''}</td><td>${r.status||''}</td><td>${yen(r.price||0)}</td><td>${r.note||''}</td><td><button class="soft" onclick="setCustomerReservationStatus(${r.id},'已确认')">确认并转订单</button> <button class="danger" onclick="setCustomerReservationStatus(${r.id},'取消')">取消</button></td></tr>`});
+  let rhtml='<div class="table"><table><thead><tr><th>日期</th><th>女孩</th><th>时间</th><th>用户名</th><th>LINE</th><th>手机</th><th>状态</th><th>原价</th><th>可用积分</th><th>使用积分</th><th>实际支付</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  rows.forEach(r=>{rhtml+=`<tr><td>${r.reserve_date}</td><td>${r.girl_name}</td><td>${r.start_time}-${r.end_time}</td><td>${r.username||''}</td><td>${r.line_name||''}</td><td>${r.phone||''}</td><td>${r.status||''}</td><td>${yen(r.price||0)}</td><td>${Number(r.points_available||0)}</td><td>${Number(r.points_used||0)}</td><td>${yen(r.actual_payment||r.price||0)}</td><td>${r.note||''}</td><td><button class="soft" onclick="setCustomerReservationStatus(${r.id},'已确认')">确认并转订单</button> <button class="danger" onclick="setCustomerReservationStatus(${r.id},'取消')">取消</button></td></tr>`});
   customerReservationTable.innerHTML=rhtml+'</tbody></table></div>';
 }
 async function setCustomerAccountStatus(id,status){await api('/api/customer_accounts/status',{id,status});await loadAll();renderAdvanceReserve();}
-async function setCustomerReservationStatus(id,status){await api('/api/customer_reservations/status',{id,status});await loadAll();renderAdvanceReserve();}
+async function setCustomerReservationStatus(id,status){const result=await api('/api/customer_reservations/status',{id,status});if(result.reservation){const i=(data.customer_reservations||[]).findIndex(x=>Number(x.id)===Number(id));if(i>=0)data.customer_reservations[i]=result.reservation;}if(status==='已确认')await loadAll();renderAdvanceReserve();}
 
 function field(label,html){return `<label class="small">${label}<br>${html}</label>`}
 function enumSelect(id,type,selected){return `<select id="${id}">${opts(type,selected)}</select>`}
@@ -2193,7 +2194,7 @@ function groupCost(filter){let m={};(data.room_assignments||[]).filter(r=>filter
 function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).reduce((s,r)=>s+Number(r.daily_cost||0),0);return {mainLabel:'成本',orderCount:(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).length,gross:roomCost};}
 
 function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=auth&&auth.role==="user";kCustomers.textContent=isUser?"—":data.customers.length;kOrders.textContent=isUser?"—":data.orders.length;let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
- table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
+ table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"points_used",t:"使用积分"},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"新增积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
  table("girlsTable",filteredGirls().map(g=>({...g,__praises:praiseRowsForGirl(g).length})),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"__praises",t:"客人好评",f:girlPraiseCell},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
@@ -2285,6 +2286,7 @@ async function loadTelegramSettings(){
   tgWebsite.value=s.website_url||'';
   tgHotel.value=s.hotel_url||'';
   tgSupportUsername.value=s.support_username||'';
+  tgPointRate.value=s.points_yen_per_point||1;
   tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
   telegramFlowDraft={...s};
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
@@ -2361,6 +2363,7 @@ async function saveTelegramSettings(){
     ...telegramFlowDraft,bot_display_name:tgBotName.value,website_url:tgWebsite.value,
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
     support_username:tgSupportUsername.value.trim().replace(/^@/,''),
+    points_yen_per_point:Math.max(1,Number(tgPointRate.value||1)),
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();

@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
     "text_time_prompt": "你选择了 <b>{girl}</b>。\n\n可预约：{free_time}\n\n请发送时间，例如：<code>19-20</code>、<code>19:30-21:00</code>。",
     "text_confirm": "请确认预约：\n\n女孩：<b>{girl}</b>\n日期：{date}\n时间：<b>{start_time}-{end_time}</b>",
     "text_submitted": "预约已经交给店长审核，请稍等。",
+    "points_yen_per_point": "1",
 }
 
 
@@ -55,6 +56,7 @@ def register_telegram_booking(
     current_business_minute_for_date,
     import_chain_text,
     order_to_chain_line,
+    ensure_customer,
 ):
     def ensure_db():
         init_main_db()
@@ -75,6 +77,10 @@ def register_telegram_booking(
                 booking_date TEXT NOT NULL, girl_name TEXT NOT NULL, sort_order INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'manual', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(booking_date,girl_name))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_customers(
+                telegram_user_id TEXT PRIMARY KEY, customer_id INTEGER NOT NULL,
+                telegram_username TEXT DEFAULT '', display_name TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
             cols = [r[1] for r in c.execute("PRAGMA table_info(customer_reservations)").fetchall()]
@@ -86,6 +92,10 @@ def register_telegram_booking(
                 "telegram_message_id": "INTEGER DEFAULT 0",
                 "hotel_file_id": "TEXT DEFAULT ''",
                 "hotel_caption": "TEXT DEFAULT ''",
+                "customer_id": "INTEGER DEFAULT 0",
+                "points_available": "INTEGER DEFAULT 0",
+                "points_used": "INTEGER DEFAULT 0",
+                "actual_payment": "INTEGER DEFAULT 0",
             }
             for name, sql_type in additions.items():
                 if name not in cols:
@@ -428,9 +438,14 @@ def register_telegram_booking(
         group_text = (f"📋 <b>新的预约申请 #{rid}</b>\n\n"
                       f"女孩：<b>{escape(girl)}</b>\n日期：{escape(day)}\n时间：{escape(start_text)}-{escape(end_text)}\n"
                       f"客人：{escape(display_name(user))}\nTelegram ID：<code>{user.get('id')}</code>")
+        customer_username = str(user.get("username") or "").strip().lstrip("@")
+        customer_url = f"https://t.me/{customer_username}" if customer_username else f"tg://user?id={user.get('id')}"
         try:
             sent = send_message(cfg["default_review_chat_id"], group_text,
-                                inline_keyboard([[callback_button("✅ 店长批准", f"approve:{rid}"), callback_button("❌ 拒绝", f"reject:{rid}")]]),
+                                inline_keyboard([
+                                    [callback_button("✅ 店长批准", f"approve:{rid}"), callback_button("❌ 拒绝", f"reject:{rid}")],
+                                    [url_button("💬 一键联系客户", customer_url)],
+                                ]),
                                 int(cfg.get("default_review_thread_id") or 0))
             with conn() as c:
                 c.execute("UPDATE customer_reservations SET telegram_message_id=? WHERE id=?", (int(sent.get("message_id") or 0), rid))
@@ -447,6 +462,89 @@ def register_telegram_booking(
             submitted_rows.append([support])
         send_message(chat.get("id"), cfg.get("text_submitted") or "预约已经交给店长审核，请稍等。",
                      inline_keyboard(submitted_rows))
+
+    def target_thread_id(row, cfg):
+        target = str(row.get("telegram_group_chat_id") or cfg.get("default_review_chat_id") or "")
+        thread_id = int(cfg.get("default_review_thread_id") or 0) if target == str(cfg.get("default_review_chat_id") or "") else 0
+        with conn() as c:
+            binding = c.execute("""SELECT * FROM telegram_group_bindings
+                                  WHERE girl_name=? AND enabled=1 AND chat_id=?""",
+                                (row["girl_name"], target)).fetchone()
+            if binding:
+                thread_id = int(binding["message_thread_id"] or 0)
+        return target, thread_id
+
+    def send_approved_chain(row, order_row, cfg, review_chat_id):
+        target, thread_id = target_thread_id(row, cfg)
+        try:
+            dt = datetime.strptime(row["reserve_date"], "%Y-%m-%d")
+            header = f"{dt.month}月{dt.day}日 {row['girl_name']} 接龙"
+            send_message(target, f"<b>{escape(header)}</b>\n{escape(order_to_chain_line(order_row, 1, False))}",
+                         thread_id=thread_id)
+        except Exception as exc:
+            send_message(review_chat_id, f"⚠️ 订单已建立，但接龙发送失败：{escape(str(exc))}")
+
+    def link_telegram_customer(c, row):
+        linked = c.execute("""SELECT c.* FROM telegram_customers t
+                            JOIN customers c ON c.id=t.customer_id WHERE t.telegram_user_id=?""",
+                           (str(row.get("telegram_user_id") or ""),)).fetchone()
+        if linked:
+            return linked
+        customer = ensure_customer(c, row.get("username") or row.get("telegram_username") or "Telegram客人",
+                                   f"Telegram ID:{row.get('telegram_user_id')}")
+        c.execute("""INSERT INTO telegram_customers(telegram_user_id,customer_id,telegram_username,display_name,updated_at)
+                     VALUES(?,?,?,?,CURRENT_TIMESTAMP)
+                     ON CONFLICT(telegram_user_id) DO UPDATE SET customer_id=excluded.customer_id,
+                     telegram_username=excluded.telegram_username,display_name=excluded.display_name,
+                     updated_at=CURRENT_TIMESTAMP""",
+                  (str(row.get("telegram_user_id") or ""), int(customer["id"]),
+                   row.get("telegram_username") or "", row.get("username") or ""))
+        return c.execute("SELECT * FROM customers WHERE id=?", (int(customer["id"]),)).fetchone()
+
+    def finalize_points(user, chat_id, rid, requested_points):
+        cfg = settings()
+        rate = max(1, int(cfg.get("points_yen_per_point") or 1))
+        with conn() as c:
+            found = c.execute("""SELECT * FROM customer_reservations
+                               WHERE id=? AND telegram_user_id=? AND status='已确认'""",
+                              (int(rid), str(user.get("id")))).fetchone()
+            if not found:
+                clear_session(user.get("id"))
+                send_message(chat_id, "没有找到等待积分选择的预约。")
+                return
+            row = dict(found)
+            if int(row.get("order_id") or 0):
+                clear_session(user.get("id"))
+                send_message(chat_id, "这笔预约已经完成积分确认。")
+                return
+            customer = link_telegram_customer(c, row)
+            available = max(0, min(int(row.get("points_available") or 0), int(customer["points"] or 0)))
+            max_usable = min(available, int(row["price"] or 0) // rate)
+            used = max(0, min(int(requested_points or 0), max_usable))
+            actual = max(0, int(row["price"] or 0) - used * rate)
+            girl_row = c.execute("SELECT id FROM girls WHERE name=?", (row["girl_name"],)).fetchone()
+            create_or_update_order(c, {
+                "order_date": row["reserve_date"], "girl_id": int(girl_row["id"]) if girl_row else 0,
+                "girl_name": row["girl_name"], "service_time": f"{row['start_time']}-{row['end_time']}",
+                "received_amount": actual, "points_used": used, "customer_raw": customer["customer_no"],
+                "remark": f"Telegram Bot 预约｜使用积分 {used}", "order_status": "预约中", "settlement_status": "未结算",
+            })
+            order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+            c.execute("""UPDATE customer_reservations SET order_id=?,points_used=?,actual_payment=?,
+                         updated_at=CURRENT_TIMESTAMP WHERE id=?""", (order_id, used, actual, int(rid)))
+            order_row = dict(c.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone())
+            row.update({"order_id": order_id, "points_used": used, "actual_payment": actual})
+        rows = []
+        if cfg.get("hotel_url"):
+            rows.append([url_button(cfg.get("button_hotel") or "推荐酒店", cfg["hotel_url"])])
+        support = support_url_button(cfg)
+        if support:
+            rows.append([support])
+        send_message(chat_id,
+                     f"积分确认完成：\n当前可用积分：{available}\n本次使用积分：{used}\n积分抵扣：¥{used * rate:,}\n<b>客人实际支付：¥{actual:,}</b>\n\n开好酒店后，请发送酒店截图、地址或定位。",
+                     inline_keyboard(rows) if rows else None)
+        send_approved_chain(row, order_row, cfg, cfg.get("default_review_chat_id"))
+        set_session(user.get("id"), chat_id, "await_hotel", {"reservation_id": int(rid)})
 
     def review_reservation(callback, approve):
         user = callback.get("from") or {}
@@ -471,45 +569,25 @@ def register_telegram_booking(
                 answer_callback(callback.get("id"), f"该预约已是：{row['status']}", True)
                 return
             new_status = "已确认" if approve else "已拒绝"
-            order_id = int(row.get("order_id") or 0)
-            if approve and not order_id:
-                girl_row = c.execute("SELECT id FROM girls WHERE name=?", (row["girl_name"],)).fetchone()
-                create_or_update_order(c, {
-                    "order_date": row["reserve_date"], "girl_id": int(girl_row["id"]) if girl_row else 0,
-                    "girl_name": row["girl_name"], "service_time": f"{row['start_time']}-{row['end_time']}",
-                    "received_amount": int(row["price"] or 0), "customer_raw": row.get("username") or "Telegram客人",
-                    "remark": "Telegram Bot 预约", "order_status": "预约中", "settlement_status": "未结算",
-                })
-                order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
-            c.execute("UPDATE customer_reservations SET status=?,order_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                      (new_status, order_id, rid))
-            order_row = dict(c.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()) if approve and order_id else None
+            customer = link_telegram_customer(c, row) if approve else None
+            available_points = int(customer["points"] or 0) if customer else 0
+            customer_id = int(customer["id"]) if customer else int(row.get("customer_id") or 0)
+            c.execute("""UPDATE customer_reservations SET status=?,customer_id=?,points_available=?,
+                         updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                      (new_status, customer_id, available_points, rid))
         answer_callback(callback.get("id"), "已处理")
         reviewer = display_name(user)
         if approve:
-            target = str(row.get("telegram_group_chat_id") or cfg.get("default_review_chat_id") or "")
-            thread_id = int(cfg.get("default_review_thread_id") or 0) if target == str(cfg.get("default_review_chat_id") or "") else 0
-            with conn() as c:
-                binding = c.execute("""SELECT * FROM telegram_group_bindings
-                                      WHERE girl_name=? AND enabled=1 AND chat_id=?""",
-                                    (row["girl_name"], target)).fetchone()
-                if binding:
-                    thread_id = int(binding["message_thread_id"] or 0)
-            try:
-                dt = datetime.strptime(row["reserve_date"], "%Y-%m-%d")
-                header = f"{dt.month}月{dt.day}日 {row['girl_name']} 接龙"
-                chain_line = order_to_chain_line(order_row, 1, False) if order_row else f"1.{row['start_time']}-{row['end_time']}"
-                send_message(target, f"<b>{escape(header)}</b>\n{escape(chain_line)}", thread_id=thread_id)
-            except Exception as exc:
-                send_message(chat.get("id"), f"⚠️ 预约已批准，但接龙发送失败：{escape(str(exc))}")
-            rows = []
-            if cfg.get("hotel_url"):
-                rows.append([url_button("推荐酒店", cfg["hotel_url"])])
             send_message(row["telegram_chat_id"],
-                         f"预约成功！{row['girl_name']} {row['reserve_date']} {row['start_time']}-{row['end_time']} 已经为你留好。\n\n开好酒店后，请直接发送酒店截图、地址或定位。",
-                         inline_keyboard(rows) if rows else None)
-            set_session(row["telegram_user_id"], row["telegram_chat_id"], "await_hotel", {"reservation_id": rid})
-            send_message(chat.get("id"), f"✅ 预约 #{rid} 已由 {escape(reviewer)} 批准。")
+                         f"预约成功！{row['girl_name']} {row['reserve_date']} {row['start_time']}-{row['end_time']} 已经为你留好。\n\n"
+                         f"当前可用积分：<b>{available_points}</b>\n请选择本次积分使用方式（1 积分抵 ¥{int(cfg.get('points_yen_per_point') or 1)}）：",
+                         inline_keyboard([
+                             [callback_button("不使用积分", f"points:0:{rid}"), callback_button("全部使用", f"points:all:{rid}")],
+                             [callback_button("输入使用积分", f"points:custom:{rid}")],
+                         ]))
+            set_session(row["telegram_user_id"], row["telegram_chat_id"], "choose_points",
+                        {"reservation_id": rid, "available_points": available_points})
+            send_message(chat.get("id"), f"✅ 预约 #{rid} 已由 {escape(reviewer)} 批准。等待客人确认积分后生成接龙。")
         else:
             send_message(row["telegram_chat_id"], f"很抱歉，预约 #{rid} 未通过。请重新选择时间或联系人工客服。")
             send_message(chat.get("id"), f"❌ 预约 #{rid} 已由 {escape(reviewer)} 拒绝。")
@@ -642,8 +720,8 @@ def register_telegram_booking(
                 girl_id = binding["girl_id"]
         cfg = settings()
         is_internal = str(chat.get("id")) == str(cfg.get("default_review_chat_id") or "")
-        if not is_internal and not binding:
-            send_message(chat.get("id"), "本群没有绑定到 MCR，不能导入接龙。")
+        if not is_internal:
+            send_message(chat.get("id"), "请在 Alice内部群导入接龙；女孩专属群只接收接龙和酒店信息。")
             return
         if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
             send_message(chat.get("id"), "只有店长、客服或群管理员可以导入接龙。")
@@ -671,22 +749,36 @@ def register_telegram_booking(
             return
         if chat.get("type") != "private":
             return
+        session = get_session(user.get("id"))
         if text.startswith("/start"):
+            if session and session.get("step") in ("choose_points", "await_points"):
+                send_message(chat.get("id"), "请先完成本次积分选择；如不使用积分，请点击“不使用积分”。")
+                return
             clear_session(user.get("id"))
             show_home(chat.get("id"))
             return
         if text.startswith("/cancel") or text == "取消":
+            if session and session.get("step") in ("choose_points", "await_points"):
+                finalize_points(user, chat.get("id"), int(session["payload"].get("reservation_id") or 0), 0)
+                return
             clear_session(user.get("id"))
             send_message(chat.get("id"), "本次操作已取消。")
             show_home(chat.get("id"))
             return
-        session = get_session(user.get("id"))
         if not session:
             show_home(chat.get("id"))
         elif session["step"] == "await_time":
             submit_reservation(message, session)
         elif session["step"] == "await_hotel":
             receive_hotel(message, session)
+        elif session["step"] == "await_points":
+            raw = re.sub(r"[^0-9]", "", text)
+            if not raw:
+                send_message(chat.get("id"), "请输入要使用的积分数字，例如：<code>1000</code>。")
+            else:
+                finalize_points(user, chat.get("id"), int(session["payload"].get("reservation_id") or 0), int(raw))
+        elif session["step"] == "choose_points":
+            send_message(chat.get("id"), "请点击上方按钮选择积分使用方式。")
         else:
             show_home(chat.get("id"))
 
@@ -699,8 +791,12 @@ def register_telegram_booking(
         if data == "book":
             show_dates(chat_id, user.get("id"))
         elif data == "flow:home":
-            clear_session(user.get("id"))
-            show_home(chat_id)
+            session = get_session(user.get("id"))
+            if session and session.get("step") in ("choose_points", "await_points"):
+                send_message(chat_id, "请先完成本次积分选择。")
+            else:
+                clear_session(user.get("id"))
+                show_home(chat_id)
         elif data == "flow:dates":
             show_dates(chat_id, user.get("id"))
         elif data.startswith("flow:girls:"):
@@ -719,10 +815,25 @@ def register_telegram_booking(
                                     "text": f"{payload.get('start_time')}-{payload.get('end_time')}"},
                                    session, confirmed=True)
         elif data == "flow:cancel":
-            clear_session(user.get("id"))
-            cfg = settings()
-            send_message(chat_id, "本次预约已取消。",
-                         inline_keyboard([[callback_button(cfg.get("button_restart") or "重新开始预约", "book")]]))
+            session = get_session(user.get("id"))
+            if session and session.get("step") in ("choose_points", "await_points"):
+                finalize_points(user, chat_id, int(session["payload"].get("reservation_id") or 0), 0)
+            else:
+                clear_session(user.get("id"))
+                cfg = settings()
+                send_message(chat_id, "本次预约已取消。",
+                             inline_keyboard([[callback_button(cfg.get("button_restart") or "重新开始预约", "book")]]))
+        elif data.startswith("points:"):
+            _, choice, rid_text = data.split(":", 2)
+            session = get_session(user.get("id"))
+            if not session or session.get("step") not in ("choose_points", "await_points") or int(session["payload"].get("reservation_id") or 0) != int(rid_text):
+                send_message(chat_id, "这个积分选择已经失效。")
+            elif choice == "custom":
+                set_session(user.get("id"), chat_id, "await_points", session["payload"])
+                send_message(chat_id, f"当前可用积分：{int(session['payload'].get('available_points') or 0)}\n请输入要使用的积分数字：")
+            else:
+                requested = int(session["payload"].get("available_points") or 0) if choice == "all" else 0
+                finalize_points(user, chat_id, int(rid_text), requested)
         elif data.startswith("date:"):
             show_girls(chat_id, user.get("id"), data.split(":", 1)[1])
         elif data.startswith("girl:"):

@@ -32,6 +32,7 @@ USERS = {
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
 ACTIVE_SESSIONS = {}
+LAST_FULL_MAINTENANCE_DAY = None
 PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
 
 @app.errorhandler(Exception)
@@ -151,6 +152,9 @@ def init_db():
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
         if 'enrollment' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN enrollment TEXT DEFAULT ''")
+        order_cols = [r[1] for r in c.execute('PRAGMA table_info(orders)').fetchall()]
+        if 'points_used' not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN points_used INTEGER DEFAULT 0")
         praise_cols = [r[1] for r in c.execute('PRAGMA table_info(girl_praises)').fetchall()]
         if 'image_mime' not in praise_cols:
             c.execute("ALTER TABLE girl_praises ADD COLUMN image_mime TEXT DEFAULT 'image/png'")
@@ -1229,7 +1233,8 @@ def active_customer_points(c, customer_id, today=None):
     today = today or tokyo_today_date()
     cancel_text = '\u53d6\u6d88'
     order_rows = c.execute("""
-        SELECT order_date, COALESCE(points,0) AS points, COALESCE(received_amount,0) AS received_amount
+        SELECT order_date, COALESCE(points,0) AS points, COALESCE(points_used,0) AS points_used,
+               COALESCE(received_amount,0) AS received_amount
         FROM orders
         WHERE customer_id=?
           AND COALESCE(order_date,'')<>''
@@ -1247,7 +1252,7 @@ def active_customer_points(c, customer_id, today=None):
         if last_day and (day - last_day).days >= 30:
             active_points = 0
         pts = int(row['points'] or 0)
-        active_points += pts
+        active_points = max(0, active_points + pts - int(row['points_used'] or 0))
         total_points += pts
         total_spent += int(row['received_amount'] or 0)
         last_day = day
@@ -1402,10 +1407,12 @@ def detect_payment_method_from_note(*texts):
 
 def create_or_update_order(c,d):
     old_customer_id = None
+    old_points_used = 0
     if d.get('id'):
-        old = c.execute("SELECT customer_id FROM orders WHERE id=?", (int(d['id']),)).fetchone()
+        old = c.execute("SELECT customer_id,COALESCE(points_used,0) AS points_used FROM orders WHERE id=?", (int(d['id']),)).fetchone()
         if old:
             old_customer_id = old["customer_id"]
+            old_points_used = int(old["points_used"] or 0)
 
     g = None
     if d.get('girl_id'):
@@ -1427,19 +1434,20 @@ def create_or_update_order(c,d):
     prof = round_yen_1000_half_up(rec - th)
     cust = ensure_customer(c,d.get('customer_raw',''),d.get('remark',''))
     pts = math.floor(rec/20)
+    points_used = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
     auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
     payment_method = auto_payment or (d.get('payment_method') or '现金')
 
     if d.get('id'):
-        c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('id')))
+        c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,points_used=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
         recalc_customer_points(c, cust['id'])
     else:
-        c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,order_status,settlement_status,payment_method,remark,remark2,raw_text)
-                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
+        c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,points_used,order_status,settlement_status,payment_method,remark,remark2,raw_text)
+                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
         recalc_customer_points(c, cust['id'])
 
 
@@ -1483,11 +1491,15 @@ def remove_girl_praise_file(image_path):
             traceback.print_exc()
 @app.route('/api/all')
 def all_data():
+    global LAST_FULL_MAINTENANCE_DAY
     init_db()
     with conn() as c:
         auto_finish_reservations(c)
-        expire_customer_points(c, None)
-        update_customer_type_by_history(c, None)
+        maintenance_day = tokyo_today_date().isoformat()
+        if LAST_FULL_MAINTENANCE_DAY != maintenance_day:
+            expire_customer_points(c, None)
+            update_customer_type_by_history(c, None)
+            LAST_FULL_MAINTENANCE_DAY = maintenance_day
         return jsonify({
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
@@ -2308,7 +2320,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v60_telegram_flow_and_chain",
+            "version": "v61_telegram_points_and_fast_refresh",
             "port": 5057,
         })
 
@@ -2327,7 +2339,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v60_telegram_flow_and_chain",
+            "version": "v61_telegram_points_and_fast_refresh",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3252,7 +3264,8 @@ def api_customer_reservation_status():
             create_or_update_order(c, {'order_date':r['reserve_date'], 'girl_id': int(g['id']) if g else 0, 'girl_name':r['girl_name'], 'service_time':f"{r['start_time']}-{r['end_time']}", 'received_amount':int(r['price'] or 0), 'customer_raw':customer_raw, 'remark': '客人网站提前预约 '+(r['note'] or ''), 'order_status':'预约中', 'settlement_status':'未结算'})
             order_id=c.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
         c.execute("UPDATE customer_reservations SET status=?, order_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status,order_id,rid))
-    return jsonify(ok=True)
+        updated = c.execute('SELECT * FROM customer_reservations WHERE id=?', (rid,)).fetchone()
+    return jsonify(ok=True, reservation=dict(updated))
 
 def open_browser(): webbrowser.open('http://127.0.0.1:5057')
 
@@ -3272,6 +3285,7 @@ register_telegram_booking(
     current_business_minute_for_date=_current_business_minute_for_date,
     import_chain_text=import_chain_text,
     order_to_chain_line=order_to_chain_line,
+    ensure_customer=ensure_customer,
 )
 
 import os

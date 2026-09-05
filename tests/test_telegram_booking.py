@@ -55,9 +55,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
         day = (self.app_module._tokyo_now().date() + timedelta(days=1)).isoformat()
         self.day = day
         with self.app_module.conn() as c:
-            for table in ("orders", "customer_reservations", "pure_shifts", "girls",
+            for table in ("orders", "customer_reservations", "customers", "pure_shifts", "girls",
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
-                          "telegram_daily_girls"):
+                          "telegram_daily_girls", "telegram_customers"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -94,6 +94,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             binding = c.execute("SELECT * FROM telegram_group_bindings WHERE girl_name='娜娜子'").fetchone()
             self.assertEqual(binding["chat_title"], "Alice内部群")
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('0001','测试客人',1000)")
+            customer_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("INSERT INTO telegram_customers(telegram_user_id,customer_id) VALUES('7001',?)", (customer_id,))
 
         private_chat = {"id": 7001, "type": "private"}
         customer = {"id": 7001, "first_name": "测试客人", "username": "guest"}
@@ -118,7 +121,17 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
             self.assertEqual(reservation["status"], "已确认")
+            self.assertEqual(int(reservation["order_id"]), 0)
+
+        self.webhook({"callback_query": {
+            "id": "c2-points", "from": customer, "data": f"points:all:{rid}",
+            "message": {"chat": private_chat},
+        }})
+        with self.app_module.conn() as c:
+            reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
             self.assertGreater(int(reservation["order_id"]), 0)
+            self.assertEqual(int(reservation["points_used"]), 1000)
+            self.assertEqual(int(reservation["actual_payment"]), 14000)
 
         self.webhook({"message": {
             "message_id": 3, "chat": private_chat, "from": customer,
@@ -202,8 +215,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
     def test_group_reply_chain_command_imports_into_mcr(self):
         self.webhook({"message": {
             "message_id": 20,
-            "chat": {"id": -30003, "type": "supergroup", "title": "娜娜子群"},
-            "from": {"id": 9300, "first_name": "客服"}, "text": "/绑定女孩 娜娜子",
+            "chat": {"id": -30003, "type": "supergroup", "title": "Alice内部群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "/绑定审核群",
         }})
         self.webhook({"message": {
             "message_id": 22,
