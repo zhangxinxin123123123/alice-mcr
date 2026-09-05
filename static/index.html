@@ -131,6 +131,7 @@ body:not(.role-boss) .boss-only{display:none!important}
   <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
   <button class="admin-only" onclick="show('advanceReserve',this)">📅 提前预约表</button>
+  <button class="admin-only" onclick="show('telegramBooking',this)">✈️ Telegram预约</button>
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
     <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
   <button class="admin-only" onclick="show('enums',this)">⚙️ 枚举类型</button>
@@ -262,6 +263,36 @@ body:not(.role-boss) .boss-only{display:none!important}
     </div>
     <div id="girlPraiseGrid" class="praise-folder-grid"></div>
   </div>
+ </section>
+
+ <section id="telegramBooking" class="panel">
+  <div class="card"><h2>Telegram 预约设置</h2>
+   <p class="note">第一阶段只显示当天出勤、没有“房间”Tag、并已绑定 Telegram 群的女孩。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
+   <div id="tgStatus" class="note">正在读取 Bot 状态...</div>
+   <div class="form">
+    <input id="tgBotName" placeholder="Bot 显示名称">
+    <select id="tgEnabled"><option value="1">开放预约</option><option value="0">暂停预约</option></select>
+    <input id="tgWebsite" placeholder="官方网站 https://...">
+    <input id="tgHotel" placeholder="推荐酒店 https://...">
+    <input id="tgHotelTimeout" type="number" min="30" placeholder="酒店资料时限/秒">
+   </div>
+   <textarea id="tgWelcome" placeholder="Bot 欢迎语"></textarea><br><br>
+   <button class="primary" onclick="saveTelegramSettings()">保存 Bot 设置</button>
+   <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
+  </div>
+  <div class="card"><h2>女孩群绑定</h2>
+   <p class="note">推荐在女孩群内由管理员发送“/绑定女孩 女孩名”，系统会自动取得群 ID。也可以在这里手动维护。</p>
+   <div class="form">
+    <select id="tgGirl"></select>
+    <input id="tgChatId" placeholder="Telegram 群 ID，例如 -100...">
+    <input id="tgChatTitle" placeholder="群名称">
+    <input id="tgThreadId" type="number" placeholder="话题 ID，可空">
+    <select id="tgBindingEnabled"><option value="1">启用</option><option value="0">停用</option></select>
+    <button class="primary" onclick="saveTelegramBinding()">保存绑定</button>
+   </div>
+   <div id="tgBindings"></div>
+  </div>
+  <div class="card"><h2>店长账号</h2><p class="note">第一位在群内执行绑定的管理员会自动登记为店长；之后只有登记的店长可以批准或拒绝预约。</p><div id="tgManagers"></div></div>
  </section>
 
 
@@ -453,7 +484,7 @@ async function doLogin(){
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  try{
@@ -2203,6 +2234,59 @@ function refreshAttPriceOptions(){
   const girl=(data.girls||[]).find(g=>String(g.id)===String(girlId)) || {};
   const prices=getAttGirlPrices(girl);
   attPrice.innerHTML=prices.map(p=>`<option value="${p}">${yen(p)}</option>`).join("");
+}
+
+let telegramConfig=null;
+async function loadTelegramSettings(){
+  tgGirl.innerHTML='<option value="">选择女孩</option>'+(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}">${escHtml(g.name)}</option>`).join('');
+  telegramConfig=await api('/api/telegram/settings',{});
+  const s=telegramConfig.settings||{};
+  tgBotName.value=s.bot_display_name||'';
+  tgEnabled.value=String(s.booking_enabled||'0');
+  tgWebsite.value=s.website_url||'';
+  tgHotel.value=s.hotel_url||'';
+  tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
+  tgWelcome.value=s.welcome_text||'';
+  tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜绑定群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
+  renderTelegramBindings();
+}
+function renderTelegramBindings(){
+  const rows=(telegramConfig&&telegramConfig.bindings)||[];
+  if(!rows.length){tgBindings.innerHTML='<p class="note">还没有绑定女孩群。Bot 上线后，在 Alice内部群发送：<b>/绑定女孩 娜娜子</b></p>';}
+  else tgBindings.innerHTML='<div class="table"><table><thead><tr><th>女孩</th><th>群名称</th><th>群 ID</th><th>话题</th><th>状态</th><th>操作</th></tr></thead><tbody>'+rows.map((r,i)=>`<tr><td>${escHtml(r.girl_name)}</td><td>${escHtml(r.chat_title||'')}</td><td><code>${escHtml(r.chat_id)}</code></td><td>${Number(r.message_thread_id||0)||'-'}</td><td>${Number(r.enabled)!==0?'启用':'停用'}</td><td><button class="soft" onclick="editTelegramBindingAt(${i})">编辑</button></td></tr>`).join('')+'</tbody></table></div>';
+  const managers=(telegramConfig&&telegramConfig.managers)||[];
+  tgManagers.innerHTML=managers.length?'<div class="table"><table><thead><tr><th>姓名</th><th>用户名</th><th>Telegram ID</th><th>状态</th></tr></thead><tbody>'+managers.map(m=>`<tr><td>${escHtml(m.display_name||'')}</td><td>${m.username?'@'+escHtml(m.username):'-'}</td><td><code>${escHtml(m.user_id)}</code></td><td>${Number(m.active)!==0?'启用':'停用'}</td></tr>`).join('')+'</tbody></table></div>':'<p class="note">尚未登记店长。首次群绑定时会自动登记。</p>';
+}
+function editTelegramBinding(r){
+  tgGirl.value=r.girl_name||''; tgChatId.value=r.chat_id||''; tgChatTitle.value=r.chat_title||'';
+  tgThreadId.value=r.message_thread_id||''; tgBindingEnabled.value=Number(r.enabled)!==0?'1':'0';
+  document.getElementById('telegramBooking').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function editTelegramBindingAt(index){editTelegramBinding(((telegramConfig&&telegramConfig.bindings)||[])[index]||{});}
+async function saveTelegramSettings(){
+  telegramConfig=await api('/api/telegram/settings',{
+    bot_display_name:tgBotName.value,welcome_text:tgWelcome.value,website_url:tgWebsite.value,
+    hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
+    booking_enabled:tgEnabled.value==='1'
+  });
+  await loadTelegramSettings();
+  alert('Telegram Bot 设置已保存');
+}
+async function saveTelegramBinding(){
+  if(!tgGirl.value||!tgChatId.value.trim()){alert('请选择女孩并填写群 ID');return;}
+  await api('/api/telegram/bindings',{
+    girl_name:tgGirl.value,chat_id:tgChatId.value.trim(),chat_title:tgChatTitle.value,
+    message_thread_id:Number(tgThreadId.value||0),enabled:tgBindingEnabled.value==='1'
+  });
+  await loadTelegramSettings();
+  alert('女孩群绑定已保存');
+}
+async function setupTelegramWebhook(){
+  if(!confirm('确认把 Telegram Webhook 指向当前 MCR 网址？'))return;
+  const origin=location.origin;
+  const result=await api('/api/telegram/webhook/setup',{public_base_url:origin});
+  alert(`Webhook 已启用：${result.webhook_url}`);
+  await loadTelegramSettings();
 }
 function addAttRow(){
   if(!attGirl.value){

@@ -2303,7 +2303,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v55_delete_praise_images",
+            "version": "v56_telegram_booking",
             "port": 5057,
         })
 
@@ -2322,7 +2322,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v55_delete_praise_images",
+            "version": "v56_telegram_booking",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3250,6 +3250,23 @@ def api_customer_reservation_status():
     return jsonify(ok=True)
 
 def open_browser(): webbrowser.open('http://127.0.0.1:5057')
+
+# Telegram 预约系统：与 MCR 共用出勤、房间、预约和订单数据库。
+from telegram_booking import register_telegram_booking
+register_telegram_booking(
+    app=app,
+    conn=conn,
+    init_main_db=init_db,
+    pure_shift_rows_for_date=pure_shift_rows_for_date,
+    create_or_update_order=create_or_update_order,
+    time_to_min=time_to_min,
+    min_to_time=min_to_time,
+    service_range_minutes=service_range_minutes,
+    ranges_overlap=ranges_overlap,
+    tokyo_now=_tokyo_now,
+    current_business_minute_for_date=_current_business_minute_for_date,
+)
+
 import os
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5057))
