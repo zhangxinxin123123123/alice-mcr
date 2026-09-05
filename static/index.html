@@ -66,6 +66,7 @@ body.role-admin #home{display:none!important}
 body.role-admin #loginAudit{display:none!important}
 body:not(.role-boss) .boss-only{display:none!important}
 .tg-flow-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(280px,1.3fr) minmax(230px,.8fr);gap:16px;align-items:start}.tg-flow-map{display:grid;gap:7px}.tg-flow-node{border:2px solid var(--line);background:#fffafd;color:var(--ink);font-weight:900}.tg-flow-node.on{border-color:var(--pink);background:#fff0f7;color:#e75ca2}.tg-flow-arrow{text-align:center;color:#e75ca2;font-weight:900}.tg-phone{background:#24252a;border:8px solid #111;border-radius:30px;padding:18px 12px;min-height:390px;color:#fff}.tg-phone-title{text-align:center;font-weight:900;padding-bottom:14px}.tg-preview-bubble{background:#35363c;border-radius:14px;padding:12px;line-height:1.5;margin-bottom:12px;white-space:normal}.tg-preview-buttons{display:grid;gap:5px}.tg-preview-buttons span{display:block;text-align:center;background:#4f8f50;border-radius:9px;padding:9px;font-weight:800}@media(max-width:900px){.tg-flow-layout{grid-template-columns:1fr}.tg-phone{max-width:340px}}
+.tg-flow-save{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:2px dashed var(--line)}.tg-flow-save .primary{min-width:180px}.tg-flow-save-hint{font-size:12px;color:var(--ink);opacity:.75}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 .settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-amount{display:grid;gap:4px}.settle-line{display:flex;align-items:center;gap:8px;justify-content:space-between}.settle-line span{font-size:12px;opacity:.75}.settle-line b{color:#e75ca2}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:var(--ink)}
 
@@ -2330,7 +2331,8 @@ function selectTelegramFlowStep(step){
   telegramFlowStep=step;document.querySelectorAll('[data-flow-step]').forEach(x=>x.classList.toggle('on',x.dataset.flowStep===step));
   const def=telegramFlowDefs[step];if(!def)return;
   tgFlowEdit.innerHTML=`<h3>${def.title}</h3><label class="small">客户看到的文字</label><textarea oninput="telegramFlowDraft['${def.text}']=this.value;renderTelegramFlowPreview()">${escHtml(telegramFlowDraft[def.text]||'')}</textarea>`+
-    (def.buttons.length?'<h3>按钮文字</h3><div class="form">'+def.buttons.map(k=>`<label class="small">${telegramFlowLabels[k]}<input value="${escHtml(telegramFlowDraft[k]||'')}" oninput="telegramFlowDraft['${k}']=this.value;renderTelegramFlowPreview()"></label>`).join('')+'</div>':'');
+    (def.buttons.length?'<h3>按钮文字</h3><div class="form">'+def.buttons.map(k=>`<label class="small">${telegramFlowLabels[k]}<input value="${escHtml(telegramFlowDraft[k]||'')}" oninput="telegramFlowDraft['${k}']=this.value;renderTelegramFlowPreview()"></label>`).join('')+'</div>':'')+
+    '<div class="tg-flow-save"><button class="primary" type="button" onclick="saveTelegramSettings(\'客户流程文案已保存\')">💾 保存本步骤文案</button><span class="tg-flow-save-hint">修改文字或按钮后请点击保存，右侧预览会立即变化。</span></div>';
   renderTelegramFlowPreview();
 }
 function renderTelegramFlowPreview(){
@@ -2389,7 +2391,7 @@ function editTelegramBinding(r){
   document.getElementById('telegramBooking').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function editTelegramBindingAt(index){editTelegramBinding(((telegramConfig&&telegramConfig.bindings)||[])[index]||{});}
-async function saveTelegramSettings(){
+async function saveTelegramSettings(successMessage='Telegram Bot 设置已保存'){
   telegramConfig=await api('/api/telegram/settings',{
     ...telegramFlowDraft,bot_display_name:tgBotName.value,website_url:tgWebsite.value,
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
@@ -2398,7 +2400,7 @@ async function saveTelegramSettings(){
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();
-  alert('Telegram Bot 设置已保存');
+  alert(successMessage);
 }
 async function saveTelegramBinding(){
   if(!tgGirl.value||!tgChatId.value.trim()){alert('请选择女孩并填写群 ID');return;}
