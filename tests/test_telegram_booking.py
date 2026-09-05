@@ -37,7 +37,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             cls.telegram_calls.append((method, body))
             if method == "getChatMember":
                 result = {"status": "administrator"}
-            elif method == "sendMessage":
+            elif method in ("sendMessage", "sendPhoto", "sendDocument", "sendLocation"):
                 result = {"message_id": len(cls.telegram_calls)}
             else:
                 result = True
@@ -57,7 +57,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             for table in ("orders", "customer_reservations", "customers", "pure_shifts", "girls",
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
-                          "telegram_daily_girls", "telegram_customers", "chain_import_rows"):
+                          "telegram_daily_girls", "telegram_customers", "chain_import_rows",
+                          "telegram_customer_cancellations"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -133,6 +134,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertEqual(int(reservation["points_used"]), 1000)
             self.assertEqual(int(reservation["actual_payment"]), 14000)
 
+        self.webhook({"callback_query": {
+            "id": "c2-hotel", "from": customer, "data": f"hotel:{rid}",
+            "message": {"chat": private_chat},
+        }})
         self.webhook({"message": {
             "message_id": 3, "chat": private_chat, "from": customer,
             "photo": [{"file_id": "small"}, {"file_id": "hotel-photo"}], "caption": "酒店测试房间",
@@ -143,6 +148,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
         self.assertTrue(any(method == "sendMessage" and "chat_id=-10001" in body and "%E6%8E%A5%E9%BE%99" in body
                             for method, body in self.telegram_calls))
+
+        with self.app_module.conn() as c:
+            c.execute("UPDATE customers SET points=900 WHERE id=?", (customer_id,))
+        self.webhook({"callback_query": {
+            "id": "c2-cancel-prompt", "from": customer, "data": f"cancel_booking:{rid}",
+            "message": {"chat": private_chat},
+        }})
+        self.webhook({"callback_query": {
+            "id": "c2-cancel-confirm", "from": customer, "data": f"cancel_confirm:{rid}",
+            "message": {"chat": private_chat},
+        }})
+        with self.app_module.conn() as c:
+            reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
+            order = c.execute("SELECT * FROM orders WHERE id=?", (reservation["order_id"],)).fetchone()
+            linked_customer = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+            cancellation = c.execute("SELECT * FROM telegram_customer_cancellations WHERE reservation_id=?", (rid,)).fetchone()
+            self.assertEqual(reservation["status"], "取消")
+            self.assertEqual(order["order_status"], "取消")
+            self.assertEqual(linked_customer["points"], 0)
+            self.assertEqual(cancellation["cancellation_no"], 1)
+            self.assertEqual(cancellation["points_deducted"], 900)
+        self.assertTrue(any(method == "deleteMessage" and "chat_id=-10001" in body for method, body in self.telegram_calls))
 
     def test_sync_includes_room_and_no_room_girls_then_save_can_reduce(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
@@ -290,6 +317,42 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertIsNone(c.execute("SELECT 1 FROM chain_import_rows WHERE order_id=?", (order_id,)).fetchone())
             reservation = c.execute("SELECT order_id FROM customer_reservations").fetchone()
             self.assertEqual(reservation["order_id"], 0)
+
+    def test_second_customer_cancellation_blacklists_and_blocks_booking(self):
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO customers(customer_no,name,points,customer_status) VALUES('0088','二次取消测试',300,'正常')")
+            customer_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("INSERT INTO telegram_customers(telegram_user_id,customer_id,display_name) VALUES('7888',?,'二次取消测试')", (customer_id,))
+            c.execute("""INSERT INTO telegram_customer_cancellations(
+                            reservation_id,telegram_user_id,customer_id,cancellation_no,points_deducted)
+                         VALUES(90001,'7888',?,1,500)""", (customer_id,))
+            c.execute("""INSERT INTO customer_reservations(
+                            reserve_date,girl_name,start_time,end_time,username,status,customer_id,
+                            telegram_user_id,telegram_chat_id,telegram_group_chat_id)
+                         VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                      (self.day, '娜娜子', '21:00', '22:00', '二次取消测试', '已确认', customer_id,
+                       '7888', '7888', '-10001'))
+            rid = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        private_chat = {"id": 7888, "type": "private"}
+        customer = {"id": 7888, "first_name": "二次取消测试"}
+        self.webhook({"callback_query": {
+            "id": "second-cancel", "from": customer, "data": f"cancel_confirm:{rid}",
+            "message": {"chat": private_chat},
+        }})
+        with self.app_module.conn() as c:
+            linked = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+            cancellation = c.execute("SELECT * FROM telegram_customer_cancellations WHERE reservation_id=?", (rid,)).fetchone()
+            self.assertEqual(linked["customer_status"], "黑名单")
+            self.assertEqual(cancellation["cancellation_no"], 2)
+
+        self.telegram_calls.clear()
+        self.webhook({"callback_query": {
+            "id": "blocked-book", "from": customer, "data": "book",
+            "message": {"chat": private_chat},
+        }})
+        sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("%E6%9A%82%E5%81%9C%E8%87%AA%E5%8A%A9%E9%A2%84%E7%BA%A6" in body for body in sent_bodies))
 
 
 if __name__ == "__main__":

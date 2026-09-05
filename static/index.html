@@ -295,7 +295,9 @@ body:not(.role-boss) .boss-only{display:none!important}
      <button class="tg-flow-node" data-flow-step="girl" onclick="selectTelegramFlowStep('girl')">选择女孩</button><div class="tg-flow-arrow">↓</div>
      <button class="tg-flow-node" data-flow-step="time" onclick="selectTelegramFlowStep('time')">输入时间</button><div class="tg-flow-arrow">↓</div>
      <button class="tg-flow-node" data-flow-step="confirm" onclick="selectTelegramFlowStep('confirm')">确认预约</button><div class="tg-flow-arrow">↓</div>
-     <button class="tg-flow-node" data-flow-step="submitted" onclick="selectTelegramFlowStep('submitted')">等待审核</button>
+     <button class="tg-flow-node" data-flow-step="submitted" onclick="selectTelegramFlowStep('submitted')">等待审核</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="success" onclick="selectTelegramFlowStep('success')">预约成功</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="cancel_policy" onclick="selectTelegramFlowStep('cancel_policy')">取消规则</button>
     </div>
     <div id="tgFlowEdit"></div>
     <div class="tg-phone"><div class="tg-phone-title">爱丽丝预约 Bot</div><div id="tgFlowPreview"></div></div>
@@ -2306,9 +2308,11 @@ const telegramFlowDefs={
  girl:{title:'选择女孩',text:'text_choose_girl',buttons:['button_back','button_cancel']},
  time:{title:'输入时间',text:'text_time_prompt',buttons:['button_back','button_cancel']},
  confirm:{title:'确认预约',text:'text_confirm',buttons:['button_confirm','button_change_time','button_reselect_girl','button_cancel']},
- submitted:{title:'等待审核',text:'text_submitted',buttons:['button_home']}
+ submitted:{title:'等待审核',text:'text_submitted',buttons:['button_home']},
+ success:{title:'预约成功',text:'text_booking_success',buttons:['button_send_hotel','button_reschedule','button_support','button_cancel']},
+ cancel_policy:{title:'取消规则',text:'text_cancel_policy',buttons:[]}
 };
-const telegramFlowLabels={button_start:'开始按钮',button_website:'官网按钮',button_hotel:'酒店按钮',button_support:'人工客服按钮',button_today:'今天按钮',button_tomorrow:'明天按钮',button_home:'首页按钮',button_restart:'重新开始按钮',button_back:'返回按钮',button_cancel:'取消按钮',button_confirm:'确认按钮',button_change_time:'修改时间按钮',button_reselect_girl:'重选女孩按钮'};
+const telegramFlowLabels={button_start:'开始按钮',button_website:'官网按钮',button_hotel:'酒店按钮',button_support:'人工客服按钮',button_send_hotel:'发送酒店信息按钮',button_reschedule:'申请改期按钮',button_today:'今天按钮',button_tomorrow:'明天按钮',button_home:'首页按钮',button_restart:'重新开始按钮',button_back:'返回按钮',button_cancel:'取消按钮',button_confirm:'确认按钮',button_change_time:'修改时间按钮',button_reselect_girl:'重选女孩按钮'};
 async function loadTelegramSettings(){
   tgGirl.innerHTML='<option value="">选择女孩</option>'+(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}">${escHtml(g.name)}</option>`).join('');
   telegramConfig=await api('/api/telegram/settings',{});

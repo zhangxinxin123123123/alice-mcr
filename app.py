@@ -139,6 +139,13 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY(order_date, girl_id, sequence_no))""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_chain_import_order ON chain_import_rows(order_id)")
+        c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_cancellations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_id INTEGER NOT NULL UNIQUE,
+            telegram_user_id TEXT DEFAULT '', customer_id INTEGER DEFAULT 0,
+            cancellation_no INTEGER DEFAULT 1, points_deducted INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_customer ON telegram_customer_cancellations(customer_id, created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_user ON telegram_customer_cancellations(telegram_user_id, created_at)")
         for qg, qt, qc, so in [('网址','网址','',1),('常用短语','常用短语','',2)]:
             c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
         defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','SVIP',5),('customer_type','常客',6),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
@@ -1242,7 +1249,7 @@ def active_customer_points(c, customer_id, today=None):
     cancel_text = '\u53d6\u6d88'
     order_rows = c.execute("""
         SELECT order_date, COALESCE(points,0) AS points, COALESCE(points_used,0) AS points_used,
-               COALESCE(received_amount,0) AS received_amount
+               COALESCE(received_amount,0) AS received_amount, COALESCE(created_at,'') AS created_at
         FROM orders
         WHERE customer_id=?
           AND COALESCE(order_date,'')<>''
@@ -1253,6 +1260,10 @@ def active_customer_points(c, customer_id, today=None):
     total_points = 0
     total_spent = 0
     last_day = None
+    first_cancel = c.execute("""SELECT created_at FROM telegram_customer_cancellations
+                                WHERE customer_id=? AND cancellation_no=1
+                                ORDER BY id LIMIT 1""", (customer_id,)).fetchone()
+    forfeited_through = str(first_cancel['created_at'] or '') if first_cancel else ''
     for row in order_rows:
         day = parse_order_day(row['order_date'])
         if not day:
@@ -1260,7 +1271,8 @@ def active_customer_points(c, customer_id, today=None):
         if last_day and (day - last_day).days >= 30:
             active_points = 0
         pts = int(row['points'] or 0)
-        active_points = max(0, active_points + pts - int(row['points_used'] or 0))
+        if not forfeited_through or str(row['created_at'] or '') > forfeited_through:
+            active_points = max(0, active_points + pts - int(row['points_used'] or 0))
         total_points += pts
         total_spent += int(row['received_amount'] or 0)
         last_day = day
@@ -2424,7 +2436,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v65_flow_editor_save_button",
+            "version": "v66_booking_hotel_cancel_sync",
             "port": 5057,
         })
 
@@ -2443,7 +2455,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v65_flow_editor_save_button",
+            "version": "v66_booking_hotel_cancel_sync",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3401,6 +3413,7 @@ register_telegram_booking(
     import_chain_text=import_chain_text,
     order_to_chain_line=order_to_chain_line,
     ensure_customer=ensure_customer,
+    recalc_customer_points=recalc_customer_points,
 )
 
 import os
