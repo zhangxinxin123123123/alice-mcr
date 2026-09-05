@@ -728,13 +728,42 @@ function table(el,rows,cols,delTable,editFn){
     cols.map(c=>`<th class="sortable" onclick="setSort('${el}','${c.k}')">${c.t}${sortMark(el,c.k)}</th>`).join("")+
     "<th>操作</th></tr></thead><tbody>";
   rows.forEach((r,i)=>{
-    h+="<tr>"+cols.map(c=>`<td>${c.f?c.f(r[c.k],r):(r[c.k]??"")}</td>`).join("")+
+    h+=`<tr data-row-id="${escapeHtml(r.id)}">`+cols.map(c=>`<td>${c.f?c.f(r[c.k],r):(r[c.k]??"")}</td>`).join("")+
     `<td><button class="soft" onclick='${editFn}(${JSON.stringify(r).replaceAll("'","&#39;")})'>编辑</button> <button class="danger" onclick="del('${delTable}',${r.id})">删除</button></td></tr>`;
   });
   document.getElementById(el).innerHTML=h+"</tbody></table></div>";
 }
 
-async function del(table,id){if(!confirm("确认删除？"))return;await api(`/api/delete/${table}/${id}`,{});await loadAll()}
+function refreshOrderSummaryOnly(){
+  const isUser=auth&&auth.role==="user", month=todayStr.slice(0,7), amtKey=isUser?"received_amount":"store_profit";
+  if(window.kOrders)kOrders.textContent=isUser?"—":data.orders.length;
+  if(window.kToday)kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));
+  if(window.kMonth)kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
+}
+function applyOrderDeleteResult(ids,result){
+  const removed=new Set((ids||[]).map(Number));
+  data.orders=(data.orders||[]).filter(o=>!removed.has(Number(o.id)));
+  (result.customers||[]).forEach(patch=>{
+    const i=(data.customers||[]).findIndex(c=>Number(c.id)===Number(patch.id));
+    if(i>=0)data.customers[i]={...data.customers[i],...patch};
+    (data.orders||[]).forEach(o=>{if(Number(o.customer_id)===Number(patch.id))o.customer_total_orders=Number(patch.total_orders||0);});
+  });
+  removed.forEach(id=>{
+    selectedOrders.delete(id);
+    document.querySelectorAll(`#ordersTable tr[data-row-id="${id}"]`).forEach(row=>row.remove());
+  });
+  refreshOrderSummaryOnly();
+}
+async function del(table,id){
+  if(!confirm("确认删除？"))return;
+  const result=await api(`/api/delete/${table}/${id}`,{});
+  if(table==="orders"){
+    applyOrderDeleteResult([id],result);
+    if(typeof showToast==="function")showToast("预约已删除");
+    return;
+  }
+  await loadAll();
+}
 function renderAdvanceReserve(){
   if(!window.customerAccountTable)return;
   if(!arDate.value) arDate.value=todayStr;
@@ -1883,10 +1912,9 @@ async function bulkDeleteOrders(){
   const ids = [...selectedOrders];
   if(!ids.length){ alert("请先勾选要删除的订单"); return; }
   if(!confirm(`确认删除 ${ids.length} 条订单？`)) return;
-  await api("/api/orders/bulk_delete", {ids});
-  selectedOrders.clear();
-  await loadAll();
-  alert("批量删除完成");
+  const result=await api("/api/orders/bulk_delete", {ids});
+  applyOrderDeleteResult(ids,result);
+  alert(`批量删除完成：${Number(result.deleted||0)} 条`);
 }
 
 async function bulkSettleOrders(status="已结算"){

@@ -84,6 +84,8 @@ def init_db():
             received_amount INTEGER DEFAULT 0, girl_take_home INTEGER DEFAULT 0, store_profit INTEGER DEFAULT 0, points INTEGER DEFAULT 0,
             order_status TEXT DEFAULT '已结束', settlement_status TEXT DEFAULT '未结算', payment_method TEXT DEFAULT '现金',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', raw_text TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_orders_customer_date_id ON orders(customer_id, order_date, id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_orders_date_id ON orders(order_date, id)")
         c.execute("""CREATE TABLE IF NOT EXISTS settlement_reports(
             id INTEGER PRIMARY KEY AUTOINCREMENT, report_date TEXT NOT NULL, girl_name TEXT NOT NULL,
             theoretical_amount INTEGER DEFAULT 0, actual_settlement INTEGER DEFAULT 0, formula_text TEXT DEFAULT '',
@@ -1668,6 +1670,27 @@ def api_girl_praises():
 def orders():
     with conn() as c: create_or_update_order(c, request.json or {})
     return jsonify(ok=True)
+
+
+def customer_refresh_rows(c, customer_ids):
+    """Return only customers affected by a local order mutation; avoids reloading /api/all."""
+    ids = sorted({int(x) for x in customer_ids if x})
+    result = []
+    for start in range(0, len(ids), 500):
+        batch = ids[start:start + 500]
+        q = ','.join(['?'] * len(batch))
+        result.extend(dict(r) for r in c.execute(f'''SELECT c.*,
+                    COALESCE(o.total_orders,0) AS total_orders,
+                    COALESCE(o.total_spent,c.total_spent,0) AS total_spent
+                FROM customers c
+                LEFT JOIN (
+                    SELECT customer_id,COUNT(*) AS total_orders,SUM(received_amount) AS total_spent
+                    FROM orders WHERE customer_id IN ({q}) GROUP BY customer_id
+                ) o ON o.customer_id=c.id
+                WHERE c.id IN ({q})''', batch + batch).fetchall())
+    return result
+
+
 @app.route('/api/delete/<table>/<int:item_id>',methods=['POST'])
 def delete(table,item_id):
     allowed={'customers':'customers','girls':'girls','orders':'orders','recharges':'recharge_records','points':'points_records'}
@@ -1680,12 +1703,16 @@ def delete(table,item_id):
         elif table in ('recharges', 'points'):
             old = c.execute(f'SELECT customer_id FROM {allowed[table]} WHERE id=?', (item_id,)).fetchone()
             affected_customer_id = old['customer_id'] if old else None
-        c.execute(f'DELETE FROM {allowed[table]} WHERE id=?',(item_id,))
+        if table == 'orders':
+            c.execute('DELETE FROM chain_import_rows WHERE order_id=?', (item_id,))
+            c.execute('UPDATE customer_reservations SET order_id=0, updated_at=CURRENT_TIMESTAMP WHERE order_id=?', (item_id,))
+        cur = c.execute(f'DELETE FROM {allowed[table]} WHERE id=?',(item_id,))
         if table == 'orders' and affected_customer_id:
-            recalc_customer_points(c, affected_customer_id)
+            recalc_customer_points(c, affected_customer_id, update_types=False)
         elif table in ('customers', 'recharges', 'points'):
             update_customer_type_by_history(c, None)
-    return jsonify(ok=True)
+        changed_customers = customer_refresh_rows(c, [affected_customer_id] if affected_customer_id else [])
+    return jsonify(ok=True, deleted=int(cur.rowcount or 0), customers=changed_customers)
 @app.route('/api/delete_by_date',methods=['POST'])
 def delete_by_date():
     d=request.json or {}; start=d.get('start'); end=d.get('end'); table=d.get('table','orders')
@@ -2397,7 +2424,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v63_incremental_chain_import",
+            "version": "v64_fast_order_delete",
             "port": 5057,
         })
 
@@ -2416,7 +2443,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v63_incremental_chain_import",
+            "version": "v64_fast_order_delete",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2461,16 +2488,27 @@ def api_schedules():
 @app.route('/api/orders/bulk_delete', methods=['POST'])
 def api_orders_bulk_delete():
     d = request.json or {}
-    ids = [int(x) for x in (d.get('ids') or [])]
+    ids = list(dict.fromkeys(int(x) for x in (d.get('ids') or []) if str(x).strip().isdigit() and int(x) > 0))
     if not ids:
         return jsonify(ok=False, error='没有选择订单'), 400
-    q = ','.join(['?'] * len(ids))
     with conn() as c:
-        affected_customer_ids_for_bulk_delete = [r['customer_id'] for r in c.execute(f'SELECT DISTINCT customer_id FROM orders WHERE id IN ({q})', ids).fetchall() if r['customer_id']]
-        c.execute(f'DELETE FROM orders WHERE id IN ({q})', ids)
+        affected_customer_ids_for_bulk_delete = set()
+        deleted = 0
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            q = ','.join(['?'] * len(batch))
+            affected_customer_ids_for_bulk_delete.update(
+                int(r['customer_id']) for r in c.execute(
+                    f'SELECT DISTINCT customer_id FROM orders WHERE id IN ({q})', batch
+                ).fetchall() if r['customer_id']
+            )
+            c.execute(f'DELETE FROM chain_import_rows WHERE order_id IN ({q})', batch)
+            c.execute(f'UPDATE customer_reservations SET order_id=0, updated_at=CURRENT_TIMESTAMP WHERE order_id IN ({q})', batch)
+            deleted += int(c.execute(f'DELETE FROM orders WHERE id IN ({q})', batch).rowcount or 0)
         for cid in affected_customer_ids_for_bulk_delete:
-            recalc_customer_points(c, cid)
-    return jsonify(ok=True, deleted=len(ids))
+            recalc_customer_points(c, cid, update_types=False)
+        changed_customers = customer_refresh_rows(c, affected_customer_ids_for_bulk_delete)
+    return jsonify(ok=True, deleted=deleted, customers=changed_customers)
 
 @app.route('/api/orders/bulk_settle', methods=['POST'])
 def api_orders_bulk_settle():

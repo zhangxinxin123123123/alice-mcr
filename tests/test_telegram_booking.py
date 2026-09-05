@@ -264,6 +264,33 @@ class TelegramBookingFlowTest(unittest.TestCase):
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body for body in sent_bodies))
 
+    def test_order_delete_returns_local_patch_and_cleans_import_mapping(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,points,total_points,total_spent) VALUES('0042','删除测试',750,750,15000)")
+            customer_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,points)
+                         VALUES(?,?,?,?,?,?,?,?,?)""",
+                      (self.day, '19:00-20:00', girl_id, '娜娜子', customer_id, '0042', '删除测试', 15000, 750))
+            order_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("""INSERT INTO chain_import_rows(order_date,girl_id,sequence_no,order_id,normalized_text)
+                         VALUES(?,?,?,?,?)""", (self.day, girl_id, 1, order_id, '1.19-20/15000/0042'))
+            c.execute("""INSERT INTO customer_reservations(reserve_date,girl_name,start_time,end_time,order_id)
+                         VALUES(?,?,?,?,?)""", (self.day, '娜娜子', '19:00', '20:00', order_id))
+
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        response = self.client.post(f"/api/delete/orders/{order_id}", headers=headers, json={})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["deleted"], 1)
+        self.assertEqual(response.json["customers"][0]["total_orders"], 0)
+        self.assertEqual(response.json["customers"][0]["points"], 0)
+        with self.app_module.conn() as c:
+            self.assertIsNone(c.execute("SELECT 1 FROM orders WHERE id=?", (order_id,)).fetchone())
+            self.assertIsNone(c.execute("SELECT 1 FROM chain_import_rows WHERE order_id=?", (order_id,)).fetchone())
+            reservation = c.execute("SELECT order_id FROM customer_reservations").fetchone()
+            self.assertEqual(reservation["order_id"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
