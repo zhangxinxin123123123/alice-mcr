@@ -115,9 +115,6 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
 
     def test_room_tagged_girl_is_not_eligible(self):
-        with self.app_module.conn() as c:
-            c.execute("INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title) VALUES('娜娜子','-1','A')")
-            c.execute("INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title) VALUES('有房女孩','-2','B')")
         self.webhook({"callback_query": {
             "id": "c3", "from": {"id": 7001, "first_name": "测试客人"},
             "data": f"date:{self.day}", "message": {"chat": {"id": 7001, "type": "private"}},
@@ -125,6 +122,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("%E5%A8%9C%E5%A8%9C%E5%AD%90" in body for body in sent_bodies))
         self.assertFalse(any("%E6%9C%89%E6%88%BF%E5%A5%B3%E5%AD%A9" in body for body in sent_bodies))
+
+    def test_default_review_group_receives_unbound_girl_booking(self):
+        self.webhook({"message": {
+            "message_id": 10,
+            "chat": {"id": -20002, "type": "supergroup", "title": "Alice内部群"},
+            "from": {"id": 9002, "first_name": "店长"},
+            "text": "/绑定审核群",
+        }})
+        with self.app_module.conn() as c:
+            cfg = dict(c.execute("SELECT setting_key,setting_value FROM telegram_settings").fetchall())
+            self.assertEqual(cfg["default_review_chat_id"], "-20002")
+
+        private_chat = {"id": 7101, "type": "private"}
+        customer = {"id": 7101, "first_name": "默认群客人"}
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+        self.webhook({"callback_query": {"id": "c4", "from": customer,
+                                          "data": f"girl:{self.day}:{girl_id}", "message": {"chat": private_chat}}})
+        self.webhook({"message": {"message_id": 11, "chat": private_chat, "from": customer, "text": "20-21"}})
+        with self.app_module.conn() as c:
+            row = c.execute("SELECT * FROM customer_reservations").fetchone()
+            self.assertEqual(row["telegram_group_chat_id"], "-20002")
 
 
 if __name__ == "__main__":

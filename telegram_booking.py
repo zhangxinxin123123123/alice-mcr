@@ -16,6 +16,9 @@ DEFAULT_SETTINGS = {
     "hotel_url": "",
     "booking_enabled": "1",
     "hotel_upload_timeout_seconds": "120",
+    "default_review_chat_id": "",
+    "default_review_chat_title": "",
+    "default_review_thread_id": "0",
 }
 
 
@@ -167,6 +170,7 @@ def register_telegram_booking(
 
     def eligible_girls(day):
         with conn() as c:
+            cfg = settings(c)
             bindings = {r["girl_name"]: dict(r) for r in c.execute(
                 "SELECT * FROM telegram_group_bindings WHERE enabled=1").fetchall()}
             girls = {r["name"]: dict(r) for r in c.execute(
@@ -175,13 +179,20 @@ def register_telegram_booking(
             seen = set()
             for shift in pure_shift_rows_for_date(c, day):
                 name = str(shift.get("girl") or "").strip()
-                if not name or name in seen or name not in bindings or name not in girls:
+                if not name or name in seen or name not in girls:
                     continue
                 tag_text = " ".join([str(shift.get("tags") or ""), str(shift.get("goldTags") or "")])
                 if "房间" in tag_text:
                     continue
                 seen.add(name)
-                result.append({"girl": name, "shift": shift, "binding": bindings[name], "profile": girls[name]})
+                binding = bindings.get(name)
+                if not binding and cfg.get("default_review_chat_id"):
+                    binding = {
+                        "girl_name": "*", "chat_id": cfg["default_review_chat_id"],
+                        "chat_title": cfg.get("default_review_chat_title") or "默认审核群",
+                        "message_thread_id": int(cfg.get("default_review_thread_id") or 0), "enabled": 1,
+                    }
+                result.append({"girl": name, "shift": shift, "binding": binding, "profile": girls[name]})
             return result
 
     def free_ranges(c, day, girl, shift, exclude_reservation_id=0):
@@ -298,6 +309,9 @@ def register_telegram_booking(
         if not item:
             clear_session(user.get("id"))
             send_message(chat.get("id"), "该女孩已经停止开放预约，请重新选择。")
+            return
+        if not item.get("binding"):
+            send_message(chat.get("id"), "该女孩还没有可接收预约的群，请联系店长绑定默认审核群。")
             return
         a, b = time_to_min(start_text), time_to_min(end_text)
         if a is None or b is None:
@@ -464,9 +478,35 @@ def register_telegram_booking(
         send_message(chat.get("id"), f"✅ 已把本群绑定给 <b>{escape(girl)}</b>。\n该女孩只有在当天出勤且没有“房间”Tag 时才会出现在 Bot 中。",
                      thread_id=message.get("message_thread_id") or 0)
 
+    def bind_default_group(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        if chat.get("type") not in ("group", "supergroup"):
+            send_message(chat.get("id"), "请在 Alice 内部审核群内使用这个命令。")
+            return
+        if not is_chat_admin(chat.get("id"), user.get("id")):
+            send_message(chat.get("id"), "只有群管理员可以绑定默认审核群。")
+            return
+        values = {
+            "default_review_chat_id": str(chat.get("id")),
+            "default_review_chat_title": chat.get("title") or "Alice内部群",
+            "default_review_thread_id": str(int(message.get("message_thread_id") or 0)),
+        }
+        with conn() as c:
+            for key, value in values.items():
+                c.execute("""INSERT INTO telegram_settings(setting_key,setting_value,updated_at)
+                             VALUES(?,?,CURRENT_TIMESTAMP)
+                             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,
+                             updated_at=CURRENT_TIMESTAMP""", (key, value))
+        save_manager(user)
+        send_message(chat.get("id"), "✅ 已将本群设为默认预约审核群。\n没有绑定专属群的无房女孩，预约都会发送到这里。",
+                     thread_id=message.get("message_thread_id") or 0)
+
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
+        if text.startswith("/绑定审核群"):
+            bind_default_group(message)
+            return
         if text.startswith("/绑定女孩"):
             bind_group(message)
             return

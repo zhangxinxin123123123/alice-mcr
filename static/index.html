@@ -267,7 +267,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 
  <section id="telegramBooking" class="panel">
   <div class="card"><h2>Telegram 预约设置</h2>
-   <p class="note">第一阶段只显示当天出勤、没有“房间”Tag、并已绑定 Telegram 群的女孩。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
+   <p class="note">第一阶段显示当天出勤且没有“房间”Tag 的女孩。专属群未绑定时，预约发送到默认审核群。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
    <div id="tgStatus" class="note">正在读取 Bot 状态...</div>
    <div class="form">
     <input id="tgBotName" placeholder="Bot 显示名称">
@@ -2247,12 +2247,12 @@ async function loadTelegramSettings(){
   tgHotel.value=s.hotel_url||'';
   tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
   tgWelcome.value=s.welcome_text||'';
-  tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜绑定群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
+  tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
   renderTelegramBindings();
 }
 function renderTelegramBindings(){
   const rows=(telegramConfig&&telegramConfig.bindings)||[];
-  if(!rows.length){tgBindings.innerHTML='<p class="note">还没有绑定女孩群。Bot 上线后，在 Alice内部群发送：<b>/绑定女孩 娜娜子</b></p>';}
+  if(!rows.length){tgBindings.innerHTML='<p class="note">还没有绑定女孩专属群。请先在 Alice内部群发送：<b>/绑定审核群</b>。需要专属群时，再在女孩群发送：<b>/绑定女孩 女孩名</b></p>';}
   else tgBindings.innerHTML='<div class="table"><table><thead><tr><th>女孩</th><th>群名称</th><th>群 ID</th><th>话题</th><th>状态</th><th>操作</th></tr></thead><tbody>'+rows.map((r,i)=>`<tr><td>${escHtml(r.girl_name)}</td><td>${escHtml(r.chat_title||'')}</td><td><code>${escHtml(r.chat_id)}</code></td><td>${Number(r.message_thread_id||0)||'-'}</td><td>${Number(r.enabled)!==0?'启用':'停用'}</td><td><button class="soft" onclick="editTelegramBindingAt(${i})">编辑</button></td></tr>`).join('')+'</tbody></table></div>';
   const managers=(telegramConfig&&telegramConfig.managers)||[];
   tgManagers.innerHTML=managers.length?'<div class="table"><table><thead><tr><th>姓名</th><th>用户名</th><th>Telegram ID</th><th>状态</th></tr></thead><tbody>'+managers.map(m=>`<tr><td>${escHtml(m.display_name||'')}</td><td>${m.username?'@'+escHtml(m.username):'-'}</td><td><code>${escHtml(m.user_id)}</code></td><td>${Number(m.active)!==0?'启用':'停用'}</td></tr>`).join('')+'</tbody></table></div>':'<p class="note">尚未登记店长。首次群绑定时会自动登记。</p>';
