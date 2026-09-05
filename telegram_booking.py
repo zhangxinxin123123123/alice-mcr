@@ -254,6 +254,13 @@ def register_telegram_booking(
             rows.append(links)
         send_message(chat_id, cfg.get("welcome_text") or DEFAULT_SETTINGS["welcome_text"], inline_keyboard(rows))
 
+    def flow_keyboard(back_data=None, back_text="⬅️ 返回上一层"):
+        rows = []
+        if back_data:
+            rows.append([callback_button(back_text, back_data)])
+        rows.append([callback_button("❌ 取消预约", "flow:cancel")])
+        return inline_keyboard(rows)
+
     def show_dates(chat_id, user_id):
         if settings().get("booking_enabled") != "1":
             send_message(chat_id, "目前预约功能暂时关闭，请稍后再试。")
@@ -264,15 +271,18 @@ def register_telegram_booking(
             day = now.date() + timedelta(days=offset)
             label = "今天" if offset == 0 else "明天"
             buttons.append([callback_button(f"{label} {day.month}/{day.day}", f"date:{day.isoformat()}")])
+        buttons.append([callback_button("⬅️ 返回首页", "flow:home"), callback_button("❌ 取消", "flow:cancel")])
         set_session(user_id, chat_id, "choose_date", {})
         send_message(chat_id, "请选择预约日期：", inline_keyboard(buttons))
 
     def show_girls(chat_id, user_id, day):
         girls = eligible_girls(day)
         if not girls:
-            send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。")
+            send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。",
+                         flow_keyboard("flow:dates", "⬅️ 重新选择日期"))
             return
         rows = [[callback_button(item["girl"], f"girl:{day}:{item['profile']['id']}")] for item in girls]
+        rows.append([callback_button("⬅️ 返回选择日期", "flow:dates"), callback_button("❌ 取消", "flow:cancel")])
         set_session(user_id, chat_id, "choose_girl", {"date": day})
         send_message(chat_id, f"{escape(day)} 可预约女孩：", inline_keyboard(rows))
 
@@ -287,11 +297,13 @@ def register_telegram_booking(
         with conn() as c:
             free = free_ranges(c, day, girl, item["shift"])
         if not free:
-            send_message(chat_id, f"{girl} 当天已经没有空闲时间。")
+            send_message(chat_id, f"{girl} 当天已经没有空闲时间。",
+                         flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
             return
         free_text = "、".join(f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free)
         set_session(user_id, chat_id, "await_time", {"date": day, "girl": girl})
-        send_message(chat_id, f"你选择了 <b>{escape(girl)}</b>。\n\n可预约：{escape(free_text)}\n\n请发送时间，例如：<code>19-20</code>、<code>19:30-21:00</code>。")
+        send_message(chat_id, f"你选择了 <b>{escape(girl)}</b>。\n\n可预约：{escape(free_text)}\n\n请发送时间，例如：<code>19-20</code>、<code>19:30-21:00</code>。",
+                     flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
 
     def parse_time_text(text):
         if "包夜" in str(text or ""):
@@ -304,11 +316,13 @@ def register_telegram_booking(
             return None
         return f"{h1 % 24:02d}:{m1:02d}", f"{h2 % 24:02d}:{m2:02d}"
 
-    def submit_reservation(message, session):
+    def submit_reservation(message, session, confirmed=False):
         user, chat = message.get("from") or {}, message.get("chat") or {}
         parsed = parse_time_text(message.get("text") or "")
         if not parsed:
-            send_message(chat.get("id"), "时间格式没有看懂，请按 <code>19-20</code> 或 <code>19:30-21:00</code> 发送。")
+            day = session["payload"].get("date")
+            send_message(chat.get("id"), "时间格式没有看懂，请按 <code>19-20</code> 或 <code>19:30-21:00</code> 发送。",
+                         flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
             return
         start_text, end_text = parsed
         day, girl = session["payload"].get("date"), session["payload"].get("girl")
@@ -318,7 +332,8 @@ def register_telegram_booking(
             send_message(chat.get("id"), "该女孩已经停止开放预约，请重新选择。")
             return
         if not item.get("binding"):
-            send_message(chat.get("id"), "该女孩还没有可接收预约的群，请联系店长绑定默认审核群。")
+            send_message(chat.get("id"), "该女孩还没有可接收预约的群，请联系店长绑定默认审核群。",
+                         flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
             return
         a, b = time_to_min(start_text), time_to_min(end_text)
         if a is None or b is None:
@@ -330,7 +345,22 @@ def register_telegram_booking(
             free = free_ranges(c, day, girl, item["shift"])
             if not any(a >= fa and b <= fb for fa, fb in free):
                 free_text = "、".join(f"{min_to_time(fa)}-{min_to_time(fb)}" for fa, fb in free) or "无"
-                send_message(chat.get("id"), f"这个时间当前不可预约。可预约时间：{escape(free_text)}")
+                send_message(chat.get("id"), f"这个时间当前不可预约。可预约时间：{escape(free_text)}",
+                             flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
+                return
+            if not confirmed:
+                set_session(user.get("id"), chat.get("id"), "confirm_time", {
+                    "date": day, "girl": girl, "start_time": start_text, "end_time": end_text,
+                })
+                keyboard = inline_keyboard([
+                    [callback_button("✅ 确定预约", "flow:confirm")],
+                    [callback_button("⬅️ 修改时间", f"flow:time:{day}:{item['profile']['id']}"),
+                     callback_button("重新选女孩", f"flow:girls:{day}")],
+                    [callback_button("❌ 取消预约", "flow:cancel")],
+                ])
+                send_message(chat.get("id"),
+                             f"请确认预约：\n\n女孩：<b>{escape(girl)}</b>\n日期：{escape(day)}\n时间：<b>{escape(start_text)}-{escape(end_text)}</b>",
+                             keyboard)
                 return
             price = int(item["profile"].get("list_price") or 15000)
             cur = c.execute("""INSERT INTO customer_reservations(
@@ -356,7 +386,8 @@ def register_telegram_booking(
             clear_session(user.get("id"))
             return
         clear_session(user.get("id"))
-        send_message(chat.get("id"), "预约已经交给店长审核，请稍等。")
+        send_message(chat.get("id"), "预约已经交给店长审核，请稍等。",
+                     inline_keyboard([[callback_button("🏠 返回首页", "flow:home")]]))
 
     def review_reservation(callback, approve):
         user = callback.get("from") or {}
@@ -482,7 +513,7 @@ def register_telegram_booking(
                          message_thread_id=excluded.message_thread_id,enabled=1,updated_at=CURRENT_TIMESTAMP""",
                       (girl, str(chat.get("id")), chat.get("title") or "", int(message.get("message_thread_id") or 0)))
         save_manager(user)
-        send_message(chat.get("id"), f"✅ 已把本群绑定给 <b>{escape(girl)}</b>。\n该女孩只有在当天出勤且没有“房间”Tag 时才会出现在 Bot 中。",
+        send_message(chat.get("id"), f"✅ 已把本群绑定给 <b>{escape(girl)}</b>。\n该女孩加入当天自动预约名单后就会出现在 Bot 中。",
                      thread_id=message.get("message_thread_id") or 0)
 
     def bind_default_group(message):
@@ -505,7 +536,7 @@ def register_telegram_booking(
                              ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,
                              updated_at=CURRENT_TIMESTAMP""", (key, value))
         save_manager(user)
-        send_message(chat.get("id"), "✅ 已将本群设为默认预约审核群。\n没有绑定专属群的无房女孩，预约都会发送到这里。",
+        send_message(chat.get("id"), "✅ 已将本群设为默认预约审核群。\n没有绑定专属群的女孩，预约都会发送到这里。",
                      thread_id=message.get("message_thread_id") or 0)
 
     def handle_message(message):
@@ -546,6 +577,29 @@ def register_telegram_booking(
         answer_callback(callback.get("id"))
         if data == "book":
             show_dates(chat_id, user.get("id"))
+        elif data == "flow:home":
+            clear_session(user.get("id"))
+            show_home(chat_id)
+        elif data == "flow:dates":
+            show_dates(chat_id, user.get("id"))
+        elif data.startswith("flow:girls:"):
+            show_girls(chat_id, user.get("id"), data.split(":", 2)[2])
+        elif data.startswith("flow:time:"):
+            _, _, day, girl_ref = data.split(":", 3)
+            choose_girl(chat_id, user.get("id"), day, girl_ref)
+        elif data == "flow:confirm":
+            session = get_session(user.get("id"))
+            if not session or session.get("step") != "confirm_time":
+                send_message(chat_id, "这个预约确认已经失效，请重新开始。",
+                             inline_keyboard([[callback_button("重新开始预约", "book")]]))
+            else:
+                payload = session.get("payload") or {}
+                submit_reservation({"from": user, "chat": msg.get("chat") or {},
+                                    "text": f"{payload.get('start_time')}-{payload.get('end_time')}"},
+                                   session, confirmed=True)
+        elif data == "flow:cancel":
+            clear_session(user.get("id"))
+            send_message(chat_id, "本次预约已取消。", inline_keyboard([[callback_button("重新开始预约", "book")]]))
         elif data.startswith("date:"):
             show_girls(chat_id, user.get("id"), data.split(":", 1)[1])
         elif data.startswith("girl:"):
