@@ -701,14 +701,21 @@ def register_telegram_booking(
     def import_chain_from_group(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         if chat.get("type") not in ("group", "supergroup"):
-            send_message(chat.get("id"), "请在内部群或已绑定的女孩群中使用这个命令。")
             return
+        cfg = settings()
+        internal_chat_id = str(cfg.get("default_review_chat_id") or "")
+        internal_thread_id = int(cfg.get("default_review_thread_id") or 0)
+
+        def notify_internal(text):
+            if internal_chat_id:
+                send_message(internal_chat_id, text, thread_id=internal_thread_id)
+
         reply = message.get("reply_to_message") or {}
         chain_text = str(reply.get("text") or reply.get("caption") or "").strip()
         if not chain_text:
-            chain_text = re.sub(r"^/导入接龙(?:@\w+)?\s*", "", str(message.get("text") or "")).strip()
+            chain_text = re.sub(r"^/?导入(?:接龙)?(?:@\w+)?\s*", "", str(message.get("text") or "")).strip()
         if not chain_text:
-            send_message(chat.get("id"), "请回复一条接龙消息并发送 <code>/导入接龙</code>，也可以把接龙文字直接写在命令后面。")
+            notify_internal("❌ 接龙导入失败：请回复一条接龙消息并发送 <code>导入</code>，也可以把接龙文字直接写在“导入”后面。")
             return
         girl_id = None
         with conn() as c:
@@ -718,22 +725,22 @@ def register_telegram_booking(
                                 (str(chat.get("id")),)).fetchone()
             if binding:
                 girl_id = binding["girl_id"]
-        cfg = settings()
-        is_internal = str(chat.get("id")) == str(cfg.get("default_review_chat_id") or "")
-        if not is_internal:
-            send_message(chat.get("id"), "请在 Alice内部群导入接龙；女孩专属群只接收接龙和酒店信息。")
-            return
         if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
-            send_message(chat.get("id"), "只有店长、客服或群管理员可以导入接龙。")
+            notify_internal(f"❌ 接龙导入被拒绝：{escape(display_name(user))} 不是店长、客服或该群管理员。")
             return
         try:
-            result = import_chain_text(chain_text, girl_id=girl_id, settlement_status="未结算")
-            send_message(chat.get("id"),
-                         f"✅ 已写入 MCR 接龙预约\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}\n订单：{int(result['count'])} 单",
-                         thread_id=message.get("message_thread_id") or 0)
+            source_message_id = reply.get("message_id") or message.get("message_id") or ""
+            result = import_chain_text(
+                chain_text, girl_id=girl_id, settlement_status="未结算",
+                source_chat_id=chat.get("id"), source_message_id=source_message_id,
+            )
+            notify_internal(
+                f"✅ MCR 接龙导入完成\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>"
+                f"\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}"
+                f"\n新增：{int(result['inserted'])} 单｜修改：{int(result['updated'])} 单｜未变化：{int(result['unchanged'])} 单"
+            )
         except Exception as exc:
-            send_message(chat.get("id"), f"❌ 接龙导入失败：{escape(str(exc))}",
-                         thread_id=message.get("message_thread_id") or 0)
+            notify_internal(f"❌ 接龙导入失败\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>\n原因：{escape(str(exc))}")
 
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
@@ -744,7 +751,7 @@ def register_telegram_booking(
         if text.startswith("/绑定女孩"):
             bind_group(message)
             return
-        if text.startswith("/导入接龙"):
+        if re.match(r"^/?导入(?:接龙)?(?:@\w+)?(?:\s|$)", text):
             import_chain_from_group(message)
             return
         if chat.get("type") != "private":

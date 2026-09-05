@@ -57,7 +57,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             for table in ("orders", "customer_reservations", "customers", "pure_shifts", "girls",
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
-                          "telegram_daily_girls", "telegram_customers"):
+                          "telegram_daily_girls", "telegram_customers", "chain_import_rows"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -212,7 +212,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertIsNone(c.execute("SELECT * FROM telegram_booking_sessions WHERE user_id='7201'").fetchone())
             self.assertEqual(c.execute("SELECT COUNT(*) FROM customer_reservations").fetchone()[0], 0)
 
-    def test_group_reply_chain_command_imports_into_mcr(self):
+    def test_group_import_incrementally_syncs_mcr_and_replies_only_in_internal_group(self):
         self.webhook({"message": {
             "message_id": 20,
             "chat": {"id": -30003, "type": "supergroup", "title": "Alice内部群"},
@@ -220,8 +220,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         }})
         self.webhook({"message": {
             "message_id": 22,
-            "chat": {"id": -30003, "type": "supergroup", "title": "娜娜子群"},
-            "from": {"id": 9300, "first_name": "客服"}, "text": "/导入接龙",
+            "chat": {"id": -39999, "type": "supergroup", "title": "娜娜子群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "导入",
             "reply_to_message": {"message_id": 21, "text": f"{self.day} 娜娜子\n1.19-20/15000/接龙测试客人"},
         }})
         with self.app_module.conn() as c:
@@ -229,6 +229,40 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertIsNotNone(row)
             self.assertEqual(row["order_date"], self.day)
             self.assertEqual(row["order_status"], "已结束")
+            first_order_id = row["id"]
+
+        sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("chat_id=-30003" in body and "%E6%96%B0%E5%A2%9E%EF%BC%9A1" in body for body in sent_bodies))
+        self.assertFalse(any("chat_id=-39999" in body for body in sent_bodies))
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {
+            "message_id": 23,
+            "chat": {"id": -39999, "type": "supergroup", "title": "娜娜子群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "/导入",
+            "reply_to_message": {"message_id": 21, "text": f"{self.day} 娜娜子\n1.19:30-20:30/16000/接龙测试客人\n2.21-22/15000/新增测试客人"},
+        }})
+        with self.app_module.conn() as c:
+            rows = c.execute("SELECT * FROM orders WHERE girl_name='娜娜子' ORDER BY id").fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["id"], first_order_id)
+            self.assertEqual(rows[0]["service_time"], "19:30-20:30")
+            self.assertEqual(rows[0]["received_amount"], 16000)
+        sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("chat_id=-30003" in body and "%E6%96%B0%E5%A2%9E%EF%BC%9A1" in body and "%E4%BF%AE%E6%94%B9%EF%BC%9A1" in body for body in sent_bodies))
+        self.assertFalse(any("chat_id=-39999" in body for body in sent_bodies))
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {
+            "message_id": 24,
+            "chat": {"id": -39999, "type": "supergroup", "title": "娜娜子群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "/导入",
+            "reply_to_message": {"message_id": 21, "text": f"{self.day} 娜娜子\n1.19:30-20:30/16000/接龙测试客人\n2.21-22/15000/新增测试客人"},
+        }})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM orders WHERE girl_name='娜娜子'").fetchone()[0], 2)
+        sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body for body in sent_bodies))
 
 
 if __name__ == "__main__":

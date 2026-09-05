@@ -11,6 +11,7 @@
 .app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{padding:20px;background:rgba(255,255,255,.85);border-right:2px dashed var(--line)}
 .logo{padding:18px;border-radius:24px;background:linear-gradient(135deg,var(--pink),var(--lav));color:white;text-align:center;box-shadow:0 12px 28px #ff8fc755}.logo h1{margin:0;font-size:23px}.logo p{margin:8px 0 0;font-size:12px}.logo-link{display:block;text-decoration:none;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}.logo-link:hover{transform:translateY(-2px);box-shadow:0 16px 32px #ff8fc766}
 .nav button{width:100%;margin:7px 0;padding:11px;border:0;border-radius:18px;background:white;color:var(--ink);font-weight:800;text-align:left;cursor:pointer;box-shadow:0 5px 14px #d7a9c422}.nav button.on{outline:2px solid var(--pink);background:linear-gradient(90deg,var(--pink2),#fff)}
+.nav-more{margin:7px 0}.nav-more summary{padding:11px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;color:var(--ink);font-weight:900;cursor:pointer;list-style:none}.nav-more summary::-webkit-details-marker{display:none}.nav-more summary::after{content:'＋';float:right}.nav-more[open] summary::after{content:'－'}.nav-more button{margin-left:10px!important;width:calc(100% - 10px)!important}
 .main{padding:22px}.top{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap}.pill{padding:9px 14px;border-radius:999px;background:white;border:2px solid var(--line);font-weight:800}
 .panel{display:none}.panel.on{display:block}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}.card{background:rgba(255,255,255,.94);border:2px solid var(--line);border-radius:25px;padding:18px;box-shadow:0 10px 24px #b68bac1c;margin-bottom:16px}.card-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.card-title-row h2{margin:0}
 .num{font-size:26px;font-weight:900;color:#e75ca2;margin-top:8px}
@@ -131,13 +132,15 @@ body:not(.role-boss) .boss-only{display:none!important}
   <button class="admin-only user-hide" onclick="show('settlement',this)">💴 金额结算</button>
   <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
-  <button class="admin-only" onclick="show('advanceReserve',this)">📅 提前预约表</button>
   <button class="admin-only" onclick="show('telegramBooking',this)">✈️ Telegram预约</button>
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
-    <button class="admin-only" onclick="show('rooms',this)">🏨 房间安排</button>
-  <button class="admin-only" onclick="show('enums',this)">⚙️ 枚举类型</button>
   <button class="admin-only" onclick="show('pureShift',this)">📋 纯出勤表</button>
-  <button class="admin-only" onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
+  <details class="nav-more admin-only"><summary>🧰 低频功能</summary>
+   <button onclick="show('advanceReserve',this)">📅 提前预约表</button>
+   <button onclick="show('rooms',this)">🏨 房间安排</button>
+   <button onclick="show('enums',this)">⚙️ 枚举类型</button>
+   <button onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
+  </details>
   <button class="user-hide" onclick="show('stats',this)">🥧 收益图表</button>
   <button class="admin-only" onclick="show('debug',this)">🩺 数据诊断</button>
  </div>
@@ -757,7 +760,7 @@ function addGirl(){editGirl({girl_type:"普通",girl_status:"在职",enrollment:
 function editGirl(g){currentEdit={table:"girls",id:g.id||null};editTitle.textContent=g.id?"编辑女孩":"新增女孩";editFields.innerHTML=field("女孩名",`<input id="m_name" value="${g.name||""}" placeholder="必填">`)+field("马甲",`<input id="m_girl_alias" value="${g.girl_alias||""}" placeholder="内部备注，不影响订单/出勤显示">`)+field("类型",enumSelect("m_girl_type","girl_type",g.girl_type))+field("状态",enumSelect("m_girl_status","girl_status",g.girl_status))+field("在籍",`<input id="m_enrollment" value="${g.enrollment||""}" placeholder="例：在籍 / 退籍 / 休籍">`)+field("每小时到手",`<input id="m_take_home_per_hour" value="${g.take_home_per_hour||10000}">`)+field("定价/出勤价格",`<input id="m_list_price" value="${g.list_price||15000}" placeholder="纯出勤表显示价格，可空">`)+field("联系方式",`<input id="m_contact" value="${g.contact||""}">`)+field("标签",`<input id="m_tags" value="${g.tags||""}">`)+field("备注",`<input id="m_remark" value="${g.remark||""}">`)+field("备注2",`<input id="m_remark2" value="${g.remark2||""}">`);editModal.classList.add("on")}
 function closeModal(){editModal.classList.remove("on");currentEdit=null}
 async function saveModalEdit(){if(!currentEdit)return;if(currentEdit.table==="orders"){await api("/api/orders",{id:currentEdit.id,order_date:m_order_date.value,service_time:m_service_time.value,girl_id:m_girl_id.value,received_amount:moneyInput(m_received_amount.value),girl_take_home:moneyInput(m_girl_take_home.value),customer_raw:m_customer_raw.value,order_status:m_order_status.value,settlement_status:m_settlement_status.value,payment_method:m_payment_method.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="customers"){await api("/api/customers",{id:currentEdit.id,customer_no:m_customer_no.value,name:m_name.value,customer_type:m_customer_type.value,recharge_balance:moneyInput(m_recharge_balance.value),points:Number(m_points.value||0),source:m_source.value,contact:m_contact.value,remark:m_remark.value,remark2:m_remark2.value})}else if(currentEdit.table==="girls"){if(!String(m_name.value||"").trim()){alert("请填写女孩名");return;}await api("/api/girls",{id:currentEdit.id,name:m_name.value,girl_alias:m_girl_alias.value,girl_type:m_girl_type.value,girl_status:m_girl_status.value,enrollment:m_enrollment.value,take_home_per_hour:moneyInput(m_take_home_per_hour.value),list_price:moneyInput(m_list_price.value),contact:m_contact.value,tags:m_tags.value,remark:m_remark.value,remark2:m_remark2.value})}closeModal();await loadAll()}
-async function importChain(){let r=await api("/api/import_chain",{order_date:iDate.value,girl_id:iGirl.value,settlement_status:iSettle.value,text:chain.value});alert(r.ok?`录入成功：${r.count} 单｜女孩：${r.girl_name}`:(r.error||"导入失败"));await loadAll()}
+async function importChain(){let r=await api("/api/import_chain",{order_date:iDate.value,girl_id:iGirl.value,settlement_status:iSettle.value,text:chain.value});alert(r.ok?`同步完成｜新增 ${r.inserted||0}｜修改 ${r.updated||0}｜未变化 ${r.unchanged||0}｜女孩：${r.girl_name}`:(r.error||"导入失败"));await loadAll()}
 
 
 let chainState={date:"",girl_name:"",girl_id:"",girl_alias:"",take_home_per_hour:10000,price:0,orders:[],shifts:[]};

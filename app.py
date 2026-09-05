@@ -131,6 +131,12 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, group_name TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', content TEXT DEFAULT '',
             sort_order INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_quick_links_group ON quick_links(group_name, sort_order, id)")
+        c.execute("""CREATE TABLE IF NOT EXISTS chain_import_rows(
+            order_date TEXT NOT NULL, girl_id INTEGER NOT NULL, sequence_no INTEGER NOT NULL, order_id INTEGER NOT NULL,
+            normalized_text TEXT DEFAULT '', source_chat_id TEXT DEFAULT '', source_message_id TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(order_date, girl_id, sequence_no))""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_chain_import_order ON chain_import_rows(order_id)")
         for qg, qt, qc, so in [('网址','网址','',1),('常用短语','常用短语','',2)]:
             c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
         defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','SVIP',5),('customer_type','常客',6),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
@@ -1408,11 +1414,13 @@ def detect_payment_method_from_note(*texts):
 def create_or_update_order(c,d):
     old_customer_id = None
     old_points_used = 0
+    old_raw_text = ''
     if d.get('id'):
-        old = c.execute("SELECT customer_id,COALESCE(points_used,0) AS points_used FROM orders WHERE id=?", (int(d['id']),)).fetchone()
+        old = c.execute("SELECT customer_id,COALESCE(points_used,0) AS points_used,COALESCE(raw_text,'') AS raw_text FROM orders WHERE id=?", (int(d['id']),)).fetchone()
         if old:
             old_customer_id = old["customer_id"]
             old_points_used = int(old["points_used"] or 0)
+            old_raw_text = str(old["raw_text"] or '')
 
     g = None
     if d.get('girl_id'):
@@ -1439,8 +1447,8 @@ def create_or_update_order(c,d):
     payment_method = auto_payment or (d.get('payment_method') or '现金')
 
     if d.get('id'):
-        c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,points_used=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('id')))
+        c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,points_used=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,raw_text=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text',old_raw_text),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
         recalc_customer_points(c, cust['id'])
@@ -1782,11 +1790,25 @@ def split_chain_fields(rest_raw):
     return fields
 
 
-def import_chain_text(text, order_date='', girl_id=None, settlement_status='未结算'):
+def chain_sequence_no(line, fallback):
+    s = re.sub(r"^#?\s*接龙\s*", "", str(line or "").strip())
+    m = re.match(r"^\s*(\d+)\s*[.、]", s)
+    return int(m.group(1)) if m else int(fallback)
+
+
+def normalize_chain_import_line(line):
+    return re.sub(r"\s+", "", str(line or "")).replace('：', ':').replace('／', '/')
+
+
+def import_chain_text(text, order_date='', girl_id=None, settlement_status='未结算',
+                      source_chat_id='', source_message_id=''):
     lines = [x.strip() for x in str(text or '').splitlines() if x.strip()]
     hd, hg = parse_header(lines)
     od = order_date or hd or str(date.today())
     count = 0
+    inserted = 0
+    updated = 0
+    unchanged = 0
     with conn() as c:
         g = None
         if girl_id:
@@ -1796,10 +1818,22 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
         if not g:
             raise ValueError('无法识别女孩名。请确认首行类似：0524小樱')
 
+        parsed = []
+        seen_sequences = set()
+        fallback_sequence = 0
         for line in lines:
+            line_date, line_girl = parse_header([line])
+            if line_date and line_girl and line_date == hd and line_girl == hg:
+                continue
             st, rest_raw = parse_chain_service_time(line)
             if not st:
                 continue
+
+            fallback_sequence += 1
+            sequence_no = chain_sequence_no(line, fallback_sequence)
+            if sequence_no in seen_sequences:
+                raise ValueError(f'接龙序号 {sequence_no} 重复，请检查后重新导入。')
+            seen_sequences.add(sequence_no)
 
             parts = split_chain_fields(rest_raw)
 
@@ -1813,10 +1847,8 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
                 raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
             cust_token, force_name = parts.pop(0)
             cust = ('__NAME__:' + cust_token) if force_name else cust_token
-            assert_no_duplicate_customer_name_for_chain(c, cust)
             remark_parts = [p[0] for p in parts]
-
-            create_or_update_order(c, {
+            parsed.append((sequence_no, normalize_chain_import_line(line), {
                 'order_date': od,
                 'service_time': st,
                 'girl_id': g['id'],
@@ -1825,9 +1857,54 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
                 'remark': ' '.join(remark_parts),
                 'settlement_status': settlement_status,
                 'raw_text': line
-            })
+            }))
+
+        legacy_orders = c.execute("""SELECT id,raw_text FROM orders
+                                     WHERE order_date=? AND girl_id=? AND COALESCE(raw_text,'')<>''
+                                     ORDER BY id""", (od, g['id'])).fetchall()
+        legacy_by_sequence = {}
+        for legacy in legacy_orders:
+            raw = str(legacy['raw_text'] or '')
+            seq = chain_sequence_no(raw, 0)
+            if seq > 0 and seq not in legacy_by_sequence:
+                legacy_by_sequence[seq] = legacy
+
+        for sequence_no, normalized, order_data in parsed:
+            mapping = c.execute("""SELECT * FROM chain_import_rows
+                                   WHERE order_date=? AND girl_id=? AND sequence_no=?""",
+                                (od, g['id'], sequence_no)).fetchone()
+            order_id = int(mapping['order_id']) if mapping else 0
+            existing_order = c.execute("SELECT id,raw_text FROM orders WHERE id=?", (order_id,)).fetchone() if order_id else None
+            if not existing_order and sequence_no in legacy_by_sequence:
+                existing_order = legacy_by_sequence[sequence_no]
+                order_id = int(existing_order['id'])
+
+            previous_normalized = normalize_chain_import_line(existing_order['raw_text']) if existing_order else ''
+            if existing_order and previous_normalized == normalized:
+                unchanged += 1
+            elif existing_order:
+                assert_no_duplicate_customer_name_for_chain(c, order_data['customer_raw'], current_order_id=order_id)
+                order_data['id'] = order_id
+                create_or_update_order(c, order_data)
+                updated += 1
+            else:
+                assert_no_duplicate_customer_name_for_chain(c, order_data['customer_raw'])
+                create_or_update_order(c, order_data)
+                order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+                inserted += 1
+
+            c.execute("""INSERT INTO chain_import_rows(
+                            order_date,girl_id,sequence_no,order_id,normalized_text,source_chat_id,source_message_id,updated_at)
+                         VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(order_date,girl_id,sequence_no) DO UPDATE SET
+                            order_id=excluded.order_id,normalized_text=excluded.normalized_text,
+                            source_chat_id=excluded.source_chat_id,source_message_id=excluded.source_message_id,
+                            updated_at=CURRENT_TIMESTAMP""",
+                      (od, g['id'], sequence_no, order_id, normalized,
+                       str(source_chat_id or ''), str(source_message_id or '')))
             count += 1
-    return {'count': count, 'girl_name': g['name'], 'order_date': od}
+    return {'count': count, 'inserted': inserted, 'updated': updated, 'unchanged': unchanged,
+            'girl_name': g['name'], 'order_date': od}
 
 @app.route('/api/import_chain',methods=['POST'])
 def import_chain():
@@ -2320,7 +2397,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v62_logo_and_girl_photo_links",
+            "version": "v63_incremental_chain_import",
             "port": 5057,
         })
 
@@ -2339,7 +2416,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v62_logo_and_girl_photo_links",
+            "version": "v63_incremental_chain_import",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
