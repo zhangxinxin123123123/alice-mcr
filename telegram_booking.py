@@ -50,6 +50,10 @@ def register_telegram_booking(
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_booking_sessions(
                 user_id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, step TEXT DEFAULT '', payload TEXT DEFAULT '{}',
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_daily_girls(
+                booking_date TEXT NOT NULL, girl_name TEXT NOT NULL, sort_order INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'manual', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(booking_date,girl_name))""")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
             cols = [r[1] for r in c.execute("PRAGMA table_info(customer_reservations)").fetchall()]
@@ -175,16 +179,19 @@ def register_telegram_booking(
                 "SELECT * FROM telegram_group_bindings WHERE enabled=1").fetchall()}
             girls = {r["name"]: dict(r) for r in c.execute(
                 "SELECT * FROM girls WHERE COALESCE(girl_status,'在职')='在职'").fetchall()}
-            result = []
-            seen = set()
+            selected = [r["girl_name"] for r in c.execute(
+                "SELECT girl_name FROM telegram_daily_girls WHERE booking_date=? ORDER BY sort_order,girl_name",
+                (day,)).fetchall()]
+            shifts = {}
             for shift in pure_shift_rows_for_date(c, day):
                 name = str(shift.get("girl") or "").strip()
-                if not name or name in seen or name not in girls:
+                if name and name not in shifts:
+                    shifts[name] = shift
+            result = []
+            for name in selected:
+                shift = shifts.get(name)
+                if not shift or name not in girls:
                     continue
-                tag_text = " ".join([str(shift.get("tags") or ""), str(shift.get("goldTags") or "")])
-                if "房间" in tag_text:
-                    continue
-                seen.add(name)
                 binding = bindings.get(name)
                 if not binding and cfg.get("default_review_chat_id"):
                     binding = {
@@ -263,7 +270,7 @@ def register_telegram_booking(
     def show_girls(chat_id, user_id, day):
         girls = eligible_girls(day)
         if not girls:
-            send_message(chat_id, "这一天暂时没有开放 Bot 预约的无房女孩。")
+            send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。")
             return
         rows = [[callback_button(item["girl"], f"girl:{day}:{item['profile']['id']}")] for item in girls]
         set_session(user_id, chat_id, "choose_girl", {"date": day})
@@ -600,6 +607,50 @@ def register_telegram_booking(
                          message_thread_id=excluded.message_thread_id,enabled=excluded.enabled,updated_at=CURRENT_TIMESTAMP""",
                       (girl, chat_id, str(data.get("chat_title") or ""), int(data.get("message_thread_id") or 0), 1 if data.get("enabled", True) else 0))
         return jsonify(ok=True)
+
+    @app.route("/api/telegram/daily-girls", methods=["POST"])
+    def telegram_daily_girls_api():
+        ensure_db()
+        if request.headers.get("X-Alice-Role") not in ("boss", "admin"):
+            return jsonify(ok=False, error="只有老板或管理员可以维护预约女孩"), 403
+        data = request.json or {}
+        day = str(data.get("date") or "").strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            return jsonify(ok=False, error="预约日期格式错误"), 400
+        action = str(data.get("action") or "get")
+        with conn() as c:
+            attendance = []
+            seen = set()
+            for shift in pure_shift_rows_for_date(c, day):
+                name = str(shift.get("girl") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    attendance.append(name)
+            if action == "sync":
+                c.execute("DELETE FROM telegram_daily_girls WHERE booking_date=?", (day,))
+                for index, name in enumerate(attendance):
+                    c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
+                                 VALUES(?,?,?,'attendance')""", (day, name, index))
+            elif action == "save":
+                names = []
+                known = {r["name"] for r in c.execute("SELECT name FROM girls").fetchall()}
+                for raw_name in data.get("girls") or []:
+                    name = str(raw_name or "").strip()
+                    if name and name in known and name not in names:
+                        names.append(name)
+                c.execute("DELETE FROM telegram_daily_girls WHERE booking_date=?", (day,))
+                for index, name in enumerate(names):
+                    c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
+                                 VALUES(?,?,?,'manual')""", (day, name, index))
+            elif action != "get":
+                return jsonify(ok=False, error="不支持的操作"), 400
+            selected = [r["girl_name"] for r in c.execute(
+                "SELECT girl_name FROM telegram_daily_girls WHERE booking_date=? ORDER BY sort_order,girl_name",
+                (day,)).fetchall()]
+            bound = {r["girl_name"] for r in c.execute(
+                "SELECT girl_name FROM telegram_group_bindings WHERE enabled=1").fetchall()}
+        rows = [{"girl_name": name, "bound": name in bound} for name in selected]
+        return jsonify(ok=True, date=day, girls=rows, attendance=attendance)
 
     @app.route("/api/telegram/webhook/setup", methods=["POST"])
     def telegram_webhook_setup_api():

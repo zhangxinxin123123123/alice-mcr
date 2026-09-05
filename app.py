@@ -2303,7 +2303,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v57_telegram_default_group",
+            "version": "v58_telegram_daily_sync",
             "port": 5057,
         })
 
@@ -2322,7 +2322,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v57_telegram_default_group",
+            "version": "v58_telegram_daily_sync",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

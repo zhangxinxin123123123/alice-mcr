@@ -56,7 +56,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.day = day
         with self.app_module.conn() as c:
             for table in ("orders", "customer_reservations", "pure_shifts", "girls",
-                          "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions"):
+                          "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
+                          "telegram_daily_girls"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('娜娜子','在职',15000)")
             c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('有房女孩','在职',15000)")
@@ -64,6 +65,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?,?,?)""", (day, "娜娜子", "19:00", "23:00", "", ""))
             c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags)
                          VALUES(?,?,?,?,?,?)""", (day, "有房女孩", "19:00", "23:00", "", "房间"))
+            c.execute("INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order) VALUES(?,?,?)",
+                      (day, "娜娜子", 0))
 
     def webhook(self, payload):
         response = self.client.post("/telegram/webhook", json=payload)
@@ -114,14 +117,24 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertEqual(reservation["hotel_file_id"], "hotel-photo")
         self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
 
-    def test_room_tagged_girl_is_not_eligible(self):
+    def test_sync_includes_room_and_no_room_girls_then_save_can_reduce(self):
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        response = self.client.post("/api/telegram/daily-girls", headers=headers,
+                                    json={"action": "sync", "date": self.day})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual([x["girl_name"] for x in response.json["girls"]], ["娜娜子", "有房女孩"])
         self.webhook({"callback_query": {
             "id": "c3", "from": {"id": 7001, "first_name": "测试客人"},
             "data": f"date:{self.day}", "message": {"chat": {"id": 7001, "type": "private"}},
         }})
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("%E5%A8%9C%E5%A8%9C%E5%AD%90" in body for body in sent_bodies))
-        self.assertFalse(any("%E6%9C%89%E6%88%BF%E5%A5%B3%E5%AD%A9" in body for body in sent_bodies))
+        self.assertTrue(any("%E6%9C%89%E6%88%BF%E5%A5%B3%E5%AD%A9" in body for body in sent_bodies))
+
+        response = self.client.post("/api/telegram/daily-girls", headers=headers,
+                                    json={"action": "save", "date": self.day, "girls": ["有房女孩"]})
+        self.assertEqual([x["girl_name"] for x in response.json["girls"]], ["有房女孩"])
 
     def test_default_review_group_receives_unbound_girl_booking(self):
         self.webhook({"message": {

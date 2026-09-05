@@ -267,7 +267,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 
  <section id="telegramBooking" class="panel">
   <div class="card"><h2>Telegram 预约设置</h2>
-   <p class="note">第一阶段显示当天出勤且没有“房间”Tag 的女孩。专属群未绑定时，预约发送到默认审核群。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
+   <p class="note">Bot 显示下方“当日自动预约女孩”名单；是否有房不会影响预约。专属群未绑定时，预约统一发送到默认审核群。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
    <div id="tgStatus" class="note">正在读取 Bot 状态...</div>
    <div class="form">
     <input id="tgBotName" placeholder="Bot 显示名称">
@@ -279,6 +279,17 @@ body:not(.role-boss) .boss-only{display:none!important}
    <textarea id="tgWelcome" placeholder="Bot 欢迎语"></textarea><br><br>
    <button class="primary" onclick="saveTelegramSettings()">保存 Bot 设置</button>
    <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
+  </div>
+  <div class="card"><h2>当日自动预约女孩</h2>
+   <p class="note">“一键同步出勤表”会把所选日期全部出勤女孩加入名单。同步后可删除不开放自动预约的女孩，也可重新添加，最后点击保存。</p>
+   <div class="form">
+    <input id="tgDailyDate" type="date" onchange="loadTelegramDailyGirls()">
+    <button class="primary" onclick="syncTelegramDailyGirls()">一键同步出勤表</button>
+    <select id="tgDailyAddGirl"><option value="">添加女孩</option></select>
+    <button class="soft" onclick="addTelegramDailyGirl()">加入名单</button>
+    <button class="primary" onclick="saveTelegramDailyGirls()">保存今日预约女孩</button>
+   </div>
+   <div id="tgDailyGirls"><p class="note">正在读取预约名单...</p></div>
   </div>
   <div class="card"><h2>女孩群绑定</h2>
    <p class="note">推荐在女孩群内由管理员发送“/绑定女孩 女孩名”，系统会自动取得群 ID。也可以在这里手动维护。</p>
@@ -2237,6 +2248,7 @@ function refreshAttPriceOptions(){
 }
 
 let telegramConfig=null;
+let telegramDailyGirls=[];
 async function loadTelegramSettings(){
   tgGirl.innerHTML='<option value="">选择女孩</option>'+(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}">${escHtml(g.name)}</option>`).join('');
   telegramConfig=await api('/api/telegram/settings',{});
@@ -2249,6 +2261,42 @@ async function loadTelegramSettings(){
   tgWelcome.value=s.welcome_text||'';
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
   renderTelegramBindings();
+  if(!tgDailyDate.value)tgDailyDate.value=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+  await loadTelegramDailyGirls();
+}
+async function loadTelegramDailyGirls(){
+  if(!tgDailyDate.value)return;
+  const result=await api('/api/telegram/daily-girls',{action:'get',date:tgDailyDate.value});
+  telegramDailyGirls=(result.girls||[]).map(x=>({girl_name:x.girl_name,bound:!!x.bound}));
+  renderTelegramDailyGirls(result.attendance||[]);
+}
+function renderTelegramDailyGirls(attendance=[]){
+  const bindingNames=new Set(((telegramConfig&&telegramConfig.bindings)||[]).filter(x=>Number(x.enabled)!==0).map(x=>x.girl_name));
+  telegramDailyGirls.forEach(x=>x.bound=bindingNames.has(x.girl_name));
+  const chosen=new Set(telegramDailyGirls.map(x=>x.girl_name));
+  const addNames=[...new Set([...(attendance||[]),...(data.girls||[]).map(g=>g.name)])].filter(x=>x&&!chosen.has(x));
+  tgDailyAddGirl.innerHTML='<option value="">添加女孩</option>'+addNames.map(name=>`<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');
+  if(!telegramDailyGirls.length){tgDailyGirls.innerHTML='<p class="note">该日期还没有预约女孩。请点击“一键同步出勤表”。</p>';return;}
+  tgDailyGirls.innerHTML='<div class="table"><table><thead><tr><th>女孩</th><th>是否绑定专属群</th><th>预约发送位置</th><th>操作</th></tr></thead><tbody>'+telegramDailyGirls.map((x,i)=>`<tr><td>${escHtml(x.girl_name)}</td><td><b>${x.bound?'已绑定':'未绑定'}</b></td><td>${x.bound?'女孩专属群':'Alice内部群'}</td><td><button class="danger" onclick="removeTelegramDailyGirl(${i})">删除</button></td></tr>`).join('')+'</tbody></table></div>';
+}
+async function syncTelegramDailyGirls(){
+  if(!tgDailyDate.value)return;
+  const result=await api('/api/telegram/daily-girls',{action:'sync',date:tgDailyDate.value});
+  telegramDailyGirls=(result.girls||[]).map(x=>({girl_name:x.girl_name,bound:!!x.bound}));
+  renderTelegramDailyGirls(result.attendance||[]);
+  alert(`已同步 ${telegramDailyGirls.length} 位出勤女孩。可删减后再保存。`);
+}
+function removeTelegramDailyGirl(index){telegramDailyGirls.splice(index,1);renderTelegramDailyGirls();}
+function addTelegramDailyGirl(){
+  const name=tgDailyAddGirl.value;if(!name)return;
+  telegramDailyGirls.push({girl_name:name,bound:false});renderTelegramDailyGirls();
+}
+async function saveTelegramDailyGirls(){
+  if(!tgDailyDate.value)return;
+  const result=await api('/api/telegram/daily-girls',{action:'save',date:tgDailyDate.value,girls:telegramDailyGirls.map(x=>x.girl_name)});
+  telegramDailyGirls=(result.girls||[]).map(x=>({girl_name:x.girl_name,bound:!!x.bound}));
+  renderTelegramDailyGirls(result.attendance||[]);
+  alert(`已保存 ${telegramDailyGirls.length} 位当日自动预约女孩。`);
 }
 function renderTelegramBindings(){
   const rows=(telegramConfig&&telegramConfig.bindings)||[];
