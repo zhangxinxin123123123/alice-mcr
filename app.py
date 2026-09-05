@@ -1770,55 +1770,60 @@ def split_chain_fields(rest_raw):
     return fields
 
 
+def import_chain_text(text, order_date='', girl_id=None, settlement_status='未结算'):
+    lines = [x.strip() for x in str(text or '').splitlines() if x.strip()]
+    hd, hg = parse_header(lines)
+    od = order_date or hd or str(date.today())
+    count = 0
+    with conn() as c:
+        g = None
+        if girl_id:
+            g = c.execute('SELECT * FROM girls WHERE id=?', (int(girl_id),)).fetchone()
+        if not g:
+            g = ensure_girl(c, hg)
+        if not g:
+            raise ValueError('无法识别女孩名。请确认首行类似：0524小樱')
+
+        for line in lines:
+            st, rest_raw = parse_chain_service_time(line)
+            if not st:
+                continue
+
+            parts = split_chain_fields(rest_raw)
+
+            if parts and '包夜' in parts[0][0]:
+                parts.pop(0)
+            if not parts:
+                continue
+
+            rec = yen_to_int(parts.pop(0)[0])
+            if not parts:
+                raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
+            cust_token, force_name = parts.pop(0)
+            cust = ('__NAME__:' + cust_token) if force_name else cust_token
+            assert_no_duplicate_customer_name_for_chain(c, cust)
+            remark_parts = [p[0] for p in parts]
+
+            create_or_update_order(c, {
+                'order_date': od,
+                'service_time': st,
+                'girl_id': g['id'],
+                'received_amount': rec,
+                'customer_raw': cust,
+                'remark': ' '.join(remark_parts),
+                'settlement_status': settlement_status,
+                'raw_text': line
+            })
+            count += 1
+    return {'count': count, 'girl_name': g['name'], 'order_date': od}
+
 @app.route('/api/import_chain',methods=['POST'])
 def import_chain():
     try:
         d = request.json or {}
-        lines = [x.strip() for x in d.get('text','').splitlines() if x.strip()]
-        hd, hg = parse_header(lines)
-        od = d.get('order_date') or hd or str(date.today())
-        count = 0
-        with conn() as c:
-            g = None
-            if d.get('girl_id'):
-                g = c.execute('SELECT * FROM girls WHERE id=?', (int(d['girl_id']),)).fetchone()
-            if not g:
-                g = ensure_girl(c, hg)
-            if not g:
-                return jsonify(ok=False, error='无法识别女孩名。请确认首行类似：0524小樱'), 400
-
-            for line in lines:
-                st, rest_raw = parse_chain_service_time(line)
-                if not st:
-                    continue
-
-                parts = split_chain_fields(rest_raw)
-
-                if parts and '包夜' in parts[0][0]:
-                    parts.pop(0)
-                if not parts:
-                    continue
-
-                rec = yen_to_int(parts.pop(0)[0])
-                if not parts:
-                    raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
-                cust_token, force_name = parts.pop(0)
-                cust = ('__NAME__:' + cust_token) if force_name else cust_token
-                assert_no_duplicate_customer_name_for_chain(c, cust)
-                remark_parts = [p[0] for p in parts]
-
-                create_or_update_order(c, {
-                    'order_date': od,
-                    'service_time': st,
-                    'girl_id': g['id'],
-                    'received_amount': rec,
-                    'customer_raw': cust,
-                    'remark': ' '.join(remark_parts),
-                    'settlement_status': d.get('settlement_status','未结算'),
-                    'raw_text': line
-                })
-                count += 1
-        return jsonify(ok=True, count=count, girl_name=g['name'])
+        result = import_chain_text(d.get('text',''), d.get('order_date') or '', d.get('girl_id'),
+                                   d.get('settlement_status','未结算'))
+        return jsonify(ok=True, **result)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2303,7 +2308,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v59_telegram_flow_navigation",
+            "version": "v60_telegram_flow_and_chain",
             "port": 5057,
         })
 
@@ -2322,7 +2327,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v59_telegram_flow_navigation",
+            "version": "v60_telegram_flow_and_chain",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3265,6 +3270,8 @@ register_telegram_booking(
     ranges_overlap=ranges_overlap,
     tokyo_now=_tokyo_now,
     current_business_minute_for_date=_current_business_minute_for_date,
+    import_chain_text=import_chain_text,
+    order_to_chain_line=order_to_chain_line,
 )
 
 import os

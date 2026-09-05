@@ -2,7 +2,7 @@ import json
 import os
 import re
 from html import escape
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -19,6 +19,25 @@ DEFAULT_SETTINGS = {
     "default_review_chat_id": "",
     "default_review_chat_title": "",
     "default_review_thread_id": "0",
+    "support_username": "",
+    "button_start": "开始预约",
+    "button_support": "人工客服",
+    "button_website": "官方网站",
+    "button_hotel": "推荐酒店",
+    "button_today": "今天",
+    "button_tomorrow": "明天",
+    "button_home": "🏠 返回首页",
+    "button_restart": "重新开始预约",
+    "button_back": "⬅️ 返回上一层",
+    "button_cancel": "❌ 取消预约",
+    "button_confirm": "✅ 确定预约",
+    "button_change_time": "⬅️ 修改时间",
+    "button_reselect_girl": "重新选女孩",
+    "text_choose_date": "请选择预约日期：",
+    "text_choose_girl": "{date} 可预约女孩：",
+    "text_time_prompt": "你选择了 <b>{girl}</b>。\n\n可预约：{free_time}\n\n请发送时间，例如：<code>19-20</code>、<code>19:30-21:00</code>。",
+    "text_confirm": "请确认预约：\n\n女孩：<b>{girl}</b>\n日期：{date}\n时间：<b>{start_time}-{end_time}</b>",
+    "text_submitted": "预约已经交给店长审核，请稍等。",
 }
 
 
@@ -34,6 +53,8 @@ def register_telegram_booking(
     ranges_overlap,
     tokyo_now,
     current_business_minute_for_date,
+    import_chain_text,
+    order_to_chain_line,
 ):
     def ensure_db():
         init_main_db()
@@ -108,6 +129,19 @@ def register_telegram_booking(
     def callback_button(text, data):
         return {"text": text, "callback_data": data}
 
+    def render_text(template, **values):
+        result = str(template or "")
+        for key, value in values.items():
+            result = result.replace("{" + key + "}", str(value))
+        return result
+
+    def valid_group_chat_id(value):
+        return bool(re.fullmatch(r"-\d+", str(value or "").strip()))
+
+    def support_url_button(cfg):
+        username = str(cfg.get("support_username") or "").strip().lstrip("@")
+        return url_button(cfg.get("button_support") or "人工客服", f"https://t.me/{username}") if username else None
+
     def send_message(chat_id, text, keyboard=None, thread_id=0):
         data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if keyboard:
@@ -176,7 +210,8 @@ def register_telegram_booking(
         with conn() as c:
             cfg = settings(c)
             bindings = {r["girl_name"]: dict(r) for r in c.execute(
-                "SELECT * FROM telegram_group_bindings WHERE enabled=1").fetchall()}
+                "SELECT * FROM telegram_group_bindings WHERE enabled=1").fetchall()
+                        if valid_group_chat_id(r["chat_id"])}
             girls = {r["name"]: dict(r) for r in c.execute(
                 "SELECT * FROM girls WHERE COALESCE(girl_status,'在职')='在职'").fetchall()}
             selected = [r["girl_name"] for r in c.execute(
@@ -244,47 +279,64 @@ def register_telegram_booking(
 
     def show_home(chat_id):
         cfg = settings()
-        rows = [[callback_button("开始预约", "book")]]
+        rows = [[callback_button(cfg.get("button_start") or "开始预约", "book")]]
         links = []
         if cfg.get("website_url"):
-            links.append(url_button("官方网站", cfg["website_url"]))
+            links.append(url_button(cfg.get("button_website") or "官方网站", cfg["website_url"]))
         if cfg.get("hotel_url"):
-            links.append(url_button("推荐酒店", cfg["hotel_url"]))
+            links.append(url_button(cfg.get("button_hotel") or "推荐酒店", cfg["hotel_url"]))
         if links:
             rows.append(links)
+        support = support_url_button(cfg)
+        if support:
+            rows.append([support])
         send_message(chat_id, cfg.get("welcome_text") or DEFAULT_SETTINGS["welcome_text"], inline_keyboard(rows))
 
     def flow_keyboard(back_data=None, back_text="⬅️ 返回上一层"):
+        cfg = settings()
         rows = []
         if back_data:
-            rows.append([callback_button(back_text, back_data)])
-        rows.append([callback_button("❌ 取消预约", "flow:cancel")])
+            rows.append([callback_button(back_text or cfg.get("button_back") or "⬅️ 返回上一层", back_data)])
+        rows.append([callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")])
+        support = support_url_button(cfg)
+        if support:
+            rows.append([support])
         return inline_keyboard(rows)
 
     def show_dates(chat_id, user_id):
-        if settings().get("booking_enabled") != "1":
+        cfg = settings()
+        if cfg.get("booking_enabled") != "1":
             send_message(chat_id, "目前预约功能暂时关闭，请稍后再试。")
             return
         now = tokyo_now()
         buttons = []
         for offset in range(0, 2):
             day = now.date() + timedelta(days=offset)
-            label = "今天" if offset == 0 else "明天"
+            label = (cfg.get("button_today") or "今天") if offset == 0 else (cfg.get("button_tomorrow") or "明天")
             buttons.append([callback_button(f"{label} {day.month}/{day.day}", f"date:{day.isoformat()}")])
-        buttons.append([callback_button("⬅️ 返回首页", "flow:home"), callback_button("❌ 取消", "flow:cancel")])
+        buttons.append([callback_button(cfg.get("button_back") or "⬅️ 返回上一层", "flow:home"),
+                        callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")])
+        support = support_url_button(cfg)
+        if support:
+            buttons.append([support])
         set_session(user_id, chat_id, "choose_date", {})
-        send_message(chat_id, "请选择预约日期：", inline_keyboard(buttons))
+        send_message(chat_id, cfg.get("text_choose_date") or "请选择预约日期：", inline_keyboard(buttons))
 
     def show_girls(chat_id, user_id, day):
+        cfg = settings()
         girls = eligible_girls(day)
         if not girls:
             send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。",
                          flow_keyboard("flow:dates", "⬅️ 重新选择日期"))
             return
         rows = [[callback_button(item["girl"], f"girl:{day}:{item['profile']['id']}")] for item in girls]
-        rows.append([callback_button("⬅️ 返回选择日期", "flow:dates"), callback_button("❌ 取消", "flow:cancel")])
+        rows.append([callback_button(cfg.get("button_back") or "⬅️ 返回上一层", "flow:dates"),
+                     callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")])
+        support = support_url_button(cfg)
+        if support:
+            rows.append([support])
         set_session(user_id, chat_id, "choose_girl", {"date": day})
-        send_message(chat_id, f"{escape(day)} 可预约女孩：", inline_keyboard(rows))
+        send_message(chat_id, render_text(cfg.get("text_choose_girl"), date=escape(day)), inline_keyboard(rows))
 
     def choose_girl(chat_id, user_id, day, girl_ref):
         item = next((x for x in eligible_girls(day)
@@ -302,7 +354,8 @@ def register_telegram_booking(
             return
         free_text = "、".join(f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free)
         set_session(user_id, chat_id, "await_time", {"date": day, "girl": girl})
-        send_message(chat_id, f"你选择了 <b>{escape(girl)}</b>。\n\n可预约：{escape(free_text)}\n\n请发送时间，例如：<code>19-20</code>、<code>19:30-21:00</code>。",
+        cfg = settings()
+        send_message(chat_id, render_text(cfg.get("text_time_prompt"), girl=escape(girl), free_time=escape(free_text)),
                      flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
 
     def parse_time_text(text):
@@ -331,8 +384,9 @@ def register_telegram_booking(
             clear_session(user.get("id"))
             send_message(chat.get("id"), "该女孩已经停止开放预约，请重新选择。")
             return
-        if not item.get("binding"):
-            send_message(chat.get("id"), "该女孩还没有可接收预约的群，请联系店长绑定默认审核群。",
+        cfg = settings()
+        if not valid_group_chat_id(cfg.get("default_review_chat_id")):
+            send_message(chat.get("id"), "内部审核群尚未正确绑定，请联系店长。",
                          flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
             return
         a, b = time_to_min(start_text), time_to_min(end_text)
@@ -353,13 +407,14 @@ def register_telegram_booking(
                     "date": day, "girl": girl, "start_time": start_text, "end_time": end_text,
                 })
                 keyboard = inline_keyboard([
-                    [callback_button("✅ 确定预约", "flow:confirm")],
-                    [callback_button("⬅️ 修改时间", f"flow:time:{day}:{item['profile']['id']}"),
-                     callback_button("重新选女孩", f"flow:girls:{day}")],
-                    [callback_button("❌ 取消预约", "flow:cancel")],
-                ])
+                    [callback_button(cfg.get("button_confirm") or "✅ 确定预约", "flow:confirm")],
+                    [callback_button(cfg.get("button_change_time") or "⬅️ 修改时间", f"flow:time:{day}:{item['profile']['id']}"),
+                     callback_button(cfg.get("button_reselect_girl") or "重新选女孩", f"flow:girls:{day}")],
+                    [callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")],
+                ] + ([[support_url_button(cfg)]] if support_url_button(cfg) else []))
                 send_message(chat.get("id"),
-                             f"请确认预约：\n\n女孩：<b>{escape(girl)}</b>\n日期：{escape(day)}\n时间：<b>{escape(start_text)}-{escape(end_text)}</b>",
+                             render_text(cfg.get("text_confirm"), girl=escape(girl), date=escape(day),
+                                         start_time=escape(start_text), end_time=escape(end_text)),
                              keyboard)
                 return
             price = int(item["profile"].get("list_price") or 15000)
@@ -374,26 +429,34 @@ def register_telegram_booking(
                       f"女孩：<b>{escape(girl)}</b>\n日期：{escape(day)}\n时间：{escape(start_text)}-{escape(end_text)}\n"
                       f"客人：{escape(display_name(user))}\nTelegram ID：<code>{user.get('id')}</code>")
         try:
-            sent = send_message(item["binding"]["chat_id"], group_text,
+            sent = send_message(cfg["default_review_chat_id"], group_text,
                                 inline_keyboard([[callback_button("✅ 店长批准", f"approve:{rid}"), callback_button("❌ 拒绝", f"reject:{rid}")]]),
-                                item["binding"].get("message_thread_id") or 0)
+                                int(cfg.get("default_review_thread_id") or 0))
             with conn() as c:
                 c.execute("UPDATE customer_reservations SET telegram_message_id=? WHERE id=?", (int(sent.get("message_id") or 0), rid))
         except Exception as exc:
             with conn() as c:
-                c.execute("UPDATE customer_reservations SET status='发送失败',note=? WHERE id=?", (f"Telegram 群发送失败：{exc}", rid))
-            send_message(chat.get("id"), "预约没有成功发送到女孩群，请联系人工客服。")
+                c.execute("UPDATE customer_reservations SET status='发送失败',note=? WHERE id=?", (f"Telegram 内部审核群发送失败：{exc}", rid))
+            send_message(chat.get("id"), "预约没有成功发送到内部审核群，请联系人工客服。")
             clear_session(user.get("id"))
             return
         clear_session(user.get("id"))
-        send_message(chat.get("id"), "预约已经交给店长审核，请稍等。",
-                     inline_keyboard([[callback_button("🏠 返回首页", "flow:home")]]))
+        submitted_rows = [[callback_button(cfg.get("button_home") or "🏠 返回首页", "flow:home")]]
+        support = support_url_button(cfg)
+        if support:
+            submitted_rows.append([support])
+        send_message(chat.get("id"), cfg.get("text_submitted") or "预约已经交给店长审核，请稍等。",
+                     inline_keyboard(submitted_rows))
 
     def review_reservation(callback, approve):
         user = callback.get("from") or {}
         msg = callback.get("message") or {}
         chat = msg.get("chat") or {}
         rid = int((callback.get("data") or "0").split(":", 1)[1])
+        cfg = settings()
+        if str(chat.get("id")) != str(cfg.get("default_review_chat_id")):
+            answer_callback(callback.get("id"), "所有预约只能在内部审核群批准", True)
+            return
         if not is_manager(user.get("id"), chat.get("id")):
             answer_callback(callback.get("id"), "只有店长可以审核", True)
             return
@@ -420,10 +483,25 @@ def register_telegram_booking(
                 order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
             c.execute("UPDATE customer_reservations SET status=?,order_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                       (new_status, order_id, rid))
+            order_row = dict(c.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()) if approve and order_id else None
         answer_callback(callback.get("id"), "已处理")
         reviewer = display_name(user)
         if approve:
-            cfg = settings()
+            target = str(row.get("telegram_group_chat_id") or cfg.get("default_review_chat_id") or "")
+            thread_id = int(cfg.get("default_review_thread_id") or 0) if target == str(cfg.get("default_review_chat_id") or "") else 0
+            with conn() as c:
+                binding = c.execute("""SELECT * FROM telegram_group_bindings
+                                      WHERE girl_name=? AND enabled=1 AND chat_id=?""",
+                                    (row["girl_name"], target)).fetchone()
+                if binding:
+                    thread_id = int(binding["message_thread_id"] or 0)
+            try:
+                dt = datetime.strptime(row["reserve_date"], "%Y-%m-%d")
+                header = f"{dt.month}月{dt.day}日 {row['girl_name']} 接龙"
+                chain_line = order_to_chain_line(order_row, 1, False) if order_row else f"1.{row['start_time']}-{row['end_time']}"
+                send_message(target, f"<b>{escape(header)}</b>\n{escape(chain_line)}", thread_id=thread_id)
+            except Exception as exc:
+                send_message(chat.get("id"), f"⚠️ 预约已批准，但接龙发送失败：{escape(str(exc))}")
             rows = []
             if cfg.get("hotel_url"):
                 rows.append([url_button("推荐酒店", cfg["hotel_url"])])
@@ -453,9 +531,12 @@ def register_telegram_booking(
         elif message.get("document"):
             file_id = message["document"].get("file_id") or ""
         target = row["telegram_group_chat_id"]
-        thread_id = 0
+        cfg = settings()
+        thread_id = int(cfg.get("default_review_thread_id") or 0) if str(target) == str(cfg.get("default_review_chat_id") or "") else 0
         with conn() as c:
-            binding = c.execute("SELECT * FROM telegram_group_bindings WHERE girl_name=?", (row["girl_name"],)).fetchone()
+            binding = c.execute("""SELECT * FROM telegram_group_bindings
+                                  WHERE girl_name=? AND chat_id=? AND enabled=1""",
+                                (row["girl_name"], str(target))).fetchone()
             if binding:
                 thread_id = int(binding["message_thread_id"] or 0)
         header = f"🏨 预约 #{rid} 的酒店资料\n女孩：{row['girl_name']}\n时间：{row['reserve_date']} {row['start_time']}-{row['end_time']}"
@@ -539,6 +620,43 @@ def register_telegram_booking(
         send_message(chat.get("id"), "✅ 已将本群设为默认预约审核群。\n没有绑定专属群的女孩，预约都会发送到这里。",
                      thread_id=message.get("message_thread_id") or 0)
 
+    def import_chain_from_group(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        if chat.get("type") not in ("group", "supergroup"):
+            send_message(chat.get("id"), "请在内部群或已绑定的女孩群中使用这个命令。")
+            return
+        reply = message.get("reply_to_message") or {}
+        chain_text = str(reply.get("text") or reply.get("caption") or "").strip()
+        if not chain_text:
+            chain_text = re.sub(r"^/导入接龙(?:@\w+)?\s*", "", str(message.get("text") or "")).strip()
+        if not chain_text:
+            send_message(chat.get("id"), "请回复一条接龙消息并发送 <code>/导入接龙</code>，也可以把接龙文字直接写在命令后面。")
+            return
+        girl_id = None
+        with conn() as c:
+            binding = c.execute("""SELECT b.girl_name,g.id AS girl_id FROM telegram_group_bindings b
+                                  LEFT JOIN girls g ON g.name=b.girl_name
+                                  WHERE b.chat_id=? AND b.enabled=1 ORDER BY b.updated_at DESC LIMIT 1""",
+                                (str(chat.get("id")),)).fetchone()
+            if binding:
+                girl_id = binding["girl_id"]
+        cfg = settings()
+        is_internal = str(chat.get("id")) == str(cfg.get("default_review_chat_id") or "")
+        if not is_internal and not binding:
+            send_message(chat.get("id"), "本群没有绑定到 MCR，不能导入接龙。")
+            return
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "只有店长、客服或群管理员可以导入接龙。")
+            return
+        try:
+            result = import_chain_text(chain_text, girl_id=girl_id, settlement_status="未结算")
+            send_message(chat.get("id"),
+                         f"✅ 已写入 MCR 接龙预约\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}\n订单：{int(result['count'])} 单",
+                         thread_id=message.get("message_thread_id") or 0)
+        except Exception as exc:
+            send_message(chat.get("id"), f"❌ 接龙导入失败：{escape(str(exc))}",
+                         thread_id=message.get("message_thread_id") or 0)
+
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
@@ -547,6 +665,9 @@ def register_telegram_booking(
             return
         if text.startswith("/绑定女孩"):
             bind_group(message)
+            return
+        if text.startswith("/导入接龙"):
+            import_chain_from_group(message)
             return
         if chat.get("type") != "private":
             return
@@ -599,7 +720,9 @@ def register_telegram_booking(
                                    session, confirmed=True)
         elif data == "flow:cancel":
             clear_session(user.get("id"))
-            send_message(chat_id, "本次预约已取消。", inline_keyboard([[callback_button("重新开始预约", "book")]]))
+            cfg = settings()
+            send_message(chat_id, "本次预约已取消。",
+                         inline_keyboard([[callback_button(cfg.get("button_restart") or "重新开始预约", "book")]]))
         elif data.startswith("date:"):
             show_girls(chat_id, user.get("id"), data.split(":", 1)[1])
         elif data.startswith("girl:"):
@@ -654,6 +777,8 @@ def register_telegram_booking(
         chat_id = str(data.get("chat_id") or "").strip()
         if not girl or not chat_id:
             return jsonify(ok=False, error="女孩和群 ID 不能为空"), 400
+        if not valid_group_chat_id(chat_id):
+            return jsonify(ok=False, error="群 ID 必须是 Telegram 自动生成的负数，不能填写自定义编号"), 400
         with conn() as c:
             c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,message_thread_id,enabled,updated_at)
                          VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)
@@ -702,7 +827,8 @@ def register_telegram_booking(
                 "SELECT girl_name FROM telegram_daily_girls WHERE booking_date=? ORDER BY sort_order,girl_name",
                 (day,)).fetchall()]
             bound = {r["girl_name"] for r in c.execute(
-                "SELECT girl_name FROM telegram_group_bindings WHERE enabled=1").fetchall()}
+                "SELECT girl_name,chat_id FROM telegram_group_bindings WHERE enabled=1").fetchall()
+                     if valid_group_chat_id(r["chat_id"])}
         rows = [{"girl_name": name, "bound": name in bound} for name in selected]
         return jsonify(ok=True, date=day, girls=rows, attendance=attendance)
 

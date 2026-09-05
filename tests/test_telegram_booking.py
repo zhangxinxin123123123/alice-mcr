@@ -59,6 +59,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
                           "telegram_daily_girls"):
                 c.execute(f"DELETE FROM {table}")
+            for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
+                c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
+                             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""",
+                          (key, value))
             c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('娜娜子','在职',15000)")
             c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('有房女孩','在职',15000)")
             c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags)
@@ -74,6 +78,12 @@ class TelegramBookingFlowTest(unittest.TestCase):
         return response
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
+        self.webhook({"message": {
+            "message_id": 0,
+            "chat": {"id": -90000, "type": "supergroup", "title": "Alice内部群"},
+            "from": {"id": 9001, "first_name": "店长"},
+            "text": "/绑定审核群",
+        }})
         self.webhook({"message": {
             "message_id": 1,
             "chat": {"id": -10001, "type": "supergroup", "title": "Alice内部群"},
@@ -103,7 +113,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
 
         self.webhook({"callback_query": {
             "id": "c2", "from": {"id": 9001, "first_name": "店长"}, "data": f"approve:{rid}",
-            "message": {"chat": {"id": -10001, "type": "supergroup", "title": "Alice内部群"}},
+            "message": {"chat": {"id": -90000, "type": "supergroup", "title": "Alice内部群"}},
         }})
         with self.app_module.conn() as c:
             reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
@@ -118,6 +128,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
             reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
             self.assertEqual(reservation["hotel_file_id"], "hotel-photo")
         self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
+        self.assertTrue(any(method == "sendMessage" and "chat_id=-10001" in body and "%E6%8E%A5%E9%BE%99" in body
+                            for method, body in self.telegram_calls))
 
     def test_sync_includes_room_and_no_room_girls_then_save_can_reduce(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
@@ -186,6 +198,24 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             self.assertIsNone(c.execute("SELECT * FROM telegram_booking_sessions WHERE user_id='7201'").fetchone())
             self.assertEqual(c.execute("SELECT COUNT(*) FROM customer_reservations").fetchone()[0], 0)
+
+    def test_group_reply_chain_command_imports_into_mcr(self):
+        self.webhook({"message": {
+            "message_id": 20,
+            "chat": {"id": -30003, "type": "supergroup", "title": "娜娜子群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "/绑定女孩 娜娜子",
+        }})
+        self.webhook({"message": {
+            "message_id": 22,
+            "chat": {"id": -30003, "type": "supergroup", "title": "娜娜子群"},
+            "from": {"id": 9300, "first_name": "客服"}, "text": "/导入接龙",
+            "reply_to_message": {"message_id": 21, "text": f"{self.day} 娜娜子\n1.19-20/15000/接龙测试客人"},
+        }})
+        with self.app_module.conn() as c:
+            row = c.execute("SELECT * FROM orders WHERE girl_name='娜娜子'").fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["order_date"], self.day)
+            self.assertEqual(row["order_status"], "已结束")
 
 
 if __name__ == "__main__":

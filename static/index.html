@@ -64,6 +64,7 @@ body.role-admin .admin-hide{display:none!important}
 body.role-admin #home{display:none!important}
 body.role-admin #loginAudit{display:none!important}
 body:not(.role-boss) .boss-only{display:none!important}
+.tg-flow-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(280px,1.3fr) minmax(230px,.8fr);gap:16px;align-items:start}.tg-flow-map{display:grid;gap:7px}.tg-flow-node{border:2px solid var(--line);background:#fffafd;color:var(--ink);font-weight:900}.tg-flow-node.on{border-color:var(--pink);background:#fff0f7;color:#e75ca2}.tg-flow-arrow{text-align:center;color:#e75ca2;font-weight:900}.tg-phone{background:#24252a;border:8px solid #111;border-radius:30px;padding:18px 12px;min-height:390px;color:#fff}.tg-phone-title{text-align:center;font-weight:900;padding-bottom:14px}.tg-preview-bubble{background:#35363c;border-radius:14px;padding:12px;line-height:1.5;margin-bottom:12px;white-space:normal}.tg-preview-buttons{display:grid;gap:5px}.tg-preview-buttons span{display:block;text-align:center;background:#4f8f50;border-radius:9px;padding:9px;font-weight:800}@media(max-width:900px){.tg-flow-layout{grid-template-columns:1fr}.tg-phone{max-width:340px}}
 .room-cal{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.room-day{min-height:120px;border:2px solid var(--line);border-radius:16px;background:#fff;padding:8px}.room-day.today{outline:3px solid var(--pink)}.room-date{font-weight:900;color:#e75ca2}.room-item{margin-top:6px;padding:6px;border-radius:10px;background:#fff0f7;font-size:12px}.tag-pill{display:inline-block;margin:2px;padding:3px 7px;border-radius:999px;background:#fff0f7;border:1px solid var(--line);font-weight:800}.warn-yellow{background:#fff5c7!important}.warn-red{background:#ffd8df!important}.warn-sleep{background:#eee!important}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}
 .settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-amount{display:grid;gap:4px}.settle-line{display:flex;align-items:center;gap:8px;justify-content:space-between}.settle-line span{font-size:12px;opacity:.75}.settle-line b{color:#e75ca2}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:var(--ink)}
 
@@ -274,11 +275,26 @@ body:not(.role-boss) .boss-only{display:none!important}
     <select id="tgEnabled"><option value="1">开放预约</option><option value="0">暂停预约</option></select>
     <input id="tgWebsite" placeholder="官方网站 https://...">
     <input id="tgHotel" placeholder="推荐酒店 https://...">
+    <input id="tgSupportUsername" placeholder="人工客服 Telegram username，例如 AliceService">
     <input id="tgHotelTimeout" type="number" min="30" placeholder="酒店资料时限/秒">
    </div>
-   <textarea id="tgWelcome" placeholder="Bot 欢迎语"></textarea><br><br>
    <button class="primary" onclick="saveTelegramSettings()">保存 Bot 设置</button>
    <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
+  </div>
+  <div class="card"><h2>客户流程编辑器</h2>
+   <p class="note">点击左侧流程节点，编辑该步骤给客户看的文字和按钮；右侧手机会实时预览。变量可用：{girl}、{date}、{free_time}、{start_time}、{end_time}。</p>
+   <div class="tg-flow-layout">
+    <div class="tg-flow-map">
+     <button class="tg-flow-node on" data-flow-step="welcome" onclick="selectTelegramFlowStep('welcome')">欢迎页</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="date" onclick="selectTelegramFlowStep('date')">选择日期</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="girl" onclick="selectTelegramFlowStep('girl')">选择女孩</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="time" onclick="selectTelegramFlowStep('time')">输入时间</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="confirm" onclick="selectTelegramFlowStep('confirm')">确认预约</button><div class="tg-flow-arrow">↓</div>
+     <button class="tg-flow-node" data-flow-step="submitted" onclick="selectTelegramFlowStep('submitted')">等待审核</button>
+    </div>
+    <div id="tgFlowEdit"></div>
+    <div class="tg-phone"><div class="tg-phone-title">爱丽丝预约 Bot</div><div id="tgFlowPreview"></div></div>
+   </div>
   </div>
   <div class="card"><h2>当日自动预约女孩</h2>
    <p class="note">“一键同步出勤表”会把所选日期全部出勤女孩加入名单。同步后可删除不开放自动预约的女孩，也可重新添加，最后点击保存。</p>
@@ -2249,6 +2265,17 @@ function refreshAttPriceOptions(){
 
 let telegramConfig=null;
 let telegramDailyGirls=[];
+let telegramFlowDraft={};
+let telegramFlowStep='welcome';
+const telegramFlowDefs={
+ welcome:{title:'欢迎页',text:'welcome_text',buttons:['button_start','button_website','button_hotel','button_support']},
+ date:{title:'选择日期',text:'text_choose_date',buttons:['button_today','button_tomorrow','button_back','button_cancel']},
+ girl:{title:'选择女孩',text:'text_choose_girl',buttons:['button_back','button_cancel']},
+ time:{title:'输入时间',text:'text_time_prompt',buttons:['button_back','button_cancel']},
+ confirm:{title:'确认预约',text:'text_confirm',buttons:['button_confirm','button_change_time','button_reselect_girl','button_cancel']},
+ submitted:{title:'等待审核',text:'text_submitted',buttons:['button_home']}
+};
+const telegramFlowLabels={button_start:'开始按钮',button_website:'官网按钮',button_hotel:'酒店按钮',button_support:'人工客服按钮',button_today:'今天按钮',button_tomorrow:'明天按钮',button_home:'首页按钮',button_restart:'重新开始按钮',button_back:'返回按钮',button_cancel:'取消按钮',button_confirm:'确认按钮',button_change_time:'修改时间按钮',button_reselect_girl:'重选女孩按钮'};
 async function loadTelegramSettings(){
   tgGirl.innerHTML='<option value="">选择女孩</option>'+(data.girls||[]).map(g=>`<option value="${escHtml(g.name)}">${escHtml(g.name)}</option>`).join('');
   telegramConfig=await api('/api/telegram/settings',{});
@@ -2257,12 +2284,30 @@ async function loadTelegramSettings(){
   tgEnabled.value=String(s.booking_enabled||'0');
   tgWebsite.value=s.website_url||'';
   tgHotel.value=s.hotel_url||'';
+  tgSupportUsername.value=s.support_username||'';
   tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
-  tgWelcome.value=s.welcome_text||'';
+  telegramFlowDraft={...s};
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
   renderTelegramBindings();
+  selectTelegramFlowStep(telegramFlowStep);
   if(!tgDailyDate.value)tgDailyDate.value=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
   await loadTelegramDailyGirls();
+}
+function selectTelegramFlowStep(step){
+  telegramFlowStep=step;document.querySelectorAll('[data-flow-step]').forEach(x=>x.classList.toggle('on',x.dataset.flowStep===step));
+  const def=telegramFlowDefs[step];if(!def)return;
+  tgFlowEdit.innerHTML=`<h3>${def.title}</h3><label class="small">客户看到的文字</label><textarea oninput="telegramFlowDraft['${def.text}']=this.value;renderTelegramFlowPreview()">${escHtml(telegramFlowDraft[def.text]||'')}</textarea>`+
+    (def.buttons.length?'<h3>按钮文字</h3><div class="form">'+def.buttons.map(k=>`<label class="small">${telegramFlowLabels[k]}<input value="${escHtml(telegramFlowDraft[k]||'')}" oninput="telegramFlowDraft['${k}']=this.value;renderTelegramFlowPreview()"></label>`).join('')+'</div>':'');
+  renderTelegramFlowPreview();
+}
+function renderTelegramFlowPreview(){
+  const def=telegramFlowDefs[telegramFlowStep];if(!def)return;
+  const sample={girl:'伊卡洛',date:'2026-09-06',free_time:'17:00-23:00',start_time:'17:00',end_time:'18:00'};
+  let txt=String(telegramFlowDraft[def.text]||'');Object.entries(sample).forEach(([k,v])=>txt=txt.replaceAll(`{${k}}`,v));
+  let buttons=def.buttons.map(k=>telegramFlowDraft[k]||telegramFlowLabels[k]);
+  if(telegramFlowStep==='date')buttons=buttons.map((x,i)=>i===0?`${x} 9/6`:i===1?`${x} 9/7`:x);
+  if(telegramFlowStep==='girl')buttons=['伊卡洛','小喵',...buttons];
+  tgFlowPreview.innerHTML=`<div class="tg-preview-bubble">${escHtml(txt).replaceAll('\n','<br>')}</div><div class="tg-preview-buttons">${buttons.filter(Boolean).map(x=>`<span>${escHtml(x)}</span>`).join('')}</div>`;
 }
 async function loadTelegramDailyGirls(){
   if(!tgDailyDate.value)return;
@@ -2313,8 +2358,9 @@ function editTelegramBinding(r){
 function editTelegramBindingAt(index){editTelegramBinding(((telegramConfig&&telegramConfig.bindings)||[])[index]||{});}
 async function saveTelegramSettings(){
   telegramConfig=await api('/api/telegram/settings',{
-    bot_display_name:tgBotName.value,welcome_text:tgWelcome.value,website_url:tgWebsite.value,
+    ...telegramFlowDraft,bot_display_name:tgBotName.value,website_url:tgWebsite.value,
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
+    support_username:tgSupportUsername.value.trim().replace(/^@/,''),
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();
