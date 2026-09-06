@@ -214,6 +214,40 @@ class TelegramBookingFlowTest(unittest.TestCase):
             row = c.execute("SELECT * FROM customer_reservations").fetchone()
             self.assertEqual(row["telegram_group_chat_id"], "-20002")
 
+    def test_new_customer_with_zero_points_skips_points_confirmation(self):
+        self.webhook({"message": {
+            "message_id": 12,
+            "chat": {"id": -21002, "type": "supergroup", "title": "Alice内部群"},
+            "from": {"id": 9102, "first_name": "店长"},
+            "text": "/绑定审核群",
+        }})
+        private_chat = {"id": 7112, "type": "private"}
+        customer = {"id": 7112, "first_name": "第一次预约客人", "username": "first_guest"}
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+        self.webhook({"callback_query": {"id": "new-1", "from": customer,
+                                          "data": f"girl:{self.day}:{girl_id}", "message": {"chat": private_chat}}})
+        self.webhook({"message": {"message_id": 13, "chat": private_chat, "from": customer, "text": "20-21"}})
+        self.webhook({"callback_query": {"id": "new-2", "from": customer,
+                                          "data": "flow:confirm", "message": {"chat": private_chat}}})
+        with self.app_module.conn() as c:
+            rid = c.execute("SELECT id FROM customer_reservations WHERE telegram_user_id='7112'").fetchone()[0]
+
+        self.telegram_calls.clear()
+        self.webhook({"callback_query": {
+            "id": "new-approve", "from": {"id": 9102, "first_name": "店长"}, "data": f"approve:{rid}",
+            "message": {"chat": {"id": -21002, "type": "supergroup", "title": "Alice内部群"}},
+        }})
+        with self.app_module.conn() as c:
+            reservation = c.execute("SELECT * FROM customer_reservations WHERE id=?", (rid,)).fetchone()
+            session = c.execute("SELECT * FROM telegram_booking_sessions WHERE user_id='7112'").fetchone()
+            self.assertGreater(int(reservation["order_id"]), 0)
+            self.assertEqual(reservation["points_available"], 0)
+            self.assertEqual(session["step"], "booked")
+        sent = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertFalse(any("%E8%AF%B7%E9%80%89%E6%8B%A9%E6%9C%AC%E6%AC%A1%E7%A7%AF%E5%88%86" in body for body in sent), sent)
+        self.assertTrue(any("%E6%96%B0%E5%AE%A2%E6%97%A0%E5%8F%AF%E7%94%A8%E7%A7%AF%E5%88%86" in body for body in sent), sent)
+
     def test_time_step_can_go_back_or_cancel_without_creating_reservation(self):
         private_chat = {"id": 7201, "type": "private"}
         customer = {"id": 7201, "first_name": "返回测试客人"}

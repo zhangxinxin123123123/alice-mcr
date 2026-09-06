@@ -557,8 +557,12 @@ def register_telegram_booking(
             start_time=escape(row['start_time']), end_time=escape(row['end_time']),
         )
         policy_text = cfg.get('text_cancel_policy') or DEFAULT_SETTINGS['text_cancel_policy']
-        points_text = (f"当前可用积分：{available}\n本次使用积分：{used}\n"
-                       f"积分抵扣：¥{used * rate:,}\n<b>客人实际支付：¥{actual:,}</b>")
+        if available > 0:
+            points_text = (f"当前可用积分：{available}\n本次使用积分：{used}\n"
+                           f"积分抵扣：¥{used * rate:,}\n<b>客人实际支付：¥{actual:,}</b>")
+        else:
+            # 新客没有积分，不向客人展示无意义的积分确认/使用明细。
+            points_text = f"<b>客人实际支付：¥{actual:,}</b>"
         send_message(chat_id, f"{success_text}\n\n{points_text}\n\n{policy_text}", booking_action_keyboard(row, cfg))
         send_approved_chain(row, order_row, cfg, cfg.get("default_review_chat_id"))
         set_session(user.get("id"), chat_id, "booked", {"reservation_id": int(rid)})
@@ -595,16 +599,21 @@ def register_telegram_booking(
         answer_callback(callback.get("id"), "已处理")
         reviewer = display_name(user)
         if approve:
-            send_message(row["telegram_chat_id"],
-                         f"预约成功！{row['girl_name']} {row['reserve_date']} {row['start_time']}-{row['end_time']} 已经为你留好。\n\n"
-                         f"当前可用积分：<b>{available_points}</b>\n请选择本次积分使用方式（1 积分抵 ¥{int(cfg.get('points_yen_per_point') or 1)}）：",
-                         inline_keyboard([
-                             [callback_button("不使用积分", f"points:0:{rid}"), callback_button("全部使用", f"points:all:{rid}")],
-                             [callback_button("输入使用积分", f"points:custom:{rid}")],
-                         ]))
-            set_session(row["telegram_user_id"], row["telegram_chat_id"], "choose_points",
-                        {"reservation_id": rid, "available_points": available_points})
-            send_message(chat.get("id"), f"✅ 预约 #{rid} 已由 {escape(reviewer)} 批准。等待客人确认积分后生成接龙。")
+            if available_points <= 0:
+                # 新客默认积分为 0：批准后直接生成 MCR 订单和女孩群接龙。
+                finalize_points({"id": row["telegram_user_id"]}, row["telegram_chat_id"], rid, 0)
+                send_message(chat.get("id"), f"✅ 预约 #{rid} 已由 {escape(reviewer)} 批准。新客无可用积分，已直接生成接龙。")
+            else:
+                send_message(row["telegram_chat_id"],
+                             f"预约成功！{row['girl_name']} {row['reserve_date']} {row['start_time']}-{row['end_time']} 已经为你留好。\n\n"
+                             f"当前可用积分：<b>{available_points}</b>\n请选择本次积分使用方式（1 积分抵 ¥{int(cfg.get('points_yen_per_point') or 1)}）：",
+                             inline_keyboard([
+                                 [callback_button("不使用积分", f"points:0:{rid}"), callback_button("全部使用", f"points:all:{rid}")],
+                                 [callback_button("输入使用积分", f"points:custom:{rid}")],
+                             ]))
+                set_session(row["telegram_user_id"], row["telegram_chat_id"], "choose_points",
+                            {"reservation_id": rid, "available_points": available_points})
+                send_message(chat.get("id"), f"✅ 预约 #{rid} 已由 {escape(reviewer)} 批准。等待客人确认积分后生成接龙。")
         else:
             send_message(row["telegram_chat_id"], f"很抱歉，预约 #{rid} 未通过。请重新选择时间或联系人工客服。")
             send_message(chat.get("id"), f"❌ 预约 #{rid} 已由 {escape(reviewer)} 拒绝。")
