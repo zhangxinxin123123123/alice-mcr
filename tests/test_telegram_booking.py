@@ -269,6 +269,62 @@ class TelegramBookingFlowTest(unittest.TestCase):
         # 连续空档以 24 小时制显示；其中 03:00-04:00 已由上面的 slots 证明可约。
         self.assertTrue(any('20%3A00-05%3A00' in body for body in sent), sent)
 
+    def test_chain_import_resolves_afternoon_short_times_to_24h_storage(self):
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('四系乃','在职',28000)")
+            girl_id = c.execute("SELECT id FROM girls WHERE name='四系乃'").fetchone()[0]
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags)
+                         VALUES(?,?,?,?,?,?)""", (self.day, "四系乃", "14:00", "18:00", "", ""))
+
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        response = self.client.post('/api/import_chain', json={
+            'order_date': self.day,
+            'girl_id': girl_id,
+            'text': "\n".join([
+                "1.2-3/28000/短写客人A",
+                "2.3-4/28000/短写客人B",
+                "3.4-5/28000/短写客人C",
+                "4.5-6/28000/短写客人D",
+            ]),
+        }, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+        with self.app_module.conn() as c:
+            stored = [r["service_time"] for r in c.execute(
+                "SELECT service_time FROM orders WHERE order_date=? AND girl_name='四系乃' ORDER BY id",
+                (self.day,),
+            ).fetchall()]
+        self.assertEqual(stored, ["14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00"])
+
+        export = self.client.post('/api/chain_export', json={'date': self.day, 'girl_name': '四系乃'}, headers=headers)
+        self.assertEqual(export.status_code, 200, export.get_data(as_text=True))
+        self.assertIn("1.14:00-15:00/28000", export.json["full"])
+        self.assertIn("四系乃满", export.json["free"]["text"])
+
+    def test_legacy_short_chain_orders_are_shift_normalized_when_free_times_refresh(self):
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('四系乃','在职',28000)")
+            girl_id = c.execute("SELECT id FROM girls WHERE name='四系乃'").fetchone()[0]
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags)
+                         VALUES(?,?,?,?,?,?)""", (self.day, "四系乃", "14:00", "18:00", "", ""))
+            for t in ("2-3", "3-4", "4-5", "5-6"):
+                c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,order_status)
+                             VALUES(?,?,?,?,?)""", (self.day, t, girl_id, "四系乃", "预约中"))
+
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        page = self.client.post('/api/chain_page', json={'date': self.day, 'girl_name': '四系乃'}, headers=headers)
+        self.assertEqual(page.status_code, 200, page.get_data(as_text=True))
+        self.assertIn("四系乃满", page.json["free"]["text"])
+
+        with self.app_module.conn() as c:
+            stored = [r["service_time"] for r in c.execute(
+                "SELECT service_time FROM orders WHERE order_date=? AND girl_name='四系乃' ORDER BY id",
+                (self.day,),
+            ).fetchall()]
+        self.assertEqual(stored, ["14:00-15:00", "15:00-16:00", "16:00-17:00", "17:00-18:00"])
+
     def test_full_girl_is_shown_as_full_instead_of_disappearing(self):
         with self.app_module.conn() as c:
             girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]

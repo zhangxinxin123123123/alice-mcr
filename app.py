@@ -1049,12 +1049,19 @@ def calc_hours(t):
 
 
 
-def parse_service_end_datetime(order_date, service_time):
+def parse_service_end_datetime(order_date, service_time, shift_intervals=None):
     """把 23.30-0.30 / 20:00-21:00 这类预约时间转换为结束 datetime；凌晨自动按次日处理。"""
     try:
         base = datetime.strptime(str(order_date), "%Y-%m-%d")
     except Exception:
         return None
+    try:
+        interval = _parse_interval_text_for_shift(service_time, shift_intervals)
+        if interval:
+            end = int(interval[1])
+            return base + timedelta(days=end // (24 * 60), hours=(end // 60) % 24, minutes=end % 60)
+    except Exception:
+        pass
     text = str(service_time or "")
     m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", text)
     if not m:
@@ -1075,9 +1082,13 @@ def parse_service_end_datetime(order_date, service_time):
 
 def auto_finish_reservations(c):
     """预约结束时间已经超过当前时间时，自动把预约中改成已结束；取消不动。"""
-    now = datetime.now()
-    for o in c.execute("SELECT id,order_date,service_time,order_status FROM orders WHERE COALESCE(order_status,'')='预约中'").fetchall():
-        end_dt = parse_service_end_datetime(o['order_date'], o['service_time'])
+    now = _tokyo_now()
+    for o in c.execute("SELECT id,order_date,service_time,girl_name,order_status FROM orders WHERE COALESCE(order_status,'')='预约中'").fetchall():
+        end_dt = parse_service_end_datetime(
+            o['order_date'],
+            o['service_time'],
+            _shift_intervals_for_girl(c, o['order_date'], o['girl_name'])
+        )
         if end_dt and end_dt < now:
             c.execute("UPDATE orders SET order_status='已结束', updated_at=CURRENT_TIMESTAMP WHERE id=?", (o['id'],))
 
@@ -1444,6 +1455,11 @@ def create_or_update_order(c,d):
     if not g:
         raise ValueError('缺少女孩')
 
+    d = dict(d)
+    d['service_time'] = normalize_chain_time_token(
+        d.get('service_time', ''),
+        _shift_intervals_for_girl(c, d.get('order_date'), g['name'])
+    )
     validate_service_time(d.get('service_time',''))
     h = float(d.get('hours') or calc_hours(d.get('service_time','')))
     rec = int(d.get('received_amount') or 0)
@@ -1516,8 +1532,11 @@ def all_data():
     global LAST_FULL_MAINTENANCE_DAY
     init_db()
     with conn() as c:
+        today_for_mcr = tokyo_today_date()
+        normalize_chain_order_times_for_date(c, (today_for_mcr - timedelta(days=1)).isoformat())
+        normalize_chain_order_times_for_date(c, today_for_mcr.isoformat())
         auto_finish_reservations(c)
-        maintenance_day = tokyo_today_date().isoformat()
+        maintenance_day = today_for_mcr.isoformat()
         if LAST_FULL_MAINTENANCE_DAY != maintenance_day:
             expire_customer_points(c, None)
             update_customer_type_by_history(c, None)
@@ -1750,7 +1769,88 @@ def strip_chain_prefix(line):
     s = re.sub(r"^\s*\d+\s*[.、]\s*", "", s)
     return s.strip()
 
-def normalize_chain_time_token(token):
+def _storage_time_label(minute):
+    h = (int(minute) // 60) % 24
+    mi = int(minute) % 60
+    return f"{h:02d}:{mi:02d}"
+
+def _chain_time_candidates(hour, minute):
+    if hour >= 24:
+        return [hour * 60 + minute]
+    if hour >= 13:
+        return [hour * 60 + minute]
+    if hour == 12:
+        return [12 * 60 + minute, 24 * 60 + minute]
+    if hour == 0:
+        return [24 * 60 + minute]
+    return [(hour + 12) * 60 + minute, (hour + 24) * 60 + minute]
+
+def _chain_interval_candidates(sh, sm, eh, em):
+    seen = set()
+    candidates = []
+    for start in _chain_time_candidates(sh, sm):
+        for base_end in _chain_time_candidates(eh, em):
+            end = base_end
+            while end <= start:
+                end += 12 * 60
+            duration = end - start
+            if 0 < duration <= 7 * 60 and (start, end) not in seen:
+                seen.add((start, end))
+                candidates.append((start, end))
+    return candidates
+
+def _choose_interval_for_shifts(candidates, shift_intervals=None):
+    if not candidates:
+        return None
+    shifts = [s for s in (shift_intervals or []) if s and s[0] is not None and s[1] is not None]
+    if not shifts:
+        return candidates[0]
+
+    def score(interval):
+        a, b = interval
+        best = None
+        for sa, sb in shifts:
+            overlap = max(0, min(b, sb) - max(a, sa))
+            inside = sa <= a and b <= sb
+            distance = abs(a - sa) + abs(b - sb)
+            item = (0 if inside else 1, -overlap, distance, a)
+            if best is None or item < best:
+                best = item
+        return best or (1, 0, 0, a)
+
+    return sorted(candidates, key=score)[0]
+
+def _shift_intervals_for_girl(c, date_str, girl_name):
+    if not c or not date_str or not girl_name:
+        return []
+    out = []
+    try:
+        for sft in pure_shift_rows_for_date(c, date_str):
+            if str(sft.get('girl') or '').strip() != str(girl_name or '').strip():
+                continue
+            if _is_package_time(sft.get('start')) or _is_package_time(sft.get('end')):
+                out.append((24 * 60, 29 * 60))
+            else:
+                interval = _interval_minutes(sft.get('start'), sft.get('end'))
+                if interval:
+                    out.append(interval)
+    except Exception:
+        traceback.print_exc()
+    return out
+
+def _explicit_24h_chain_token(token, sh, eh):
+    raw = str(token or '')
+    if ':' not in raw:
+        return False
+    parts = re.split(r"(?:[-~ー～]|到|至)", re.sub(r"\s+", "", raw), maxsplit=1)
+    if len(parts) != 2:
+        return True
+    return (
+        parts[0].startswith('0') or parts[1].startswith('0')
+        or sh == 0 or eh == 0 or sh >= 13 or eh >= 13
+    )
+
+def normalize_chain_time_token(token, shift_intervals=None):
     """
     接龙时间显示标准化。
     支持 7.30到8.30 / 7.30-8.30 / 23.30-0.30。
@@ -1762,21 +1862,19 @@ def normalize_chain_time_token(token):
         return token
 
     sh, sm, eh, em = _parse_time_groups(m)
-    if ':' in token:
-        return f"{sh % 24:02d}:{sm:02d}-{eh % 24:02d}:{em:02d}"
+    if _explicit_24h_chain_token(token, sh, eh):
+        start = _business_clock_minutes_24h(sh, sm)
+        end = _business_clock_minutes_24h(eh, em)
+        if end <= start:
+            end += 24 * 60
+        return f"{_storage_time_label(start)}-{_storage_time_label(end)}"
 
-    # 12.30-1.30 是同日 12.30-13.30，不允许被标准化成 25.30。
-    display_eh = eh
-    if eh * 60 + em < sh * 60 + sm and sh >= 12 and eh < 12:
-        same_day_pm_end = (eh + 12) * 60 + em
-        if same_day_pm_end > sh * 60 + sm:
-            display_eh = eh + 12
+    interval = _choose_interval_for_shifts(_chain_interval_candidates(sh, sm, eh, em), shift_intervals)
+    if not interval:
+        return token
+    return f"{_storage_time_label(interval[0])}-{_storage_time_label(interval[1])}"
 
-    start = _time_label(sh, sm)
-    end = _time_label(display_eh, em)
-    return f"{start}-{end}"
-
-def parse_chain_service_time(line):
+def parse_chain_service_time(line, shift_intervals=None):
     body = strip_chain_prefix(line)
     if "包夜" in body:
         return "包夜 12.00-5.00", body
@@ -1784,7 +1882,7 @@ def parse_chain_service_time(line):
     m = re.search(r"(\d{1,2}(?:[:.]\d{1,2})?\s*(?:[-~ー～]|到|至)\s*\d{1,2}(?:[:.]\d{1,2})?)(.*)$", body)
     if not m:
         return None, body
-    return normalize_chain_time_token(m.group(1)), m.group(2)
+    return normalize_chain_time_token(m.group(1), shift_intervals), m.group(2)
 
 def split_chain_fields(rest_raw):
     """
@@ -1857,6 +1955,7 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
         if not g:
             raise ValueError('无法识别女孩名。请确认首行类似：0524小樱')
 
+        shift_intervals = _shift_intervals_for_girl(c, od, g['name'])
         parsed = []
         seen_sequences = set()
         fallback_sequence = 0
@@ -1864,7 +1963,7 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
             line_date, line_girl = parse_header([line])
             if line_date and line_girl and line_date == hd and line_girl == hg:
                 continue
-            st, rest_raw = parse_chain_service_time(line)
+            st, rest_raw = parse_chain_service_time(line, shift_intervals)
             if not st:
                 continue
 
@@ -2157,6 +2256,33 @@ def _parse_interval_text(text):
         return None
     return _interval_minutes(m.group(1), m.group(2))
 
+def _parse_interval_text_for_shift(text, shift_intervals=None):
+    raw = str(text or '').strip()
+    if not raw or _is_package_time(raw):
+        return _parse_interval_text(raw)
+    return _parse_interval_text(normalize_chain_time_token(raw, shift_intervals))
+
+def normalize_chain_order_times_for_date(c, date_str, girl_name=''):
+    if not date_str:
+        return 0
+    params = [date_str]
+    where = "order_date=?"
+    if girl_name:
+        where += " AND girl_name=?"
+        params.append(girl_name)
+    changed = 0
+    for o in c.execute(f"SELECT id,service_time,girl_name FROM orders WHERE {where}", params).fetchall():
+        raw = str(o['service_time'] or '').strip()
+        if not raw or _is_package_time(raw):
+            continue
+        normalized = normalize_chain_time_token(raw, _shift_intervals_for_girl(c, date_str, o['girl_name']))
+        if normalized and normalized != raw and _parse_interval_text(normalized):
+            c.execute("""UPDATE orders
+                         SET service_time=?, hours=?, updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""", (normalized, calc_hours(normalized), o['id']))
+            changed += 1
+    return changed
+
 def _fmt_free_minute(m, is_end=False):
     h = (m // 60) % 24
     mi = m % 60
@@ -2266,16 +2392,18 @@ def build_chain_free_rows(c, date_str):
             base = (max(base[0], cutoff), base[1])
             if base[0] >= base[1]:
                 continue
+        shift_intervals = [base]
         busy = []
         for o in c.execute("""SELECT service_time FROM orders
                             WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'""", (date_str, girl)).fetchall():
-            itv = _parse_interval_text(o['service_time'])
+            itv = _parse_interval_text_for_shift(o['service_time'], shift_intervals)
             if itv:
                 busy.append(itv)
         free = _subtract_intervals(base, busy)
         if cutoff is not None:
             free = [(max(a, cutoff), b) for a, b in free if max(a, cutoff) < b]
         if not free:
+            result.append({'girl': girl, 'segments': '满', 'text': f"{girl}满", 'full': True})
             continue
         segments = ''.join([f"{_fmt_free_minute(a)}-{_fmt_free_minute(b, True)}空" for a,b in free])
         result.append({'girl': girl, 'segments': segments, 'text': f"{girl}{segments}"})
@@ -2294,6 +2422,7 @@ def api_chain_page():
     girl_name = str(d.get('girl_name') or '').strip()
     client_now = _request_client_now(d)
     with conn() as c:
+        normalize_chain_order_times_for_date(c, date_str)
         auto_finish_reservations(c)
         shifts = pure_shift_rows_for_date(c, date_str)
         # 给每个纯出勤女孩补上女孩表价格/ID，接龙预约用这个自动定价。
@@ -2366,7 +2495,10 @@ def api_chain_order():
             g = ensure_girl(c, girl_name)
         if not g:
             return jsonify(ok=False, error='缺少女孩'), 400
-        service_time = normalize_chain_time_token(d.get('service_time') or '')
+        service_time = normalize_chain_time_token(
+            d.get('service_time') or '',
+            _shift_intervals_for_girl(c, date_str, g['name'])
+        )
         base_price = int((g['list_price'] or 15000) or 15000)
         raw_amount = d.get('received_amount')
         amount = int(raw_amount) if str(raw_amount or '').strip() else int(round(base_price * calc_hours(service_time)))
@@ -2410,6 +2542,7 @@ def api_chain_export():
     girl_name = str(d.get('girl_name') or '').strip()
     client_now = _request_client_now(d)
     with conn() as c:
+        normalize_chain_order_times_for_date(c, date_str, girl_name)
         auto_finish_reservations(c)
         orders = c.execute("""SELECT * FROM orders
             WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'
@@ -2436,7 +2569,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v67_mcr_24h_availability",
+            "version": "v68_shift_aware_chain_time",
             "port": 5057,
         })
 
@@ -2455,7 +2588,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v67_mcr_24h_availability",
+            "version": "v68_shift_aware_chain_time",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3264,6 +3397,7 @@ def mcr_girl_free_ranges(c, day, girl, shift, exclude_reservation_id=0, client_n
         return []
     if end <= start:
         end += 24 * 60
+    shift_intervals = [(start, end)]
 
     cutoff = _current_business_minute_for_date(day, client_now)
     if cutoff is not None:
@@ -3275,7 +3409,7 @@ def mcr_girl_free_ranges(c, day, girl, shift, exclude_reservation_id=0, client_n
     for order in c.execute("""SELECT service_time FROM orders
                               WHERE order_date=? AND girl_name=?
                                 AND COALESCE(order_status,'')!='取消'""", (day, girl)).fetchall():
-        period = service_range_minutes(order['service_time'])
+        period = _parse_interval_text_for_shift(order['service_time'], shift_intervals)
         if period:
             busy.append(period)
 
@@ -3347,6 +3481,7 @@ def api_customer_available():
     girl_filter=str(d.get('girl_name') or '').strip()
     client_now=_request_client_now(d)
     with conn() as c:
+        normalize_chain_order_times_for_date(c, day, girl_filter)
         shifts=pure_shift_rows_for_date(c, day)
         cutoff=_current_business_minute_for_date(day, client_now)
         out=[]
@@ -3382,6 +3517,7 @@ def api_customer_reserve():
     note=str(d.get('note') or '').strip()
     if not acc_id or not girl or not start or not end: return jsonify(ok=False,error='预约信息不完整'),400
     with conn() as c:
+        normalize_chain_order_times_for_date(c, day, girl)
         acc=c.execute('SELECT * FROM customer_accounts WHERE id=?',(acc_id,)).fetchone()
         if not acc: return jsonify(ok=False,error='请先注册'),404
         if acc['status']!='已通过': return jsonify(ok=False,error='管理员审核通过后才可以预约'),403
@@ -3393,8 +3529,9 @@ def api_customer_reserve():
         cutoff=_current_business_minute_for_date(day, _request_client_now(d))
         if cutoff is not None and a < cutoff:
             return jsonify(ok=False,error='不能预约已经过去的时间'),400
+        shift_intervals = _shift_intervals_for_girl(c, day, girl)
         for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
-            r=service_range_minutes(o['service_time'])
+            r=_parse_interval_text_for_shift(o['service_time'], shift_intervals)
             if r and ranges_overlap(a,b,r[0],r[1]): return jsonify(ok=False,error='这个时间已经被预约'),409
         for rsv in c.execute("SELECT start_time,end_time FROM customer_reservations WHERE reserve_date=? AND girl_name=? AND status IN ('待确认','已确认')", (day,girl)).fetchall():
             c1=time_to_min(rsv['start_time']); d1=time_to_min(rsv['end_time'])

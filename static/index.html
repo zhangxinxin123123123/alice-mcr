@@ -248,7 +248,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     </div>
     <div class="free-dona-card" id="chainFreeDonaBox">
       <div class="free-dona-title" id="chainFreeDonaTitle">空闲时间</div>
-      <div class="free-dona-sub"><span>空闲女孩</span><span id="chainFreeDonaCount">0</span></div>
+      <div class="free-dona-sub"><span>女孩状态</span><span id="chainFreeDonaCount">0</span></div>
       <div class="free-dona-list" id="chainFreeDonaList"><div class="free-dona-empty">暂无空闲时间</div></div>
     </div>
  </div>
@@ -821,6 +821,8 @@ function parseChainFreeFromText(text){
   const header=rows[0]||"空闲时间";
   const lines=rows.slice(1).filter(x=>!/^https?:\/\//i.test(x)).map(line=>{
     const m=line.match(/^(.+?)(\d{1,2}:\d{2}.*)$/);
+    const full=line.match(/^(.+?)(已?满)$/);
+    if(full)return {girl:full[1].trim(),segments:full[2].trim(),text:line};
     if(!m)return {girl:line,segments:"",text:line};
     return {girl:m[1].trim(),segments:m[2].trim(),text:line};
   });
