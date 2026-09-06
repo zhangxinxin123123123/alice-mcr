@@ -239,6 +239,50 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertIsNone(c.execute("SELECT * FROM telegram_booking_sessions WHERE user_id='7201'").fetchone())
             self.assertEqual(c.execute("SELECT COUNT(*) FROM customer_reservations").fetchone()[0], 0)
 
+    def test_chain_12_hour_orders_and_bot_24_hour_availability_use_same_mcr_ranges(self):
+        with self.app_module.conn() as c:
+            c.execute("UPDATE pure_shifts SET start_time='19:00',end_time='05:00' WHERE shift_date=? AND girl_name='娜娜子'", (self.day,))
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,order_status)
+                         VALUES(?,?,?,?,?)""", (self.day, '7-8', girl_id, '娜娜子', '预约中'))
+
+        self.assertEqual(self.app_module.service_range_minutes('7-8'), (19 * 60, 20 * 60))
+        self.assertEqual(self.app_module.service_range_minutes('3-4'), (27 * 60, 28 * 60))
+
+        response = self.client.post('/api/customer_available', json={
+            'date': self.day,
+            'girl_name': '娜娜子',
+        })
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        slots = [slot['label'] for slot in response.json['girls'][0]['slots']]
+        self.assertNotIn('19:00-19:30', slots)
+        self.assertNotIn('19:30-20:00', slots)
+        self.assertIn('03:00-03:30', slots)
+        self.assertIn('03:30-04:00', slots)
+
+        self.telegram_calls.clear()
+        self.webhook({'callback_query': {
+            'id': 'mcr-24h-display', 'from': {'id': 7210, 'first_name': '24小时测试'},
+            'data': f'date:{self.day}', 'message': {'chat': {'id': 7210, 'type': 'private'}},
+        }})
+        sent = [body for method, body in self.telegram_calls if method == 'sendMessage']
+        # 连续空档以 24 小时制显示；其中 03:00-04:00 已由上面的 slots 证明可约。
+        self.assertTrue(any('20%3A00-05%3A00' in body for body in sent), sent)
+
+    def test_full_girl_is_shown_as_full_instead_of_disappearing(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,order_status)
+                         VALUES(?,?,?,?,?)""", (self.day, '19:00-23:00', girl_id, '娜娜子', '预约中'))
+
+        self.telegram_calls.clear()
+        self.webhook({'callback_query': {
+            'id': 'full-display', 'from': {'id': 7211, 'first_name': '满员测试'},
+            'data': f'date:{self.day}', 'message': {'chat': {'id': 7211, 'type': 'private'}},
+        }})
+        sent = [body for method, body in self.telegram_calls if method == 'sendMessage']
+        self.assertTrue(any('%E5%B7%B2%E6%BB%A1' in body for body in sent), sent)
+
     def test_group_import_incrementally_syncs_mcr_and_replies_only_in_internal_group(self):
         self.webhook({"message": {
             "message_id": 20,

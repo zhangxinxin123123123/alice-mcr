@@ -3240,19 +3240,74 @@ def min_to_time(m):
     return f"{h:02d}:{mi:02d}"
 
 def service_range_minutes(text):
-    if '包夜' in str(text or ''):
-        return 24*60, 29*60
-    m = re.search(r"(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?", str(text or ''))
-    if not m: return None
-    a = int(m.group(1))*60 + int(m.group(2) or 0)
-    b = int(m.group(3))*60 + int(m.group(4) or 0)
-    if int(m.group(1)) < 6: a += 24*60
-    if int(m.group(3)) < 6: b += 24*60
-    if b <= a: b += 24*60
-    return a,b
+    """把 MCR 订单时间转换成夜场业务分钟。
+
+    接龙允许 12 小时简写（7-8 表示 19:00-20:00），带冒号的时间按
+    24 小时制处理（07:00-08:00 才表示上午）。统一复用出勤/接龙解析器，
+    避免 Bot 与 MCR 对同一条订单得出不同的占用时间。
+    """
+    return _parse_interval_text(text)
 
 def ranges_overlap(a,b,c,d):
     return max(a,c) < min(b,d)
+
+
+def mcr_girl_free_ranges(c, day, girl, shift, exclude_reservation_id=0, client_now=None):
+    """MCR 唯一的女孩空闲时间计算入口，返回业务分钟区间。
+
+    出勤来自 MCR 出勤表，占用来自 MCR 订单表；尚未生成订单的 Bot
+    待审核/已批准预约也作为临时占用，防止审核期间被重复预约。
+    """
+    start = time_to_min(shift.get('start') or shift.get('start_time'))
+    end = time_to_min(shift.get('end') or shift.get('end_time'))
+    if start is None or end is None:
+        return []
+    if end <= start:
+        end += 24 * 60
+
+    cutoff = _current_business_minute_for_date(day, client_now)
+    if cutoff is not None:
+        start = max(start, cutoff)
+        if start >= end:
+            return []
+
+    busy = []
+    for order in c.execute("""SELECT service_time FROM orders
+                              WHERE order_date=? AND girl_name=?
+                                AND COALESCE(order_status,'')!='取消'""", (day, girl)).fetchall():
+        period = service_range_minutes(order['service_time'])
+        if period:
+            busy.append(period)
+
+    for reservation in c.execute("""SELECT id,start_time,end_time,COALESCE(order_id,0) AS order_id
+                                    FROM customer_reservations
+                                    WHERE reserve_date=? AND girl_name=?
+                                      AND status IN ('待确认','已确认')""", (day, girl)).fetchall():
+        if int(reservation['id']) == int(exclude_reservation_id or 0):
+            continue
+        # 已经生成 MCR 订单的预约由 orders 统一占用，不重复建立第二套来源。
+        if int(reservation['order_id'] or 0) > 0:
+            continue
+        a = time_to_min(reservation['start_time'])
+        b = time_to_min(reservation['end_time'])
+        if a is not None and b is not None:
+            if b <= a:
+                b += 24 * 60
+            busy.append((a, b))
+
+    free = [(start, end)]
+    for busy_start, busy_end in sorted(busy):
+        next_free = []
+        for free_start, free_end in free:
+            if busy_end <= free_start or busy_start >= free_end:
+                next_free.append((free_start, free_end))
+                continue
+            if free_start < busy_start:
+                next_free.append((free_start, busy_start))
+            if busy_end < free_end:
+                next_free.append((busy_end, free_end))
+        free = next_free
+    return [(a, b) for a, b in free if b - a >= 30]
 
 def customer_by_phone_or_username(c, phone, username):
     return c.execute("SELECT * FROM customer_accounts WHERE phone=? OR username=? ORDER BY id DESC LIMIT 1", (phone, username)).fetchone()
@@ -3305,21 +3360,13 @@ def api_customer_available():
             if cutoff is not None:
                 st=max(st, cutoff)
                 if st >= en: continue
-            busy=[]
-            for o in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day,girl)).fetchall():
-                r=service_range_minutes(o['service_time'])
-                if r: busy.append(r)
-            for rsv in c.execute("SELECT start_time,end_time FROM customer_reservations WHERE reserve_date=? AND girl_name=? AND status IN ('待确认','已确认')", (day,girl)).fetchall():
-                a=time_to_min(rsv['start_time']); b=time_to_min(rsv['end_time'])
-                if a is not None and b is not None:
-                    if b <= a: b += 24*60
-                    busy.append((a,b))
+            free=mcr_girl_free_ranges(c, day, girl, sft, client_now=client_now)
             slots=[]
-            x=st
-            while x+30 <= en:
-                if not any(ranges_overlap(x,x+30,a,b) for a,b in busy):
+            for free_start, free_end in free:
+                x=free_start
+                while x+30 <= free_end:
                     slots.append({'start':min_to_time(x),'end':min_to_time(x+30),'label':f"{min_to_time(x)}-{min_to_time(x+30)}"})
-                x += 30
+                    x += 30
             out.append({'girl':girl,'start':min_to_time(st),'end':min_to_time(en),'price':sft.get('price') or 0,'slots':slots})
         return jsonify(ok=True,date=day,girls=out)
 
@@ -3410,6 +3457,7 @@ register_telegram_booking(
     ranges_overlap=ranges_overlap,
     tokyo_now=_tokyo_now,
     current_business_minute_for_date=_current_business_minute_for_date,
+    mcr_girl_free_ranges=mcr_girl_free_ranges,
     import_chain_text=import_chain_text,
     order_to_chain_line=order_to_chain_line,
     ensure_customer=ensure_customer,

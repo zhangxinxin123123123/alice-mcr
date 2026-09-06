@@ -58,6 +58,7 @@ def register_telegram_booking(
     ranges_overlap,
     tokyo_now,
     current_business_minute_for_date,
+    mcr_girl_free_ranges,
     import_chain_text,
     order_to_chain_line,
     ensure_customer,
@@ -257,44 +258,11 @@ def register_telegram_booking(
             return result
 
     def free_ranges(c, day, girl, shift, exclude_reservation_id=0):
-        start = time_to_min(shift.get("start") or shift.get("start_time"))
-        end = time_to_min(shift.get("end") or shift.get("end_time"))
-        if start is None or end is None:
-            return []
-        if end <= start:
-            end += 24 * 60
-        cutoff = current_business_minute_for_date(day, tokyo_now())
-        if cutoff is not None:
-            start = max(start, cutoff)
-            if start >= end:
-                return []
-        busy = []
-        for row in c.execute("SELECT service_time FROM orders WHERE order_date=? AND girl_name=? AND COALESCE(order_status,'')!='取消'", (day, girl)).fetchall():
-            period = service_range_minutes(row["service_time"])
-            if period:
-                busy.append(period)
-        for row in c.execute("""SELECT id,start_time,end_time FROM customer_reservations
-                              WHERE reserve_date=? AND girl_name=? AND status IN ('待确认','已确认')""", (day, girl)).fetchall():
-            if int(row["id"]) == int(exclude_reservation_id or 0):
-                continue
-            a, b = time_to_min(row["start_time"]), time_to_min(row["end_time"])
-            if a is not None and b is not None:
-                if b <= a:
-                    b += 24 * 60
-                busy.append((a, b))
-        free = [(start, end)]
-        for ba, bb in sorted(busy):
-            next_free = []
-            for fa, fb in free:
-                if bb <= fa or ba >= fb:
-                    next_free.append((fa, fb))
-                else:
-                    if fa < ba:
-                        next_free.append((fa, ba))
-                    if bb < fb:
-                        next_free.append((bb, fb))
-            free = next_free
-        return [(a, b) for a, b in free if b - a >= 30]
+        return mcr_girl_free_ranges(
+            c, day, girl, shift,
+            exclude_reservation_id=exclude_reservation_id,
+            client_now=tokyo_now(),
+        )
 
     def show_home(chat_id):
         cfg = settings()
@@ -358,20 +326,24 @@ def register_telegram_booking(
     def show_girls(chat_id, user_id, day):
         cfg = settings()
         girls = eligible_girls(day)
-        available_girls = []
+        girl_rows = []
         with conn() as c:
             for item in girls:
                 free = free_ranges(c, day, item['girl'], item['shift'])
-                if free:
-                    available_girls.append((item, free))
-        if not available_girls:
+                girl_rows.append((item, free))
+        if not girl_rows:
             send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。",
                          flow_keyboard("flow:dates", "⬅️ 重新选择日期"))
             return
         rows = []
-        for item, free in available_girls:
-            free_text = '、'.join(f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free)
-            rows.append([callback_button(f"{item['girl']}｜{free_text}", f"girl:{day}:{item['profile']['id']}")])
+        for item, free in girl_rows:
+            if free:
+                free_text = '、'.join(f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free)
+                callback_data = f"girl:{day}:{item['profile']['id']}"
+            else:
+                free_text = "已满"
+                callback_data = f"full:{day}:{item['profile']['id']}"
+            rows.append([callback_button(f"{item['girl']}｜{free_text}", callback_data)])
         rows.append([callback_button(cfg.get("button_back") or "⬅️ 返回上一层", "flow:dates"),
                      callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")])
         support = support_url_button(cfg)
@@ -944,7 +916,8 @@ def register_telegram_booking(
         user = callback.get("from") or {}
         msg = callback.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
-        answer_callback(callback.get("id"))
+        if not data.startswith("full:"):
+            answer_callback(callback.get("id"))
         if data == "book":
             show_dates(chat_id, user.get("id"))
         elif data == "flow:home":
@@ -1041,6 +1014,8 @@ def register_telegram_booking(
         elif data.startswith("girl:"):
             _, day, girl = data.split(":", 2)
             choose_girl(chat_id, user.get("id"), day, girl)
+        elif data.startswith("full:"):
+            answer_callback(callback.get("id"), "该女孩当天已经约满，请选择其他女孩。", True)
         elif data.startswith("approve:"):
             review_reservation(callback, True)
         elif data.startswith("reject:"):
