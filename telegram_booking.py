@@ -83,6 +83,11 @@ def register_telegram_booking(
                 booking_date TEXT NOT NULL, girl_name TEXT NOT NULL, sort_order INTEGER DEFAULT 0,
                 source TEXT DEFAULT 'manual', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(booking_date,girl_name))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_daily_chain_messages(
+                booking_date TEXT NOT NULL, girl_name TEXT NOT NULL, chat_id TEXT NOT NULL,
+                message_thread_id INTEGER DEFAULT 0, message_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(booking_date,girl_name,chat_id,message_thread_id))""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_customers(
                 telegram_user_id TEXT PRIMARY KEY, customer_id INTEGER NOT NULL,
                 telegram_username TEXT DEFAULT '', display_name TEXT DEFAULT '',
@@ -169,6 +174,13 @@ def register_telegram_booking(
         if int(thread_id or 0):
             data["message_thread_id"] = int(thread_id)
         return tg("sendMessage", data)
+
+    def edit_message_text(chat_id, message_id, text, keyboard=None):
+        data = {"chat_id": chat_id, "message_id": int(message_id), "text": text,
+                "parse_mode": "HTML", "disable_web_page_preview": True}
+        if keyboard:
+            data["reply_markup"] = keyboard
+        return tg("editMessageText", data)
 
     def answer_callback(callback_id, text="", alert=False):
         try:
@@ -478,17 +490,74 @@ def register_telegram_booking(
                 thread_id = int(binding["message_thread_id"] or 0)
         return target, thread_id
 
-    def send_approved_chain(row, order_row, cfg, review_chat_id):
+    def refresh_daily_chain(row, cfg, new_order_id=0):
+        """Create or update the girl's single daily chain message from current MCR orders."""
         target, thread_id = target_thread_id(row, cfg)
+        day = str(row["reserve_date"])
+        girl = str(row["girl_name"])
+        with conn() as c:
+            orders = [dict(x) for x in c.execute("""SELECT * FROM orders
+                                                   WHERE order_date=? AND girl_name=?
+                                                     AND COALESCE(order_status,'')!='取消'
+                                                   ORDER BY id""", (day, girl)).fetchall()]
+            registry = c.execute("""SELECT message_id FROM telegram_daily_chain_messages
+                                    WHERE booking_date=? AND girl_name=? AND chat_id=?
+                                      AND message_thread_id=?""",
+                                 (day, girl, str(target), int(thread_id or 0))).fetchone()
+            message_id = int(registry["message_id"] or 0) if registry else 0
+            if not message_id:
+                previous = c.execute("""SELECT telegram_chain_message_id FROM customer_reservations
+                                        WHERE reserve_date=? AND girl_name=? AND telegram_chain_chat_id=?
+                                          AND COALESCE(telegram_chain_message_id,0)>0
+                                        ORDER BY id DESC LIMIT 1""",
+                                     (day, girl, str(target))).fetchone()
+                message_id = int(previous["telegram_chain_message_id"] or 0) if previous else 0
+
+        def order_sort_key(order):
+            period = service_range_minutes(order.get("service_time"))
+            return (period[0] if period else 99 * 60, int(order.get("id") or 0))
+
+        orders.sort(key=order_sort_key)
+        dt = datetime.strptime(day, "%Y-%m-%d")
+        lines = [f"<b>{escape(f'{dt.month}月{dt.day}日 {girl} 接龙')}</b>"]
+        if not orders:
+            lines.append("暂无预约")
+        for index, order in enumerate(orders, 1):
+            chain_line = escape(order_to_chain_line(order, index, False))
+            if int(order.get("id") or 0) == int(new_order_id or 0):
+                # Telegram 不支持自定义文字颜色，用彩色标记和粗体突出本次新增。
+                lines.append(f"🟣 <b>NEW｜{chain_line}</b>")
+            else:
+                lines.append(f"▫️ {chain_line}")
+        text = "\n".join(lines)
+
+        sent_message_id = message_id
+        if message_id:
+            try:
+                edit_message_text(target, message_id, text)
+            except Exception:
+                sent = send_message(target, text, thread_id=thread_id)
+                sent_message_id = int(sent.get("message_id") or 0)
+        else:
+            sent = send_message(target, text, thread_id=thread_id)
+            sent_message_id = int(sent.get("message_id") or 0)
+
+        with conn() as c:
+            c.execute("""INSERT INTO telegram_daily_chain_messages(
+                            booking_date,girl_name,chat_id,message_thread_id,message_id,updated_at)
+                         VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(booking_date,girl_name,chat_id,message_thread_id) DO UPDATE SET
+                            message_id=excluded.message_id,updated_at=CURRENT_TIMESTAMP""",
+                      (day, girl, str(target), int(thread_id or 0), int(sent_message_id)))
+            c.execute("""UPDATE customer_reservations
+                         SET telegram_chain_chat_id=?,telegram_chain_message_id=?,updated_at=CURRENT_TIMESTAMP
+                         WHERE reserve_date=? AND girl_name=? AND telegram_group_chat_id=?""",
+                      (str(target), int(sent_message_id), day, girl, str(target)))
+        return sent_message_id
+
+    def send_approved_chain(row, order_row, cfg, review_chat_id):
         try:
-            dt = datetime.strptime(row["reserve_date"], "%Y-%m-%d")
-            header = f"{dt.month}月{dt.day}日 {row['girl_name']} 接龙"
-            sent = send_message(target, f"<b>{escape(header)}</b>\n{escape(order_to_chain_line(order_row, 1, False))}",
-                                thread_id=thread_id)
-            with conn() as c:
-                c.execute("""UPDATE customer_reservations SET telegram_chain_chat_id=?,telegram_chain_message_id=?,
-                             updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                          (str(target), int(sent.get('message_id') or 0), int(row['id'])))
+            refresh_daily_chain(row, cfg, int(order_row.get("id") or 0))
         except Exception as exc:
             send_message(review_chat_id, f"⚠️ 订单已建立，但接龙发送失败：{escape(str(exc))}")
 
@@ -733,7 +802,14 @@ def register_telegram_booking(
                     c.execute("UPDATE customers SET customer_status='黑名单',updated_at=CURRENT_TIMESTAMP WHERE id=?", (customer_id,))
                 recalc_customer_points(c, customer_id, update_types=False)
 
-        delete_bot_group_message(row.get('telegram_chain_chat_id'), row.get('telegram_chain_message_id'))
+        # 每位女孩每天只有一张接龙总表；取消时重建总表，不能删除共享消息。
+        try:
+            refresh_daily_chain(row, cfg)
+        except Exception as exc:
+            internal_id = str(cfg.get('default_review_chat_id') or '')
+            if internal_id:
+                send_message(internal_id, f"⚠️ 预约已取消，但接龙总表更新失败：{escape(str(exc))}",
+                             thread_id=int(cfg.get('default_review_thread_id') or 0))
         hotel_ids = []
         try:
             hotel_ids = json.loads(row.get('telegram_hotel_message_ids') or '[]')
@@ -742,15 +818,10 @@ def register_telegram_booking(
         for message_id in hotel_ids:
             delete_bot_group_message(row.get('telegram_hotel_chat_id'), message_id)
 
-        target, thread_id = target_thread_id(row, cfg)
         group_notice = (f"❌ <b>预约已取消 #{rid}</b>\n女孩：{escape(row['girl_name'])}\n"
                         f"时间：{escape(row['reserve_date'])} {escape(row['start_time'])}-{escape(row['end_time'])}")
-        try:
-            send_message(target, group_notice, thread_id=thread_id)
-        except Exception:
-            pass
         internal_id = str(cfg.get('default_review_chat_id') or '')
-        if internal_id and str(target) != internal_id:
+        if internal_id:
             consequence = f"扣除累计积分 {points_deducted}" if cancellation_no == 1 else '已加入黑名单'
             send_message(internal_id,
                          f"{group_notice}\n客人：{escape(row.get('username') or row.get('telegram_username') or str(user.get('id')))}"

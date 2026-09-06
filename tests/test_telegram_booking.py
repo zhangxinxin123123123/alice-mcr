@@ -37,7 +37,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             cls.telegram_calls.append((method, body))
             if method == "getChatMember":
                 result = {"status": "administrator"}
-            elif method in ("sendMessage", "sendPhoto", "sendDocument", "sendLocation"):
+            elif method in ("sendMessage", "editMessageText", "sendPhoto", "sendDocument", "sendLocation"):
                 result = {"message_id": len(cls.telegram_calls)}
             else:
                 result = True
@@ -58,7 +58,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             for table in ("orders", "customer_reservations", "customers", "pure_shifts", "girls",
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
-                          "telegram_customer_cancellations"):
+                          "telegram_customer_cancellations", "telegram_daily_chain_messages"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -169,7 +169,61 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.assertEqual(linked_customer["points"], 0)
             self.assertEqual(cancellation["cancellation_no"], 1)
             self.assertEqual(cancellation["points_deducted"], 900)
-        self.assertTrue(any(method == "deleteMessage" and "chat_id=-10001" in body for method, body in self.telegram_calls))
+        self.assertTrue(any(method == "editMessageText" and "chat_id=-10001" in body and "%E6%9A%82%E6%97%A0%E9%A2%84%E7%BA%A6" in body
+                            for method, body in self.telegram_calls))
+        # 酒店图片和说明仍会被删除；共享接龙本身只编辑、不删除。
+        self.assertEqual(sum(1 for method, body in self.telegram_calls
+                             if method == "deleteMessage" and "chat_id=-10001" in body), 1)
+
+    def test_approved_booking_updates_one_daily_chain_and_marks_only_latest_as_new(self):
+        manager = {"id": 9401, "first_name": "店长"}
+        self.webhook({"message": {
+            "message_id": 30, "chat": {"id": -40004, "type": "supergroup", "title": "Alice内部群"},
+            "from": manager, "text": "/绑定审核群",
+        }})
+        self.webhook({"message": {
+            "message_id": 31, "chat": {"id": -41004, "type": "supergroup", "title": "娜娜子群"},
+            "from": manager, "text": "/绑定女孩 娜娜子",
+        }})
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,received_amount,remark,order_status)
+                         VALUES(?,?,?,?,?,?,?)""",
+                      (self.day, "19:00-20:00", girl_id, "娜娜子", 15000, "人工旧接龙", "预约中"))
+            for user_id, start, end in ((7401, "20:00", "21:00"), (7402, "21:00", "22:00")):
+                c.execute("""INSERT INTO customer_reservations(
+                                reserve_date,girl_name,start_time,end_time,username,status,price,
+                                telegram_user_id,telegram_chat_id,telegram_group_chat_id)
+                             VALUES(?,?,?,?,?,'待确认',15000,?,?,?)""",
+                          (self.day, "娜娜子", start, end, f"客人{user_id}", str(user_id), str(user_id), "-41004"))
+            reservation_ids = [r[0] for r in c.execute(
+                "SELECT id FROM customer_reservations ORDER BY id").fetchall()]
+
+        self.telegram_calls.clear()
+        self.webhook({"callback_query": {
+            "id": "daily-approve-1", "from": manager, "data": f"approve:{reservation_ids[0]}",
+            "message": {"chat": {"id": -40004, "type": "supergroup", "title": "Alice内部群"}},
+        }})
+        first_group_messages = [body for method, body in self.telegram_calls
+                                if method == "sendMessage" and "chat_id=-41004" in body]
+        self.assertEqual(len(first_group_messages), 1)
+        self.assertIn("%E4%BA%BA%E5%B7%A5%E6%97%A7%E6%8E%A5%E9%BE%99", first_group_messages[0])
+        self.assertIn("NEW%EF%BD%9C", first_group_messages[0])
+
+        self.telegram_calls.clear()
+        self.webhook({"callback_query": {
+            "id": "daily-approve-2", "from": manager, "data": f"approve:{reservation_ids[1]}",
+            "message": {"chat": {"id": -40004, "type": "supergroup", "title": "Alice内部群"}},
+        }})
+        edits = [body for method, body in self.telegram_calls
+                 if method == "editMessageText" and "chat_id=-41004" in body]
+        self.assertEqual(len(edits), 1)
+        self.assertEqual(edits[0].count("NEW%EF%BD%9C"), 1)
+        self.assertIn("1.7-8", edits[0])
+        self.assertIn("2.8-9", edits[0])
+        self.assertIn("3.9-10", edits[0])
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_daily_chain_messages").fetchone()[0], 1)
 
     def test_sync_includes_room_and_no_room_girls_then_save_can_reduce(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
