@@ -209,6 +209,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(len(first_group_messages), 1)
         self.assertIn("%E4%BA%BA%E5%B7%A5%E6%97%A7%E6%8E%A5%E9%BE%99", first_group_messages[0])
         self.assertIn("NEW%EF%BD%9C", first_group_messages[0])
+        self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+2+%E4%BD%8D%E5%AE%A2%E6%88%B7", first_group_messages[0])
+        self.assertIn("tg%3A%2F%2Fuser%3Fid%3D7401", first_group_messages[0])
 
         self.telegram_calls.clear()
         self.webhook({"callback_query": {
@@ -222,6 +224,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn("1.7-8", edits[0])
         self.assertIn("2.8-9", edits[0])
         self.assertIn("3.9-10", edits[0])
+        self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+2+%E4%BD%8D%E5%AE%A2%E6%88%B7", edits[0])
+        self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+3+%E4%BD%8D%E5%AE%A2%E6%88%B7", edits[0])
+        self.assertIn("tg%3A%2F%2Fuser%3Fid%3D7402", edits[0])
         with self.app_module.conn() as c:
             self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_daily_chain_messages").fetchone()[0], 1)
 

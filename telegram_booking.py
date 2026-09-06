@@ -500,6 +500,12 @@ def register_telegram_booking(
                                                    WHERE order_date=? AND girl_name=?
                                                      AND COALESCE(order_status,'')!='取消'
                                                    ORDER BY id""", (day, girl)).fetchall()]
+            contacts = {int(x["order_id"]): dict(x) for x in c.execute("""SELECT order_id,telegram_user_id,telegram_username
+                                                                           FROM customer_reservations
+                                                                           WHERE reserve_date=? AND girl_name=?
+                                                                             AND status='已确认'
+                                                                             AND COALESCE(order_id,0)>0""",
+                                                                        (day, girl)).fetchall()}
             registry = c.execute("""SELECT message_id FROM telegram_daily_chain_messages
                                     WHERE booking_date=? AND girl_name=? AND chat_id=?
                                       AND message_thread_id=?""",
@@ -522,6 +528,7 @@ def register_telegram_booking(
         lines = [f"<b>{escape(f'{dt.month}月{dt.day}日 {girl} 接龙')}</b>"]
         if not orders:
             lines.append("暂无预约")
+        contact_rows = []
         for index, order in enumerate(orders, 1):
             chain_line = escape(order_to_chain_line(order, index, False))
             if int(order.get("id") or 0) == int(new_order_id or 0):
@@ -529,17 +536,30 @@ def register_telegram_booking(
                 lines.append(f"🟣 <b>NEW｜{chain_line}</b>")
             else:
                 lines.append(f"▫️ {chain_line}")
+            contact = contacts.get(int(order.get("id") or 0))
+            if contact:
+                telegram_username = str(contact.get("telegram_username") or "").strip().lstrip("@")
+                telegram_user_id = str(contact.get("telegram_user_id") or "").strip()
+                if telegram_username:
+                    contact_url = f"https://t.me/{telegram_username}"
+                elif telegram_user_id.isdigit():
+                    contact_url = f"tg://user?id={telegram_user_id}"
+                else:
+                    contact_url = ""
+                if contact_url:
+                    contact_rows.append([url_button(f"💬 联系第 {index} 位客户", contact_url)])
         text = "\n".join(lines)
+        keyboard = inline_keyboard(contact_rows) if contact_rows else None
 
         sent_message_id = message_id
         if message_id:
             try:
-                edit_message_text(target, message_id, text)
+                edit_message_text(target, message_id, text, keyboard)
             except Exception:
-                sent = send_message(target, text, thread_id=thread_id)
+                sent = send_message(target, text, keyboard, thread_id=thread_id)
                 sent_message_id = int(sent.get("message_id") or 0)
         else:
-            sent = send_message(target, text, thread_id=thread_id)
+            sent = send_message(target, text, keyboard, thread_id=thread_id)
             sent_message_id = int(sent.get("message_id") or 0)
 
         with conn() as c:
