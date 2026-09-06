@@ -187,6 +187,14 @@ class TelegramBookingFlowTest(unittest.TestCase):
         }})
         with self.app_module.conn() as c:
             girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('0042','回头客',0)")
+            returning_customer_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,
+                                             customer_no,customer_name,received_amount,order_status)
+                         VALUES('2026-01-01','19:00-20:00',?,?,?,?,?,15000,'已结束')""",
+                      (girl_id, "娜娜子", returning_customer_id, "0042", "回头客"))
+            c.execute("""INSERT INTO telegram_customers(telegram_user_id,customer_id,display_name)
+                         VALUES('7402',?,'回头客')""", (returning_customer_id,))
             c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,received_amount,remark,order_status)
                          VALUES(?,?,?,?,?,?,?)""",
                       (self.day, "19:00-20:00", girl_id, "娜娜子", 15000, "人工旧接龙", "预约中"))
@@ -208,6 +216,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                                 if method == "sendMessage" and "chat_id=-41004" in body]
         self.assertEqual(len(first_group_messages), 1)
         self.assertIn("%E4%BA%BA%E5%B7%A5%E6%97%A7%E6%8E%A5%E9%BE%99", first_group_messages[0])
+        self.assertIn("%E5%AE%A2%E4%BA%BA7401", first_group_messages[0])
         self.assertIn("NEW%EF%BD%9C", first_group_messages[0])
         self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+2+%E4%BD%8D%E5%AE%A2%E6%88%B7", first_group_messages[0])
         self.assertIn("tg%3A%2F%2Fuser%3Fid%3D7401", first_group_messages[0])
@@ -224,11 +233,24 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn("1.7-8", edits[0])
         self.assertIn("2.8-9", edits[0])
         self.assertIn("3.9-10", edits[0])
+        self.assertIn("%2F0042", edits[0])
         self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+2+%E4%BD%8D%E5%AE%A2%E6%88%B7", edits[0])
         self.assertIn("%E8%81%94%E7%B3%BB%E7%AC%AC+3+%E4%BD%8D%E5%AE%A2%E6%88%B7", edits[0])
         self.assertIn("tg%3A%2F%2Fuser%3Fid%3D7402", edits[0])
         with self.app_module.conn() as c:
             self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_daily_chain_messages").fetchone()[0], 1)
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {
+            "message_id": 32, "chat": {"id": -41004, "type": "supergroup", "title": "娜娜子群"},
+            "from": manager, "text": f"/最新接龙 {self.day}",
+        }})
+        latest = [body for method, body in self.telegram_calls
+                  if method == "sendMessage" and "chat_id=-41004" in body]
+        self.assertEqual(len(latest), 1)
+        self.assertIn("%E6%8E%A5%E9%BE%99", latest[0])
+        self.assertIn("%2F0042", latest[0])
+        self.assertNotIn("NEW%EF%BD%9C", latest[0])
 
     def test_sync_includes_room_and_no_room_girls_then_save_can_reduce(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})

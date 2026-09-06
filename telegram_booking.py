@@ -490,7 +490,7 @@ def register_telegram_booking(
                 thread_id = int(binding["message_thread_id"] or 0)
         return target, thread_id
 
-    def refresh_daily_chain(row, cfg, new_order_id=0):
+    def refresh_daily_chain(row, cfg, new_order_id=0, force_new=False):
         """Create or update the girl's single daily chain message from current MCR orders."""
         target, thread_id = target_thread_id(row, cfg)
         day = str(row["reserve_date"])
@@ -506,12 +506,20 @@ def register_telegram_booking(
                                                                              AND status='已确认'
                                                                              AND COALESCE(order_id,0)>0""",
                                                                         (day, girl)).fetchall()}
+            first_order_ids = {int(x["customer_id"]): int(x["first_order_id"])
+                               for x in c.execute("""SELECT customer_id,MIN(id) AS first_order_id
+                                                      FROM orders
+                                                      WHERE COALESCE(customer_id,0)>0
+                                                        AND COALESCE(order_status,'')!='取消'
+                                                      GROUP BY customer_id""").fetchall()}
             registry = c.execute("""SELECT message_id FROM telegram_daily_chain_messages
                                     WHERE booking_date=? AND girl_name=? AND chat_id=?
                                       AND message_thread_id=?""",
                                  (day, girl, str(target), int(thread_id or 0))).fetchone()
             message_id = int(registry["message_id"] or 0) if registry else 0
-            if not message_id:
+            if force_new:
+                message_id = 0
+            if not message_id and not force_new:
                 previous = c.execute("""SELECT telegram_chain_message_id FROM customer_reservations
                                         WHERE reserve_date=? AND girl_name=? AND telegram_chain_chat_id=?
                                           AND COALESCE(telegram_chain_message_id,0)>0
@@ -530,7 +538,23 @@ def register_telegram_booking(
             lines.append("暂无预约")
         contact_rows = []
         for index, order in enumerate(orders, 1):
-            chain_line = escape(order_to_chain_line(order, index, False))
+            display_order = dict(order)
+            remark = str(display_order.get("remark") or "").strip()
+            display_order["remark"] = ""
+            chain_line = order_to_chain_line(display_order, index, False)
+            customer_id = int(order.get("customer_id") or 0)
+            customer_name = str(order.get("customer_name") or "").strip()
+            customer_no = str(order.get("customer_no") or "").strip()
+            if customer_id:
+                first_order_id = first_order_ids.get(customer_id)
+                customer_label = customer_name if int(order.get("id") or 0) == int(first_order_id or 0) else customer_no
+                if customer_label:
+                    chain_line += "/" + customer_label
+                if remark and not remark.startswith("Telegram Bot 预约") and remark not in (customer_name, customer_no):
+                    chain_line += "/" + remark
+            elif remark:
+                chain_line += "/" + remark
+            chain_line = escape(chain_line)
             if int(order.get("id") or 0) == int(new_order_id or 0):
                 # Telegram 不支持自定义文字颜色，用彩色标记和粗体突出本次新增。
                 lines.append(f"🟣 <b>NEW｜{chain_line}</b>")
@@ -909,6 +933,36 @@ def register_telegram_booking(
         send_message(chat.get("id"), "✅ 已将本群设为默认预约审核群。\n没有绑定专属群的女孩，预约都会发送到这里。",
                      thread_id=message.get("message_thread_id") or 0)
 
+    def send_latest_chain_from_group(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        text = str(message.get("text") or "")
+        if chat.get("type") not in ("group", "supergroup"):
+            send_message(chat.get("id"), "请在已经绑定女孩的群内使用 <code>/最新接龙</code>。")
+            return
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "只有店长、客服或群管理员可以发送最新接龙。",
+                         thread_id=message.get("message_thread_id") or 0)
+            return
+        with conn() as c:
+            binding = c.execute("""SELECT girl_name FROM telegram_group_bindings
+                                  WHERE chat_id=? AND enabled=1
+                                  ORDER BY updated_at DESC LIMIT 1""",
+                                (str(chat.get("id")),)).fetchone()
+        if not binding:
+            send_message(chat.get("id"), "本群还没有绑定女孩，请先发送 <code>/绑定女孩 女孩名</code>。",
+                         thread_id=message.get("message_thread_id") or 0)
+            return
+        date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+        day = date_match.group(1) if date_match else tokyo_now().date().isoformat()
+        row = {"reserve_date": day, "girl_name": binding["girl_name"],
+               "telegram_group_chat_id": str(chat.get("id"))}
+        try:
+            # 强制发一张新的总表，让“最新接龙”出现在群聊底部；后续批准继续编辑这张。
+            refresh_daily_chain(row, settings(), force_new=True)
+        except Exception as exc:
+            send_message(chat.get("id"), f"最新接龙发送失败：{escape(str(exc))}",
+                         thread_id=message.get("message_thread_id") or 0)
+
     def import_chain_from_group(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         if chat.get("type") not in ("group", "supergroup"):
@@ -961,6 +1015,9 @@ def register_telegram_booking(
             return
         if text.startswith("/绑定女孩"):
             bind_group(message)
+            return
+        if re.match(r"^/?最新接龙(?:@\w+)?(?:\s|$)", text):
+            send_latest_chain_from_group(message)
             return
         if re.match(r"^/?导入(?:接龙)?(?:@\w+)?(?:\s|$)", text):
             import_chain_from_group(message)
