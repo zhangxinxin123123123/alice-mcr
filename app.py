@@ -2569,7 +2569,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v69_new_customer_skip_points",
+            "version": "v70_daily_telegram_chain",
             "port": 5057,
         })
 
@@ -2588,7 +2588,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v69_new_customer_skip_points",
+            "version": "v70_daily_telegram_chain",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
