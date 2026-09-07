@@ -825,6 +825,11 @@ def neko_admin_credentials(username=None, password=None):
     pwd = str(password or os.environ.get('ALICE_NEKO_ADMIN_PASSWORD') or os.environ.get('NEKO_ADMIN_PASS') or os.environ.get('NEKO_ADMIN_PASSWORD') or '').strip()
     return user, pwd
 
+def alice_wordpress_credentials():
+    user = str(os.environ.get('ALICE_WP_ADMIN_USER') or '').strip()
+    pwd = str(os.environ.get('ALICE_WP_ADMIN_PASSWORD') or '').strip()
+    return user, pwd
+
 def leading_zero_bits(data):
     n = 0
     for b in data:
@@ -908,6 +913,153 @@ def neko_admin_login(username=None, password=None):
             err = strip_html_text(html_unescape(m.group(1)))
         raise ValueError(err or '喵喵后台登录失败')
     return opener
+
+def alice_wordpress_login(username=None, password=None):
+    import base64
+    import http.cookiejar
+    from urllib.request import build_opener, HTTPCookieProcessor
+    user = str(username or '').strip()
+    pwd = str(password or '').strip()
+    if not user or not pwd:
+        raise ValueError('官网同步尚未配置后台账号密码')
+    jar = http.cookiejar.CookieJar()
+    opener = build_opener(HTTPCookieProcessor(jar))
+    opener.addheaders = [
+        ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36'),
+        ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
+        ('Referer', ALICE_BASE_URL + '/wp-login.php'),
+    ]
+    login_url = ALICE_BASE_URL + '/wp-login.php?redirect_to=' + quote(ALICE_BASE_URL + '/wp-admin/') + '&reauth=1'
+    login_html, _ = opener_text(opener, login_url, timeout=30)
+    data = {'log': user, 'pwd': pwd, 'wp-submit': '登录', 'redirect_to': ALICE_BASE_URL + '/wp-admin/',
+            'testcookie': '1', 'rememberme': 'forever'}
+    for tag in re.findall(r'<input\b[^>]*>', login_html, re.I | re.S):
+        attrs = parse_input_attrs(tag)
+        name = attrs.get('name') or ''
+        if not name.startswith('pow_challenge['):
+            continue
+        idx = re.search(r'\[(\d+)\]', name)
+        challenge = attrs.get('value') or ''
+        if not idx or not challenge:
+            continue
+        prefix = challenge.split('.', 1)[0]
+        padded = prefix + ('=' * ((4 - len(prefix) % 4) % 4))
+        decoded = base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8', 'ignore')
+        parts = decoded.split(':')
+        if len(parts) >= 3:
+            data[name] = challenge
+            data['pow_solution[' + idx.group(1) + ']'] = solve_neko_pow(parts[0], int(parts[-1]))
+    req = Request(ALICE_BASE_URL + '/wp-login.php', data=urlencode(data).encode('utf-8'), method='POST', headers={
+        'Content-Type': 'application/x-www-form-urlencoded', 'Referer': login_url})
+    opener.open(req, timeout=30).read()
+    admin_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/', timeout=30)
+    if 'wpbody-content' not in admin_html and 'wp-admin-bar' not in admin_html:
+        raise ValueError('官网后台登录失败，请检查 Render 中的账号密码')
+    return opener
+
+def _wordpress_form_pairs(edit_html):
+    form = re.search(r'<form\b[^>]*(?:id|name)=["\']post["\'][^>]*>(.*?)</form>', edit_html, re.S | re.I)
+    body = form.group(1) if form else edit_html
+    pairs = []
+    for tag in re.findall(r'<input\b[^>]*>', body, re.I | re.S):
+        attrs = parse_input_attrs(tag)
+        name = attrs.get('name') or ''
+        kind = str(attrs.get('type') or 'text').lower()
+        if not name or kind in ('submit', 'button', 'file', 'image', 'reset'):
+            continue
+        if kind in ('checkbox', 'radio') and not re.search(r'\bchecked\b', tag, re.I):
+            continue
+        pairs.append((name, attrs.get('value') or ''))
+    for match in re.finditer(r'<textarea\b([^>]*)>(.*?)</textarea>', body, re.S | re.I):
+        attrs = parse_input_attrs('<textarea ' + match.group(1) + '>')
+        if attrs.get('name'):
+            pairs.append((attrs['name'], html_unescape(match.group(2))))
+    for match in re.finditer(r'<select\b([^>]*)>(.*?)</select>', body, re.S | re.I):
+        attrs = parse_input_attrs('<select ' + match.group(1) + '>')
+        name = attrs.get('name') or ''
+        if not name:
+            continue
+        options = re.findall(r'<option\b([^>]*)>(.*?)</option>', match.group(2), re.S | re.I)
+        selected = [x for x in options if re.search(r'\bselected\b', x[0], re.I)] or options[:1]
+        for option_attrs, option_text in selected:
+            oa = parse_input_attrs('<option ' + option_attrs + '>')
+            pairs.append((name, oa.get('value') if 'value' in oa else strip_html_text(option_text)))
+    return pairs
+
+def _acf_gallery_field_key(edit_html):
+    starts = list(re.finditer(r'<div\b[^>]*class=["\'][^"\']*acf-field[^"\']*["\'][^>]*>', edit_html, re.S | re.I))
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else min(len(edit_html), match.end() + 12000)
+        block = edit_html[match.start():end]
+        if '照片(可以添加多个照片)' not in block and 'acf-photo-gallery' not in block:
+            continue
+        attrs = parse_input_attrs(match.group(0))
+        key = attrs.get('data-key') or ''
+        if key.startswith('field_'):
+            return key
+        name_match = re.search(r'name=["\']acf\[(field_[^\]]+)\]["\']', block, re.I)
+        if name_match:
+            return name_match.group(1)
+    return ''
+
+def _multipart_request(url, fields, filename, image_bytes, opener, referer):
+    boundary = 'AliceWpBoundary' + secrets.token_hex(12)
+    parts = []
+    for key, value in fields:
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode('utf-8'))
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="async-upload"; filename="{filename}"\r\nContent-Type: image/png\r\n\r\n'.encode('utf-8'))
+    parts.append(image_bytes)
+    parts.append(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
+    req = Request(url, data=b''.join(parts), method='POST', headers={
+        'Content-Type': f'multipart/form-data; boundary={boundary}', 'Referer': referer,
+        'Accept': 'application/json,text/plain,*/*'})
+    with opener.open(req, timeout=60) as response:
+        return response.read().decode('utf-8', 'replace')
+
+def sync_alice_wordpress_attendance(day, image_bytes, service_text):
+    user, pwd = alice_wordpress_credentials()
+    if not user or not pwd:
+        return {'configured': False, 'synced': False, 'warning': 'Render 尚未设置 ALICE_WP_ADMIN_USER 和 ALICE_WP_ADMIN_PASSWORD'}
+    post_id = int(os.environ.get('ALICE_WP_ATTENDANCE_POST_ID') or 9744)
+    try:
+        opener = alice_wordpress_login(user, pwd)
+        edit_url = f'{ALICE_BASE_URL}/wp-admin/post.php?post={post_id}&action=edit'
+        edit_html, _ = opener_text(opener, edit_url, timeout=40)
+        gallery_key = _acf_gallery_field_key(edit_html)
+        if not gallery_key:
+            raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
+        nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
+        if not nonce_match:
+            nonce_match = re.search(r'name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', edit_html, re.I)
+        if not nonce_match:
+            raise ValueError('找不到官网图片上传授权码')
+        upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
+            ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
+            ('_wpnonce', html_unescape(nonce_match.group(1)))
+        ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
+        upload_data = json.loads(upload_raw)
+        attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
+        if not upload_data.get('success') or not attachment_id:
+            raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
+        pairs = _wordpress_form_pairs(edit_html)
+        replace_names = {'acf[field_5d253ca06ccc7]', f'acf[{gallery_key}]', 'action', 'post_ID'}
+        pairs = [(k, v) for k, v in pairs if k not in replace_names]
+        pairs.extend([
+            ('action', 'editpost'), ('post_ID', str(post_id)),
+            ('acf[field_5d253ca06ccc7]', str(service_text or '').strip()),
+            (f'acf[{gallery_key}]', str(attachment_id)), ('save', '更新'),
+        ])
+        req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
+                      method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
+        with opener.open(req, timeout=60) as response:
+            final_url = response.geturl()
+            result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
+        if 'post.php' not in final_url and 'post.php' not in result_html:
+            raise ValueError('官网没有确认保存成功')
+        return {'configured': True, 'synced': True, 'post_id': post_id, 'attachment_id': attachment_id}
+    except Exception as exc:
+        return {'configured': True, 'synced': False, 'warning': str(exc)}
 
 def acf_value_from_edit(edit_html, data_name):
     m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
@@ -2752,7 +2904,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v75_wide_neon_shift",
+            "version": "v76_full_attendance_sync",
             "port": 5057,
         })
 
@@ -2771,7 +2923,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v75_wide_neon_shift",
+            "version": "v76_full_attendance_sync",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -3782,6 +3934,7 @@ register_telegram_booking(
     order_to_chain_line=order_to_chain_line,
     ensure_customer=ensure_customer,
     recalc_customer_points=recalc_customer_points,
+    sync_wordpress_attendance=sync_alice_wordpress_attendance,
 )
 
 import os

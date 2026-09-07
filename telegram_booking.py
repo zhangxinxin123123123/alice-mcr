@@ -65,6 +65,7 @@ def register_telegram_booking(
     order_to_chain_line,
     ensure_customer,
     recalc_customer_points,
+    sync_wordpress_attendance=None,
 ):
     def ensure_db():
         init_main_db()
@@ -1330,6 +1331,7 @@ def register_telegram_booking(
         thread_id = int(cfg.get("default_review_thread_id") or 0)
         synced = 0
         names = []
+        wordpress_result = {"configured": False, "synced": False}
         if kind == "pure_shift":
             with conn() as c:
                 for shift in pure_shift_rows_for_date(c, day):
@@ -1338,6 +1340,8 @@ def register_telegram_booking(
                         names.append(name)
             synced = len(names)
             caption = f"📋 <b>{escape(day)} 爱丽丝出勤表</b>\n已同步 TEL预约女孩：{synced}人"
+            if callable(sync_wordpress_attendance):
+                wordpress_result = sync_wordpress_attendance(day, image_bytes, str(data.get("service_text") or ""))
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
         result = send_photo_bytes(chat_id, image_bytes, caption, thread_id)
@@ -1348,6 +1352,7 @@ def register_telegram_booking(
                     c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
                                  VALUES(?,?,?,'attendance_send')""", (day, name, index))
         return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), synced=synced,
+                       wordpress=wordpress_result,
                        chat_title=cfg.get("default_review_chat_title") or "Alice内部群")
 
     ensure_db()

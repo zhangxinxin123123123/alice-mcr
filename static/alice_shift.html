@@ -293,6 +293,9 @@ button{cursor:pointer;font-weight:900}
   color:var(--poster-text);
   text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa;
 }
+.shift-meta-line{display:flex;align-items:center;gap:6px;min-width:0;margin-top:5px;white-space:nowrap;font-size:calc(13px * var(--poster-scale));line-height:1.15;font-weight:900;color:var(--poster-text);text-shadow:0 1px 2px #004b60,0 0 6px #ffffffaa}
+.shift-meta-line .tag-wrap{flex:1 1 auto;min-width:0;overflow:hidden;display:flex;flex-wrap:nowrap;margin:0}
+.shift-time,.shift-price{flex:0 0 auto;white-space:nowrap}.shift-price{font-weight:900}
 .preview.mode-default .time-price-line{
   align-items:flex-end;
   gap:6px;
@@ -544,13 +547,13 @@ th{
   color:var(--yellow);
 }
 .preview.mode-default{
-  padding:22px 14px 28px;
+  padding:20px 16px 30px;
   background:
     repeating-linear-gradient(0deg,rgba(33,247,255,.08) 0 1px,transparent 1px 18px),
     repeating-linear-gradient(90deg,rgba(255,47,154,.10) 0 1px,transparent 1px 18px),
     linear-gradient(135deg,#070611 0%,#190921 46%,#061720 100%);
-  border:2px solid var(--pink);
-  box-shadow:0 0 0 1px rgba(33,247,255,.38),0 0 30px rgba(255,47,154,.38),inset 0 0 28px rgba(33,247,255,.10);
+  border:3px solid var(--pink);
+  box-shadow:0 0 0 2px rgba(255,255,255,.72),0 0 0 4px rgba(255,47,154,.48),0 0 34px rgba(255,47,154,.72),inset 0 0 34px rgba(255,47,154,.14);
   font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;
 }
 .preview.mode-default::before{
@@ -575,25 +578,29 @@ th{
 .preview.mode-default .preview-title{
   margin:0 0 8px;
   padding:7px 8px 8px;
-  border:1px solid rgba(33,247,255,.72);
+  border:2px solid rgba(255,47,154,.92);
   border-radius:8px;
   color:#fff;
   background:linear-gradient(90deg,rgba(255,47,154,.28),rgba(11,36,54,.88));
-  font-size:20px;
+  font-size:26px;
   line-height:1.05;
   letter-spacing:0;
-  text-shadow:3px 0 var(--cyan),-3px 0 var(--pink),0 0 12px rgba(255,255,255,.42);
+  text-shadow:2px 0 var(--cyan),-2px 0 var(--pink),0 0 7px #fff,0 0 17px rgba(255,47,154,.96);
 }
 .preview.mode-default .preview-title::before,
 .preview.mode-default .preview-title::after{
-  width:11px;
-  height:11px;
+  content:"♥";
+  width:auto;
+  height:auto;
   margin:0 6px 1px;
-  border-radius:2px;
-  background:var(--yellow);
-  box-shadow:0 0 8px rgba(255,212,71,.72);
+  border-radius:0;
+  background:none;
+  color:var(--pink);
+  font-size:18px;
+  box-shadow:none;
+  text-shadow:0 0 5px #fff,0 0 12px var(--pink);
 }
-.preview.mode-default .preview-title::after{background:var(--cyan);box-shadow:0 0 8px rgba(33,247,255,.72)}
+.preview.mode-default .preview-title::after{background:none;color:var(--pink);box-shadow:none}
 .preview.mode-default .preview-sub{
   display:flex;
   justify-content:center;
@@ -604,7 +611,7 @@ th{
   border-radius:999px;
   color:var(--yellow);
   background:rgba(255,212,71,.10);
-  font-size:11px;
+  font-size:13px;
   text-shadow:none;
 }
 .preview.mode-default .shift-list{gap:7px;padding:0 1px}
@@ -616,10 +623,13 @@ th{
   box-shadow:inset 4px 0 0 var(--pink),0 0 12px rgba(255,47,154,.20);
 }
 .preview.mode-default .shift-card-inner{
-  grid-template-columns:54px minmax(0,1fr);
-  column-gap:10px;
+  grid-template-columns:64px minmax(0,1fr);
+  column-gap:12px;
 }
 .preview.mode-default .shift-avatar{
+  width:60px;
+  height:60px;
+  flex-basis:60px;
   border:2px solid var(--cyan);
   background:linear-gradient(145deg,#13273b,#2b1840);
   outline:1px solid rgba(255,47,154,.70);
@@ -632,11 +642,16 @@ th{
 }
 .preview.mode-default .shift-name{
   color:var(--name-color,#fff);
-  font-size:15px;
+  font-size:19px;
   line-height:1.12;
-  -webkit-text-stroke:.25px rgba(255,255,255,.82);
-  text-shadow:0 0 3px #fff,0 0 8px var(--name-color,#ff2f9a),0 0 15px var(--name-color,#ff2f9a),2px 0 var(--pink),-2px 0 var(--cyan);
+  -webkit-text-stroke:.15px rgba(255,255,255,.68);
+  text-shadow:0 0 2px #fff,0 0 5px var(--name-color,#ff2f9a),0 0 10px var(--name-color,#ff2f9a);
 }
+.preview.mode-default .shift-meta-line{display:flex;align-items:center;gap:6px;min-width:0;margin-top:5px;white-space:nowrap;color:#dfffff;font-size:13px;font-weight:900;text-shadow:0 0 7px rgba(33,247,255,.44)}
+.preview.mode-default .shift-meta-line .tag-wrap{flex:1 1 auto;display:flex;flex-wrap:nowrap;gap:3px;margin:0;min-width:0;overflow:hidden}
+.preview.mode-default .shift-meta-line .tag,.preview.mode-default .shift-meta-line .gold-tag{font-size:10px;padding:3px 5px;white-space:nowrap}
+.preview.mode-default .shift-time{white-space:nowrap}
+.preview.mode-default .shift-price{color:var(--yellow);white-space:nowrap;text-shadow:0 0 8px rgba(255,212,71,.5)}
 .preview.mode-default .time-price-line{
   color:#dfffff;
   font-size:12px;
@@ -721,7 +736,7 @@ th{
       <span class="count">出勤人数：<span id="shiftCount">0</span></span>
       <button class="soft" onclick="clearAll()">清空全部</button>
       <button class="soft" onclick="scrollToPreview()">定位截图区</button>
-      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">复制图片</button><button class="primary" onclick="sendShiftToTelegram()">📤 发送出勤表并同步TEL预约</button>
+      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">复制图片</button><button class="primary" onclick="sendShiftToTelegram()">📤 全面同步</button>
       <button class="soft" onclick="loadGirls()">刷新女孩表</button>
     </div>
   </div>
@@ -1125,6 +1140,15 @@ th{
     return normal || gold ? `<div class="tag-wrap">${gold}${normal}</div>` : "";
   }
 
+  function attendanceNameColor(shift){
+    const girl=getGirlByName(shift.girl)||{};
+    const text=[shift.girl,...(shift.tags||[]),...(shift.goldTags||[]),girl.tags,girl.remark,girl.remark2,girl.girl_type].filter(Boolean).join(" ");
+    if(/大美女|绝色|颜值系|女神系/.test(text)) return "#49bfff";
+    if(/服务系|服务/.test(text)) return "#ff9a4d";
+    if(/年纪小|少女|萝莉|嫩系|新人/.test(text)) return "#ff63b7";
+    return "#d999ff";
+  }
+
   function renderPreview(){
     const d = shiftDate.value || today;
     const rows = rowsForDate();
@@ -1134,12 +1158,11 @@ th{
     previewCount.textContent = rows.length;
     shiftCount.textContent = rows.length;
     if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
-    const nameColors=["#ff70b9","#72f5ff","#ffd447","#c890ff","#78ffad","#ff9b65","#ffffff","#ff667f"];
-    shiftList.innerHTML = rows.map((s,index)=>{
+    shiftList.innerHTML = rows.map(s=>{
       const p = getGirlPrice(s.girl);
-      const priceText = p > 0 ? `<span>${yen(p)}${previewMode === "custom" ? " /h" : "/h"}</span>` : `<span>¥0</span>`;
-      const nameColor=nameColors[index%nameColors.length];
-      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name" style="--name-color:${nameColor}">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
+      const priceText = p > 0 ? `${yen(p)}${previewMode === "custom" ? " /h" : "/h"}` : "¥0";
+      const nameColor=attendanceNameColor(s);
+      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name" style="--name-color:${nameColor}">${escapeHtml(s.girl)}</div><div class="shift-meta-line">${renderTags(s.tags,s.goldTags)}<span class="shift-time">${escapeHtml(displayTimeRange(s.start,s.end))}</span><span class="shift-price">${priceText}</span></div></div></div></div>`;
     }).join("");
   }
 
@@ -1249,14 +1272,16 @@ th{
   window.sendShiftToTelegram = async function(){
     const d=shiftDate.value||today;
     if(!rowsForDate().length){alert("当前日期还没有出勤数据");return;}
-    if(window.parent&&window.parent.beginBusy)window.parent.beginBusy("正在发送出勤表并同步TEL预约…");
+    if(window.parent&&window.parent.beginBusy)window.parent.beginBusy("正在全面同步 Telegram、TEL预约和官网…");
     try{
       applyPreviewStyle();
-      const canvas=await html2canvas(previewBox,{backgroundColor:null,scale:2.5,useCORS:true});
-      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:canvas.toDataURL('image/png')})});
+      const canvas=await html2canvas(previewBox,{backgroundColor:null,scale:4,useCORS:true,imageTimeout:20000});
+      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:canvas.toDataURL('image/png'),service_text:buildCopyText()})});
       const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
-      alert(`出勤表已发送到 ${result.chat_title||'Alice内部群'}，TEL预约已同步 ${result.synced||0} 位女孩。`);
+      const wp=result.wordpress||{};
+      const wpText=wp.synced?'官网“今日出勤”图片和文案已更新':`官网未更新：${wp.warning||'尚未配置'}`;
+      alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}\nTEL预约：${result.synced||0} 位女孩\n${wpText}`);
     }catch(e){console.error(e);alert(e.message||"发送失败，请稍后重试");}
     finally{if(window.parent&&window.parent.endBusy)window.parent.endBusy();}
   };
