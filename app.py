@@ -19,13 +19,16 @@ NEKO_BASE_URL=os.environ.get('ALICE_NEKO_BASE_URL','https://neko-miaomiao.com').
 ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rstrip('/')
 TOKYO_YY_BASE_URL=os.environ.get('TOKYO_YY_BASE_URL','https://tokyo-yy.com').rstrip('/')
 TOKYO_ALICE_SHOP_ID=os.environ.get('TOKYO_ALICE_SHOP_ID','\u7231\u4e3d\u4e1d\u5b66\u56ed')
-AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
+LEGACY_AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
+# Render 的程序目录会随部署重建；头像必须与 SQLite 一样放在持久磁盘。
+AVATAR_DIR=Path(os.environ.get('ALICE_AVATAR_DIR') or
+                (DB_PATH.parent/'girl_avatars' if str(DB_PATH).replace('\\','/').startswith('/var/data/') else LEGACY_AVATAR_DIR))
 LEGACY_GIRL_PRAISE_DIR=APP_DIR/'static'/'girl_praises'
 GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/'girl_praises'))
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v91_wordpress_visibility_fields_fix"
+APP_VERSION = "v92_avatar_persistence_multi_wp_images"
 
 @app.after_request
 def compress_large_json(response):
@@ -155,6 +158,7 @@ def _init_db_schema():
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职', enrollment TEXT DEFAULT '',
             take_home_per_hour INTEGER DEFAULT 10000, list_price INTEGER DEFAULT 15000, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
+            avatar_url TEXT DEFAULT '', avatar_source_url TEXT DEFAULT '', avatar_updated_at TEXT DEFAULT '',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS orders(
             id INTEGER PRIMARY KEY AUTOINCREMENT, order_date TEXT, service_time TEXT, hours REAL DEFAULT 1,
@@ -245,6 +249,12 @@ def _init_db_schema():
             c.execute("ALTER TABLE girls ADD COLUMN email TEXT DEFAULT ''")
         if 'enrollment' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN enrollment TEXT DEFAULT ''")
+        if 'avatar_url' not in girl_cols:
+            c.execute("ALTER TABLE girls ADD COLUMN avatar_url TEXT DEFAULT ''")
+        if 'avatar_source_url' not in girl_cols:
+            c.execute("ALTER TABLE girls ADD COLUMN avatar_source_url TEXT DEFAULT ''")
+        if 'avatar_updated_at' not in girl_cols:
+            c.execute("ALTER TABLE girls ADD COLUMN avatar_updated_at TEXT DEFAULT ''")
         order_cols = [r[1] for r in c.execute('PRAGMA table_info(orders)').fetchall()]
         if 'points_used' not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN points_used INTEGER DEFAULT 0")
@@ -1071,11 +1081,12 @@ def _wordpress_rest_nonce(edit_html):
             return html_unescape(match.group(1)).replace('\\/', '/')
     return ''
 
-def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes):
+def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes, page_index=0, page_count=1):
     nonce = _wordpress_rest_nonce(edit_html)
     if not nonce:
         return 0
-    filename = f'alice-attendance-{day}.png'
+    suffix = f'-{page_index + 1}' if page_count > 1 else ''
+    filename = f'alice-attendance-{day}{suffix}.png'
     req = Request(ALICE_BASE_URL + '/wp-json/wp/v2/media', data=image_bytes, method='POST', headers={
         'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{filename}"',
         'X-WP-Nonce': nonce, 'Referer': edit_url, 'Accept': 'application/json'})
@@ -1221,24 +1232,34 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key)
         if not gallery_name:
             raise ValueError('找不到旧版相册插件的图片字段名')
+        image_bytes_list = ([bytes(image_bytes)] if isinstance(image_bytes, (bytes, bytearray))
+                            else [bytes(item) for item in (image_bytes or []) if item])
+        if not image_bytes_list:
+            raise ValueError('没有可上传的今日出勤图片')
+        attachment_ids = []
         stage = '上传今日出勤图片'
         try:
-            attachment_id = _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes)
-            if not attachment_id:
-                stage = '读取官网媒体上传页'
-                media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
-                nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
-                if not nonce_match:
-                    raise ValueError('找不到官网图片上传授权码')
-                stage = '上传今日出勤图片'
-                upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
-                    ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
-                    ('_wpnonce', html_unescape(nonce_match.group(1)))
-                ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
-                upload_data = json.loads(upload_raw)
-                attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
-                if not upload_data.get('success') or not attachment_id:
-                    raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
+            for page_index, page_bytes in enumerate(image_bytes_list):
+                attachment_id = _wordpress_rest_upload_image(
+                    opener, edit_html, edit_url, day, page_bytes, page_index, len(image_bytes_list))
+                if not attachment_id:
+                    stage = '读取官网媒体上传页'
+                    media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
+                    nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
+                    if not nonce_match:
+                        raise ValueError('找不到官网图片上传授权码')
+                    suffix = f'-{page_index + 1}' if len(image_bytes_list) > 1 else ''
+                    filename = f'alice-attendance-{day}{suffix}.png'
+                    stage = '上传今日出勤图片'
+                    upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
+                        ('name', filename), ('action', 'upload-attachment'),
+                        ('_wpnonce', html_unescape(nonce_match.group(1)))
+                    ], filename, page_bytes, opener, edit_url)
+                    upload_data = json.loads(upload_raw)
+                    attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
+                    if not upload_data.get('success') or not attachment_id:
+                        raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
+                attachment_ids.append(attachment_id)
         except HTTPError as exc:
             detail = exc.read().decode('utf-8', 'replace').strip()[:300]
             raise ValueError(f'官网图片上传失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
@@ -1250,8 +1271,10 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         pairs.extend([
             ('action', 'editpost'), ('post_ID', str(post_id)),
             ('acf[field_5d253ca06ccc7]', str(service_text or '').strip()),
-            (gallery_name + '[]', str(attachment_id)), ('save', '更新'),
         ])
+        # 按生成顺序写入；第一张就是相册列表默认显示的图片。
+        pairs.extend((gallery_name + '[]', str(attachment_id)) for attachment_id in attachment_ids)
+        pairs.append(('save', '更新'))
         stage = '保存“今日出勤”图片和文案'
         req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
                       method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
@@ -1267,14 +1290,15 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         stage = '确认“今日出勤”相册已替换'
         verify_html, _ = opener_text(opener, edit_url + '&alice_verify=1', timeout=40)
         verified_ids = _wordpress_photo_gallery_attachment_ids(verify_html)
-        if verified_ids != [attachment_id]:
-            raise ValueError(f'旧版相册插件没有保存新图片（期望 {attachment_id}，实际 {verified_ids or "空"}）')
+        if verified_ids != attachment_ids:
+            raise ValueError(f'旧版相册插件没有保存新图片（期望 {attachment_ids}，实际 {verified_ids or "空"}）')
         stage = '同步女孩公开/私密状态'
         try:
             visibility = sync_alice_wordpress_girl_visibility(opener, attendance_names or [], all_girl_names or [])
         except Exception as exc:
             visibility = {'synced': False, 'warning': str(exc), 'matched': 0, 'published': 0, 'privated': 0}
-        return {'configured': True, 'synced': True, 'post_id': post_id, 'attachment_id': attachment_id,
+        return {'configured': True, 'synced': True, 'post_id': post_id,
+                'attachment_id': attachment_ids[0], 'attachment_ids': attachment_ids,
                 'visibility': visibility}
     except Exception as exc:
         warning = str(exc)
@@ -1547,6 +1571,21 @@ def avatar_file_for(girl_name, src_url, content_type=''):
     key = hashlib.sha1((girl_name + '|' + src_url).encode('utf-8')).hexdigest()[:16]
     return AVATAR_DIR / (key + ext)
 
+def avatar_local_path(avatar_url):
+    value = str(avatar_url or '')
+    if value.startswith('/girl_avatars/'):
+        return AVATAR_DIR / Path(value).name
+    if value.startswith('/static/girl_avatars/'):
+        return LEGACY_AVATAR_DIR / Path(value).name
+    return None
+
+@app.route('/girl_avatars/<path:filename>')
+def saved_girl_avatar(filename):
+    # 只允许 cache_avatar 生成的哈希文件名。
+    if not re.fullmatch(r'[0-9a-f]{16}\.(?:jpg|jpeg|png|webp|gif)', filename, re.I):
+        return Response('Not found', status=404)
+    return send_from_directory(str(AVATAR_DIR), filename)
+
 def cache_avatar(girl_name, neko_name, src_url, referer=None):
     if not src_url:
         return ''
@@ -1560,7 +1599,7 @@ def cache_avatar(girl_name, neko_name, src_url, referer=None):
     AVATAR_DIR.mkdir(parents=True, exist_ok=True)
     path = avatar_file_for(girl_name, src_url, content_type)
     path.write_bytes(data)
-    rel = '/static/girl_avatars/' + path.name
+    rel = '/girl_avatars/' + path.name
     with conn() as c:
         c.execute("""INSERT INTO girl_avatar_cache(girl_name,neko_name,avatar_url,source_url,updated_at)
                      VALUES(?,?,?,?,CURRENT_TIMESTAMP)
@@ -1568,6 +1607,9 @@ def cache_avatar(girl_name, neko_name, src_url, referer=None):
                      neko_name=excluded.neko_name, avatar_url=excluded.avatar_url,
                      source_url=excluded.source_url, updated_at=CURRENT_TIMESTAMP""",
                   (girl_name, neko_name, rel, src_url))
+        c.execute("""UPDATE girls SET avatar_url=?, avatar_source_url=?,
+                     avatar_updated_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+                     WHERE name=?""", (rel, src_url, girl_name))
     return rel
 
 def cached_neko_image(girl_name, neko_name, src_url):
@@ -1579,8 +1621,8 @@ def cached_neko_image(girl_name, neko_name, src_url):
         with conn() as c:
             row = c.execute("SELECT avatar_url,source_url FROM girl_avatar_cache WHERE girl_name=?", (girl_name,)).fetchone()
         if row and row['avatar_url'] and row['source_url'] == src_url:
-            local_path = APP_DIR / str(row['avatar_url']).lstrip('/').replace('/', os.sep)
-            if local_path.exists():
+            local_path = avatar_local_path(row['avatar_url'])
+            if local_path and local_path.exists():
                 return row['avatar_url']
     except Exception:
         pass
@@ -3923,9 +3965,13 @@ def api_girl_avatars():
     with conn() as c:
         if names:
             placeholders = ','.join('?' for _ in names)
-            data = rows(c.execute(f"SELECT * FROM girl_avatar_cache WHERE girl_name IN ({placeholders})", names).fetchall())
+            data = rows(c.execute(f"""SELECT g.name AS girl_name, COALESCE(NULLIF(g.girl_alias,''),g.name) AS neko_name,
+                g.avatar_url, g.avatar_source_url AS source_url, g.avatar_updated_at AS updated_at
+                FROM girls g WHERE g.name IN ({placeholders}) AND COALESCE(g.avatar_url,'')!=''""", names).fetchall())
         else:
-            data = rows(c.execute("SELECT * FROM girl_avatar_cache ORDER BY updated_at DESC").fetchall())
+            data = rows(c.execute("""SELECT g.name AS girl_name, COALESCE(NULLIF(g.girl_alias,''),g.name) AS neko_name,
+                g.avatar_url, g.avatar_source_url AS source_url, g.avatar_updated_at AS updated_at
+                FROM girls g WHERE COALESCE(g.avatar_url,'')!='' ORDER BY g.avatar_updated_at DESC""").fetchall())
     return jsonify(ok=True, avatars={r['girl_name']:r for r in data}, rows=data)
 
 @app.route('/api/alice_avatars/sync', methods=['POST'])

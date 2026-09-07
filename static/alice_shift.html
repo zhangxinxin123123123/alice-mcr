@@ -981,7 +981,7 @@ th{
       if(!options.silent || ok){
         avatarStatus.textContent = `东京YY头像已更新 ${ok} 个，未匹配 ${miss} 个${err ? "，失败 " + err + " 个" : ""}`;
       }
-      return ok > 0 || miss === 0;
+      return data;
     }catch(e){
       console.error(e);
       if(!options.silent){
@@ -1300,6 +1300,15 @@ th{
     return html2canvas(page,{backgroundColor:null,scale,useCORS:true,imageTimeout:20000});
   }
 
+  async function waitForShiftAvatarImages(){
+    const images=previewPages().flatMap(page=>Array.from(page.querySelectorAll('img')));
+    await Promise.all(images.map(img=>{
+      if(img.complete && img.naturalWidth>0) return Promise.resolve();
+      if(typeof img.decode==='function') return img.decode().catch(()=>{});
+      return new Promise(resolve=>{img.addEventListener('load',resolve,{once:true});img.addEventListener('error',resolve,{once:true});});
+    }));
+  }
+
   window.copyShiftPage = async function(index){
     try{
       const canvas = await renderShiftPageCanvas(index,3);
@@ -1330,11 +1339,16 @@ th{
     if(!rowsForDate().length){alert("当前日期还没有出勤数据");return;}
     if(window.parent&&window.parent.beginBusy)window.parent.beginBusy("正在全面同步 Telegram、TEL预约和官网…");
     try{
+      avatarStatus.textContent="全面同步第 1 步：正在从东京YY更新并保存头像…";
+      const avatarResult=await syncAliceAvatars({silent:true});
+      if(!avatarResult) throw new Error("东京YY头像更新失败，本次全面同步已停止，请稍后重试");
+      await loadGirlAvatars();
+      render();
+      await waitForShiftAvatarImages();
       const canvases=[];
       for(let index=0;index<previewPages().length;index++) canvases.push(await renderShiftPageCanvas(index,3));
       const imageDataList=canvases.map(canvas=>canvas.toDataURL('image/png'));
-      const wordpressCanvas=await renderShiftPageCanvas(0,2);
-      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data_list:imageDataList,wordpress_image_data:wordpressCanvas.toDataURL('image/png'),service_text:buildCopyText()})});
+      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data_list:imageDataList,service_text:buildCopyText(),avatar_sync:{missing:avatarResult.missing||[],errors:avatarResult.errors||[]}})});
       const rawResult=await r.text();
       let result;
       try{result=JSON.parse(rawResult);}catch(_e){result={ok:false,error:`服务器返回异常（HTTP ${r.status}）`};}
@@ -1346,7 +1360,9 @@ th{
         : (wp.synced?`\n官网女孩状态未同步：${visibility.warning||((visibility.failed||[])[0]?.error)||'请检查女孩名称'}`:'');
       const unmatched=(visibility.unmatched_attendance||[]).length?`\n官网未匹配出勤女孩：${visibility.unmatched_attendance.join('、')}`:'';
       const wpText=wp.synced?`官网“今日出勤”图片和文案已更新${visibilityText}${unmatched}`:`官网未更新：${wp.warning||'尚未配置'}`;
-      alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}（${imageDataList.length} 张图）\nTEL预约：${result.synced||0} 位女孩\n${wpText}`);
+      const avatarWarnings=[...(avatarResult.missing||[]),...(avatarResult.errors||[]).map(x=>x.girl_name)].filter(Boolean);
+      const avatarText=avatarWarnings.length?`\nYY头像未识别：${avatarWarnings.join('、')}（已沿用女孩表已保存头像）`:'';
+      alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}（${imageDataList.length} 张图）\nTEL预约：${result.synced||0} 位女孩\n${wpText}${avatarText}`);
     }catch(e){console.error(e);alert(e.message||"发送失败，请稍后重试");}
     finally{if(window.parent&&window.parent.endBusy)window.parent.endBusy();}
   };
