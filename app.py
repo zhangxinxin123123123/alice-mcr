@@ -31,9 +31,43 @@ USERS = {
     "admin": {"password": "admin123", "role": "admin", "label": "管理员"},
     "user": {"password": "user123", "role": "user", "label": "普通用户"},
 }
+SYSTEM_MODULES = [
+    'home','orders','customers','girls','settlement','quickLinks','importer','telegramBooking',
+    'chainReserve','pureShift','advanceReserve','rooms','enums','stats','debug','loginAudit'
+]
+ROLE_DEFAULT_PERMISSIONS = {
+    'boss': SYSTEM_MODULES,
+    'admin': [x for x in SYSTEM_MODULES if x not in ('home','loginAudit')],
+    'user': [x for x in SYSTEM_MODULES if x not in ('home','settlement','stats','loginAudit')],
+}
 ACTIVE_SESSIONS = {}
 LAST_FULL_MAINTENANCE_DAY = None
 PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
+
+def password_hash(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac('sha256', str(password or '').encode(), salt.encode(), 180000).hex()
+    return f"pbkdf2_sha256${salt}${digest}"
+
+def password_matches(password, encoded):
+    try:
+        scheme, salt, expected = str(encoded or '').split('$', 2)
+        if scheme != 'pbkdf2_sha256':
+            return False
+        actual = password_hash(password, salt).rsplit('$', 1)[-1]
+        return secrets.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+def normalize_permissions(value, role='user'):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            value = value.split(',')
+    if not isinstance(value, (list, tuple, set)):
+        value = ROLE_DEFAULT_PERMISSIONS.get(role, [])
+    return [key for key in SYSTEM_MODULES if key in set(str(x) for x in value)]
 
 @app.errorhandler(Exception)
 def api_json_error(e):
@@ -74,6 +108,26 @@ def init_db():
             source TEXT DEFAULT '', contact TEXT DEFAULT '', grade TEXT DEFAULT '', tags TEXT DEFAULT '', member_level TEXT DEFAULT '',
             remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', customer_type_locked INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS system_users(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user', label TEXT DEFAULT '', permissions TEXT DEFAULT '[]', enabled INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        if not c.execute("SELECT 1 FROM system_users LIMIT 1").fetchone():
+            seed_users = []
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_users'").fetchone():
+                seed_users = [dict(x) for x in c.execute("SELECT username,password,role,label,is_active FROM app_users ORDER BY rowid").fetchall()]
+            if not seed_users:
+                seed_users = [dict(username=username, password=info.get('password'), role=info.get('role'),
+                                   label=info.get('label'), is_active=1) for username, info in USERS.items()]
+            for info in seed_users:
+                username = str(info.get('username') or '').strip()
+                role = info.get('role') or 'user'
+                if not username or role not in ROLE_DEFAULT_PERMISSIONS:
+                    continue
+                c.execute("""INSERT INTO system_users(username,password_hash,role,label,permissions,enabled)
+                             VALUES(?,?,?,?,?,?)""", (username, password_hash(info.get('password')), role,
+                             info.get('label') or username, json.dumps(ROLE_DEFAULT_PERMISSIONS.get(role, []), ensure_ascii=False),
+                             1 if info.get('is_active', 1) else 0))
         c.execute("""CREATE TABLE IF NOT EXISTS girls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, girl_alias TEXT DEFAULT '', girl_type TEXT DEFAULT '普通', girl_status TEXT DEFAULT '在职', enrollment TEXT DEFAULT '',
             take_home_per_hour INTEGER DEFAULT 10000, list_price INTEGER DEFAULT 15000, contact TEXT DEFAULT '', tags TEXT DEFAULT '',
@@ -196,10 +250,36 @@ def init_db():
         traceback.print_exc()
 
 def current_role():
-    return request.headers.get('X-Alice-Role') or request.args.get('role') or ''
+    info = ACTIVE_SESSIONS.get(current_session_token()) or {}
+    return info.get('role') or ''
 
 def current_session_token():
     return request.headers.get('X-Alice-Session') or request.args.get('session_token') or ''
+
+def current_session_info():
+    return ACTIVE_SESSIONS.get(current_session_token()) or {}
+
+def required_module_for_api(path):
+    if path == '/api/telegram/report-photo':
+        kind = str((request.get_json(silent=True) or {}).get('kind') or '')
+        return 'settlement' if kind == 'settlement' else 'pureShift'
+    rules = [
+        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/telegram/', 'telegramBooking'),
+        ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
+        ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
+        ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
+        ('/api/pure_shifts', 'pureShift'), ('/api/schedules', 'pureShift'),
+        ('/api/room', 'rooms'), ('/api/hotel_room', 'rooms'), ('/api/delete_room', 'rooms'),
+        ('/api/enums', 'enums'), ('/api/quick_links', 'quickLinks'),
+        ('/api/customer_accounts', 'advanceReserve'), ('/api/customer_reservations', 'advanceReserve'),
+    ]
+    if path.startswith('/api/delete/'):
+        table = path.split('/')[3] if len(path.split('/')) > 3 else ''
+        return {'orders':'orders','customers':'customers','girls':'girls','recharges':'customers','points':'customers'}.get(table)
+    for prefix, module in rules:
+        if path.startswith(prefix):
+            return module
+    return None
 
 @app.before_request
 def require_login_for_api():
@@ -207,26 +287,109 @@ def require_login_for_api():
     if path.startswith('/static/') or path in PUBLIC_PATHS:
         return None
     if path.startswith('/api/'):
-        role = current_role()
+        session = current_session_info()
+        role = session.get('role') or ''
         if role not in ('boss','admin','user'):
             return jsonify(ok=False, error='请先登录'), 401
-        if not current_session_token():
+        if not current_session_token() or not session:
             return jsonify(ok=False, error='登录已失效，请重新登录'), 401
-        if role == 'user' and (path.startswith('/api/settlements') or path == '/api/orders/bulk_settle'):
-            return jsonify(ok=False, error='普通用户不能查看金额结算'), 403
+        module = required_module_for_api(path)
+        if role != 'boss' and module and module not in session.get('permissions', []):
+            return jsonify(ok=False, error='当前账号没有这个模块的权限'), 403
     return None
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
+    init_db()
     d = request.json or {}
     u = str(d.get('username') or '').strip()
     p = str(d.get('password') or '').strip()
-    info = USERS.get(u)
-    if info and info['password'] == p:
+    with conn() as c:
+        row = c.execute("SELECT * FROM system_users WHERE username=? AND enabled=1", (u,)).fetchone()
+    info = dict(row) if row else None
+    if info and password_matches(p, info.get('password_hash')):
+        permissions = normalize_permissions(info.get('permissions'), info.get('role'))
         token = secrets.token_urlsafe(24)
-        ACTIVE_SESSIONS[token] = {'username': u, 'role': info['role']}
-        return jsonify(ok=True, username=u, role=info['role'], label=info['label'], session_token=token)
+        ACTIVE_SESSIONS[token] = {'username': u, 'role': info['role'], 'permissions': permissions}
+        return jsonify(ok=True, username=u, role=info['role'], label=info['label'], permissions=permissions, session_token=token)
     return jsonify(ok=False, error='用户名或密码错误'), 401
+
+@app.route('/api/system/users', methods=['GET', 'POST'])
+def api_system_users():
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以管理登录权限'), 403
+    init_db()
+    actor = current_session_info().get('username') or ''
+    if request.method == 'GET':
+        with conn() as c:
+            user_rows = rows(c.execute("""SELECT id,username,role,label,permissions,enabled,created_at,updated_at
+                                         FROM system_users ORDER BY CASE role WHEN 'boss' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,id""").fetchall())
+        active_counts = {}
+        for session in ACTIVE_SESSIONS.values():
+            name = session.get('username') or ''
+            active_counts[name] = active_counts.get(name, 0) + 1
+        try:
+            with conn() as c:
+                db_active = c.execute("""SELECT username,COUNT(*) AS n FROM login_sessions
+                                         WHERE status='active' AND COALESCE(logout_at,'')='' GROUP BY username""").fetchall()
+            for row in db_active:
+                active_counts[row['username']] = max(active_counts.get(row['username'], 0), int(row['n'] or 0))
+        except sqlite3.OperationalError:
+            pass
+        for item in user_rows:
+            item['permissions'] = normalize_permissions(item.get('permissions'), item.get('role'))
+            item['active_sessions'] = active_counts.get(item.get('username'), 0)
+        return jsonify(ok=True, users=user_rows, modules=SYSTEM_MODULES)
+    d = request.json or {}
+    action = str(d.get('action') or 'save')
+    uid = int(d.get('id') or 0)
+    with conn() as c:
+        if action == 'delete':
+            row = c.execute("SELECT * FROM system_users WHERE id=?", (uid,)).fetchone()
+            if not row:
+                return jsonify(ok=False, error='账号不存在'), 404
+            if row['username'] == actor:
+                return jsonify(ok=False, error='不能删除当前正在使用的老板账号'), 400
+            if row['role'] == 'boss' and c.execute("SELECT COUNT(*) FROM system_users WHERE role='boss' AND enabled=1").fetchone()[0] <= 1:
+                return jsonify(ok=False, error='系统必须至少保留一个启用的老板账号'), 400
+            c.execute("DELETE FROM system_users WHERE id=?", (uid,))
+            for token, session in list(ACTIVE_SESSIONS.items()):
+                if session.get('username') == row['username']:
+                    ACTIVE_SESSIONS.pop(token, None)
+            return jsonify(ok=True)
+        username = str(d.get('username') or '').strip()
+        label = str(d.get('label') or username).strip()
+        role = str(d.get('role') or 'user').strip()
+        enabled = 1 if d.get('enabled', True) else 0
+        if not username or role not in ROLE_DEFAULT_PERMISSIONS:
+            return jsonify(ok=False, error='账号名或角色不正确'), 400
+        permissions = SYSTEM_MODULES if role == 'boss' else normalize_permissions(d.get('permissions'), role)
+        existing = c.execute("SELECT * FROM system_users WHERE id=?", (uid,)).fetchone() if uid else None
+        if existing and existing['username'] == actor and (role != 'boss' or not enabled):
+            return jsonify(ok=False, error='不能停用当前老板账号或取消自己的老板角色'), 400
+        duplicate = c.execute("SELECT id FROM system_users WHERE username=? AND id<>?", (username, uid or 0)).fetchone()
+        if duplicate:
+            return jsonify(ok=False, error='这个登录账号已经存在'), 400
+        password = str(d.get('password') or '')
+        if existing:
+            encoded = password_hash(password) if password else existing['password_hash']
+            c.execute("""UPDATE system_users SET username=?,password_hash=?,role=?,label=?,permissions=?,enabled=?,updated_at=CURRENT_TIMESTAMP
+                         WHERE id=?""", (username, encoded, role, label, json.dumps(permissions, ensure_ascii=False), enabled, uid))
+            old_username = existing['username']
+        else:
+            if len(password) < 4:
+                return jsonify(ok=False, error='新账号密码至少需要4位'), 400
+            c.execute("""INSERT INTO system_users(username,password_hash,role,label,permissions,enabled)
+                         VALUES(?,?,?,?,?,?)""", (username, password_hash(password), role, label,
+                         json.dumps(permissions, ensure_ascii=False), enabled))
+            old_username = username
+        for token, session in list(ACTIVE_SESSIONS.items()):
+            if session.get('username') == old_username:
+                if not enabled:
+                    ACTIVE_SESSIONS.pop(token, None)
+                else:
+                    session.update(username=username, role=role, permissions=permissions)
+    return jsonify(ok=True)
 
 
 def conn():
@@ -1541,7 +1704,7 @@ def all_data():
             expire_customer_points(c, None)
             update_customer_type_by_history(c, None)
             LAST_FULL_MAINTENANCE_DAY = maintenance_day
-        return jsonify({
+        payload = {
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
             'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type,
@@ -1565,7 +1728,27 @@ def all_data():
                                                     COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
                                              LEFT JOIN girls g ON g.id=gp.girl_id
-                                             ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())})
+                                             ORDER BY gp.created_at DESC, gp.id DESC''').fetchall())}
+        session = current_session_info()
+        if session.get('role') != 'boss':
+            allowed = set(session.get('permissions') or [])
+            if 'customers' not in allowed:
+                payload['customers'] = []; payload['recharges'] = []; payload['points'] = []
+            if not ({'girls','pureShift','telegramBooking','chainReserve','rooms'} & allowed):
+                payload['girls'] = []; payload['girl_praises'] = []
+            if not ({'orders','home','stats','settlement','chainReserve'} & allowed):
+                payload['orders'] = []
+            if 'pureShift' not in allowed:
+                payload['schedules'] = []
+            if 'rooms' not in allowed:
+                payload['hotel_rooms'] = []; payload['room_assignments'] = []
+            if 'advanceReserve' not in allowed:
+                payload['customer_accounts'] = []; payload['customer_reservations'] = []
+            if 'quickLinks' not in allowed:
+                payload['quick_links'] = []
+            if 'enums' not in allowed:
+                payload['enums'] = []
+        return jsonify(payload)
 @app.route('/api/customers',methods=['POST'])
 def customers():
     d=request.json or {}
@@ -2569,7 +2752,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v73_unified_mobile_ui",
+            "version": "v74_permissions_report_send",
             "port": 5057,
         })
 
@@ -2588,7 +2771,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v73_unified_mobile_ui",
+            "version": "v74_permissions_report_send",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

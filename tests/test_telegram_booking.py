@@ -569,6 +569,40 @@ class TelegramBookingFlowTest(unittest.TestCase):
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("%E6%9A%82%E5%81%9C%E8%87%AA%E5%8A%A9%E9%A2%84%E7%BA%A6" in body for body in sent_bodies))
 
+    def test_boss_can_create_account_with_module_permissions(self):
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        self.assertEqual(boss.status_code, 200)
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"]}
+        created = self.client.post("/api/system/users", headers=headers, json={
+            "username": "permission_test", "password": "test1234", "label": "权限测试",
+            "role": "user", "enabled": True, "permissions": ["pureShift"]
+        })
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        login = self.client.post("/api/login", json={"username": "permission_test", "password": "test1234"})
+        self.assertEqual(login.json["permissions"], ["pureShift"])
+        user_headers = {"X-Alice-Role": "user", "X-Alice-Session": login.json["session_token"]}
+        allowed = self.client.get(f"/api/pure_shifts?date={self.day}", headers=user_headers)
+        denied = self.client.post("/api/customers", headers=user_headers, json={"name": "不应保存"})
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(denied.status_code, 403)
+        listing = self.client.get("/api/system/users", headers=headers).json["users"]
+        uid = next(x["id"] for x in listing if x["username"] == "permission_test")
+        self.client.post("/api/system/users", headers=headers, json={"action": "delete", "id": uid})
+
+    def test_pure_shift_report_photo_sends_and_syncs_daily_girls(self):
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_id','-90000') ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value")
+            c.execute("INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_title','Alice内部群') ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value")
+        response = self.client.post("/api/telegram/report-photo", headers=headers, json={
+            "kind": "pure_shift", "date": self.day,
+            "image_data": "data:image/png;base64,ZmFrZS1wbmc="
+        })
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["synced"], 2)
+        self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
+
 
 if __name__ == "__main__":
     unittest.main()

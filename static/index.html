@@ -5,6 +5,7 @@
 <title>爱丽丝学院管理系统</title>
 <script defer src="https://cdn.jsdelivr.net/npm/chart.js">
 </script>
+<script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
 :root{--pink:#ff8fc7;--pink2:#ffd6ea;--lav:#d9c8ff;--ink:#5d4566;--line:#f0c6dc;--danger:#ff6e92}
 *{box-sizing:border-box}html{min-width:0;overflow-x:hidden;-webkit-text-size-adjust:100%}body{margin:0;min-width:0;overflow-x:hidden;font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff)}
@@ -39,6 +40,8 @@ button{touch-action:manipulation}button.primary,button.soft,button.danger{min-he
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 .busy-overlay{position:fixed;inset:0;z-index:9998;display:grid;place-items:center;padding:24px;background:rgba(255,247,251,.72);backdrop-filter:blur(5px);opacity:0;visibility:hidden;transition:opacity .16s ease,visibility .16s ease}.busy-overlay.on{opacity:1;visibility:visible}.busy-card{min-width:min(290px,88vw);padding:22px;border:2px solid var(--line);border-radius:22px;background:rgba(255,255,255,.97);box-shadow:0 18px 50px #b65b8f35;text-align:center}.busy-spinner{display:block;width:42px;height:42px;margin:0 auto 12px;border:4px solid var(--pink2);border-top-color:#e75ca2;border-radius:50%;animation:busySpin .75s linear infinite}.busy-card strong,.busy-card small{display:block}.busy-card small{margin-top:7px;opacity:.72}.busy-slow{display:none}.busy-overlay.slow .busy-slow{display:block}@keyframes busySpin{to{transform:rotate(360deg)}}
+.permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0}.permission-check{display:flex;align-items:center;gap:8px;padding:9px 11px;border:2px solid var(--line);border-radius:14px;background:#fffafd;font-weight:800}.permission-check input{width:18px;height:18px}.account-disabled{opacity:.55}
+.telegram-report-capture{position:fixed;left:-10000px;top:0;width:760px;padding:28px;color:#fff;background:linear-gradient(145deg,#090511,#1a0820 52%,#061720);border:3px solid #ff2f9a;font-family:"Yu Gothic UI","Microsoft YaHei",sans-serif}.telegram-report-capture h2{margin:0 0 16px;padding:12px;text-align:center;color:#fff;border:1px solid #21f7ff;background:#24102c;text-shadow:2px 0 #21f7ff,-2px 0 #ff2f9a}.telegram-report-capture table{min-width:0;background:#0b1020}.telegram-report-capture th{background:#240b28;color:#21f7ff}.telegram-report-capture td{color:#fff}.telegram-report-capture .report-total{margin-top:14px;text-align:right;color:#ffd447;font-size:20px;font-weight:900}
 
 body.login-active{min-height:100vh;overflow:hidden;background:#fff2f8}
 body.login-active .app,body.login-active .modal{display:none!important}
@@ -66,14 +69,6 @@ body:not(.login-active) .login-mask{display:none!important}
 @keyframes loginPanelIn{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:760px){.login-mask{padding:18px}.login-stage::before{inset:10px;border-radius:28px}.login-bg-frame{width:min(92vw,520px);aspect-ratio:4/5;border-width:8px;border-radius:30px}.login-bg{inset:8px;border-radius:21px;background-position:center}.login-deco{width:42px;height:42px;font-size:19px}.login-deco.a{left:6vw;top:11vh}.login-deco.b{right:6vw;top:12vh}.login-deco.c{left:7vw;bottom:13vh}.login-deco.d{right:7vw;bottom:12vh}.login-brand{padding:14px 16px}.login-brand h1{font-size:30px}.login-box{padding:20px;border-radius:22px}}
 .missing-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#ffe2e8;color:#d6003d;font-weight:900;border:1px solid #ffb5c4}.done-day{display:inline-block;margin:3px;padding:5px 8px;border-radius:999px;background:#e9fff2;color:#11823b;font-weight:900;border:1px solid #bff0d0}
-body.role-user .user-hide{display:none!important}
-body.role-user .stat-chart-only{display:none!important}
-body.role-user #stats{display:none!important}
-body.role-user #settlement{display:none!important}
-body.role-user #loginAudit{display:none!important}
-body.role-admin .admin-hide{display:none!important}
-body.role-admin #home{display:none!important}
-body.role-admin #loginAudit{display:none!important}
 body:not(.role-boss) .boss-only{display:none!important}
 .tg-flow-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(280px,1.3fr) minmax(230px,.8fr);gap:16px;align-items:start}.tg-flow-map{display:grid;gap:7px}.tg-flow-node{border:2px solid var(--line);background:#fffafd;color:var(--ink);font-weight:900}.tg-flow-node.on{border-color:var(--pink);background:#fff0f7;color:#e75ca2}.tg-flow-arrow{text-align:center;color:#e75ca2;font-weight:900}.tg-phone{background:#24252a;border:8px solid #111;border-radius:30px;padding:18px 12px;min-height:390px;color:#fff}.tg-phone-title{text-align:center;font-weight:900;padding-bottom:14px}.tg-preview-bubble{background:#35363c;border-radius:14px;padding:12px;line-height:1.5;margin-bottom:12px;white-space:normal}.tg-preview-buttons{display:grid;gap:5px}.tg-preview-buttons span{display:block;text-align:center;background:#4f8f50;border-radius:9px;padding:9px;font-weight:800}@media(max-width:900px){.tg-flow-layout{grid-template-columns:1fr}.tg-phone{max-width:340px}}
 .tg-flow-save{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:2px dashed var(--line)}.tg-flow-save .primary{min-width:180px}.tg-flow-save-hint{font-size:12px;color:var(--ink);opacity:.75}
@@ -136,24 +131,25 @@ body:not(.role-boss) .boss-only{display:none!important}
 <aside class="side">
  <a class="logo logo-link" href="https://ailisi99.com/" target="_blank" rel="noopener noreferrer" title="打开爱丽丝官网"><h1>爱丽丝学院管理系统</h1><p>订单 · 客户 · 女孩 · TEL预约</p></a>
  <div class="nav">
-  <button class="on user-hide admin-hide" onclick="show('home',this)">🏫 学院总览</button>
-  <button class="admin-only" onclick="show('orders',this)">🧾 订单/预约</button>
-  <button class="admin-only" onclick="show('customers',this)">🐰 客户表</button>
-  <button class="admin-only" onclick="show('girls',this)">🎀 女孩表</button>
-  <button class="admin-only user-hide" onclick="show('settlement',this)">💴 金额结算</button>
-  <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
-  <button onclick="show('importer',this)">📥 接龙导入</button>
-  <button class="admin-only" onclick="show('telegramBooking',this)">✈️ TEL预约</button>
-  <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
-  <button class="admin-only" onclick="show('pureShift',this)">📋 纯出勤表</button>
-  <details class="nav-more admin-only"><summary>🧰 低频功能</summary>
-   <button onclick="show('advanceReserve',this)">📅 提前预约表</button>
-   <button onclick="show('rooms',this)">🏨 房间安排</button>
-   <button onclick="show('enums',this)">⚙️ 枚举类型</button>
-   <button onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
+  <button class="on" data-module="home" onclick="show('home',this)">🏫 学院总览</button>
+  <button data-module="orders" onclick="show('orders',this)">🧾 订单/预约</button>
+  <button data-module="customers" onclick="show('customers',this)">🐰 客户表</button>
+  <button data-module="girls" onclick="show('girls',this)">🎀 女孩表</button>
+  <button data-module="settlement" onclick="show('settlement',this)">💴 金额结算</button>
+  <button data-module="quickLinks" onclick="show('quickLinks',this)">🔗 链接跳转</button>
+  <button data-module="importer" onclick="show('importer',this)">📥 接龙导入</button>
+  <button data-module="telegramBooking" onclick="show('telegramBooking',this)">✈️ TEL预约</button>
+  <button data-module="chainReserve" onclick="show('chainReserve',this)">🧩 接龙预约</button>
+  <button data-module="pureShift" onclick="show('pureShift',this)">📋 纯出勤表</button>
+  <button data-module="stats" onclick="show('stats',this)">🥧 收益图表</button>
+  <button data-module="debug" onclick="show('debug',this)">🩺 数据诊断</button>
+  <button id="loginAuditNav" data-module="loginAudit" onclick="show('loginAudit',this)">🔐 登录检测</button>
+  <details class="nav-more" data-module-group="lowFrequency"><summary>🧰 低频功能</summary>
+   <button data-module="advanceReserve" onclick="show('advanceReserve',this)">📅 提前预约表</button>
+   <button data-module="rooms" onclick="show('rooms',this)">🏨 房间安排</button>
+   <button data-module="enums" onclick="show('enums',this)">⚙️ 枚举类型</button>
+   <button data-module="pureShift" onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
   </details>
-  <button class="user-hide" onclick="show('stats',this)">🥧 收益图表</button>
-  <button class="admin-only" onclick="show('debug',this)">🩺 数据诊断</button>
  </div>
  <p class="note">统一管理订单、客户、女孩、接龙、出勤与 TEL 预约。<br>数据库会自动安全读取。</p>
 </aside>
@@ -187,10 +183,11 @@ body:not(.role-boss) .boss-only{display:none!important}
   <div id="girlsTable"></div></div>
  </section>
 
- <section id="settlement" class="panel"><div class="card"><h2>金额结算</h2>
-  <p class="note">按女孩汇总所有未结算订单。主行显示多日未结算合计；点“展开”可查看不同日期的未结算明细，勾选签收后再结算。</p>
-  <div class="form"><input id="settleGirlQ" placeholder="筛选女孩"><button class="soft" onclick="clearSettlementPick()">清空签收</button><button class="primary" onclick="settleAllSettlement()">结算所有</button></div>
-  <div id="settlementTable"></div></div>
+ <section id="settlement" class="panel"><div class="card" id="settlePatchRoot"><div class="card-title-row"><h2>金额结算</h2><button class="primary" onclick="sendSettlementReport()">📤 发送今日结算截图</button></div>
+  <p class="note">按通报日期汇总未结算订单。勾选签收后变绿色；超过三天未结算会闪烁红色；已结算订单不会再计入。</p>
+  <div class="form"><input id="settleReportDate" type="date" onchange="renderSettlement()"><input id="settleGirlQ" placeholder="筛选女孩"><button class="primary" onclick="window.saveSettlementReports()">保存应收金额</button><button class="primary" onclick="window.sendDailySettlementReport()">当日结算通报</button><button class="soft" onclick="window.clearSettlementPick()">清空签收</button><button class="primary" onclick="window.settleAllSettlement()">结算所有</button></div>
+  <div class="form settle-smtp-form"><input id="settleSmtpHost" placeholder="SMTP服务器，如 smtp.gmail.com"><input id="settleSmtpPort" placeholder="端口 587/465" value="587"><input id="settleSmtpUser" placeholder="邮箱账号"><input id="settleSmtpFrom" placeholder="发件邮箱，不填用账号"><input id="settleSmtpPass" type="password" placeholder="邮箱授权码/密码"><span class="note">临时发信参数，只随本次通报发送，不保存到服务器。</span></div>
+  <div id="settlementTable"></div><div id="settleAllSummary"></div></div>
  </section>
 
  <section id="quickLinks" class="panel"><div class="card"><h2>链接跳转</h2>
@@ -386,6 +383,21 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="debug" class="panel"><div class="card"><h2>数据诊断</h2><button class="primary" onclick="loadAll()">重新读取</button><pre id="debugText" style="white-space:pre-wrap;background:#fff0f7;border-radius:16px;padding:14px"></pre></div></section>
+
+ <section id="loginAudit" class="panel">
+  <div class="card"><div class="card-title-row"><h2>登录记录</h2><button class="soft" onclick="loadLoginAuditRecords()">刷新</button></div>
+   <div class="form"><input id="loginAuditDate" type="date" onchange="loadLoginAuditRecords()"><button class="soft" onclick="loginAuditDate.value=todayStr;loadLoginAuditRecords()">今天</button></div>
+   <div id="loginAuditSummary" class="note"></div><div id="loginAuditRecords"></div>
+  </div>
+  <div class="card"><div class="card-title-row"><h2>登录检测与账号权限</h2><button class="soft" onclick="clearSystemUserForm()">＋ 新增账号</button></div>
+   <p class="note">老板可以为每个登录账号勾选能够看到和操作的模块。修改权限会同步到该账号当前登录；停用或删除后会立即退出。</p>
+   <div class="form"><input id="sysUserId" type="hidden"><input id="sysUsername" placeholder="登录账号"><input id="sysLabel" placeholder="显示名称"><input id="sysPassword" type="password" placeholder="密码（编辑时留空表示不修改）"><select id="sysRole" onchange="applyRolePermissionPreset()"><option value="user">普通用户</option><option value="admin">管理员</option><option value="boss">老板</option></select><select id="sysEnabled"><option value="1">账号启用</option><option value="0">账号停用</option></select></div>
+   <div id="systemPermissionGrid" class="permission-grid"></div>
+   <button class="primary" onclick="saveSystemUser()">保存账号和权限</button>
+   <button class="soft" onclick="clearSystemUserForm()">清空</button>
+  </div>
+  <div class="card"><h2>现有账号</h2><div id="systemUsersTable"></div></div>
+ </section>
 </main>
 </div>
 
@@ -472,12 +484,10 @@ function armLoginCueFallback(){
   window.addEventListener('pointerdown',retry,{once:true});
   window.addEventListener('keydown',retry,{once:true});
 }
-function roleBlockedPage(id){
-  const role=auth&&auth.role;
-  if(role==='user')return id==='home'||id==='stats'||id==='settlement'||id==='loginAudit';
-  if(role==='admin')return id==='home'||id==='loginAudit';
-  return false;
-}
+const SYSTEM_MODULE_LABELS={home:'学院总览',orders:'订单/预约',customers:'客户表',girls:'女孩表',settlement:'金额结算',quickLinks:'链接跳转',importer:'接龙导入',telegramBooking:'TEL预约',chainReserve:'接龙预约',pureShift:'纯出勤表',advanceReserve:'提前预约表',rooms:'房间安排',enums:'枚举类型',stats:'收益图表',debug:'数据诊断',loginAudit:'登录检测'};
+const ROLE_PERMISSION_PRESETS={boss:Object.keys(SYSTEM_MODULE_LABELS),admin:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','loginAudit'].includes(x)),user:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','settlement','stats','loginAudit'].includes(x))};
+function canAccessModule(id){if(id==='girlPraiseFolder')id='girls';return !!auth&&(auth.role==='boss'||(auth.permissions||ROLE_PERMISSION_PRESETS[auth.role]||[]).includes(id));}
+function roleBlockedPage(id){return !canAccessModule(id);}
 function clearAuthAndShowLogin(message){
   authVerified=false;
   auth=null;
@@ -487,7 +497,7 @@ function clearAuthAndShowLogin(message){
   document.body.classList.remove('role-user','role-admin','role-boss');
   if(window.roleBadge)roleBadge.textContent='未登录';
 }
-const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
+const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr; if(window.settleReportDate) settleReportDate.value=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
 const moneyInput=v=>{v=String(v||"").replace(/[（）()¥円,]/g,"").trim();if(!v)return 0;if(v.includes("万"))return Math.round(parseFloat(v)*10000);let n=parseFloat(v)||0;return n>0&&n<100?Math.round(n*10000):Math.round(n);}
 let busyCount=0,busyShowTimer=null,busySlowTimer=null;
@@ -532,10 +542,13 @@ function applyRole(){
   document.body.classList.toggle('role-admin', auth.role==='admin');
   document.body.classList.toggle('role-boss', auth.role==='boss');
   roleBadge.textContent = auth.role==='boss' ? '老板模式' : (auth.role==='admin' ? '管理员模式' : '普通用户模式');
+  document.querySelectorAll('.nav [data-module]').forEach(el=>{el.hidden=!canAccessModule(el.dataset.module)});
+  const low=document.querySelector('[data-module-group="lowFrequency"]');
+  if(low)low.hidden=![...low.querySelectorAll('[data-module]')].some(el=>!el.hidden);
   const current=document.querySelector('.panel.on');
   if(current && roleBlockedPage(current.id)){
-    const ordersBtn=[...document.querySelectorAll('.nav button')].find(b=>b.textContent.includes('订单'));
-    show('orders', ordersBtn || document.querySelector('.nav button'));
+    const first=[...document.querySelectorAll('.nav button[data-module]')].find(b=>!b.hidden&&canAccessModule(b.dataset.module));
+    if(first)show(first.dataset.module,first);
   }
 }
 async function doLogin(){
@@ -546,7 +559,7 @@ async function doLogin(){
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
     const j=await r.json().catch(()=>({ok:false,error:'登录失败'}));
     if(!r.ok || !j.ok){setLoginActive(true,j.error||'登录失败');return;}
-    auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
+    auth={username:j.username,role:j.role,label:j.label,permissions:j.permissions||[],session_token:j.session_token||""};
     authVerified=false;
     localStorage.setItem('alice_auth',JSON.stringify(auth));
     setLoginActive(true,'正在读取数据...');
@@ -558,9 +571,9 @@ async function doLogin(){
     if(btn)btn.disabled=false;
   }
 }
-function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
+async function logout(){try{if(auth)await timedFetch('/api/login/logout',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({session_token:auth.session_token})},8000);}catch(e){}finally{localStorage.removeItem('alice_auth');auth=null;location.reload();}}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录检测":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  beginBusy("正在读取管理系统数据…");
@@ -2227,6 +2240,15 @@ function toggleSettlementIds(ids,checked){if(checked&&!confirm('确定是否签�
 function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
 async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要结算的日期或女孩');return;} const r=await api('/api/orders/bulk_settle',{ids,settlement_status:status}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status=status}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert(`勾选${status}完成`);}
 async function settleAllSettlement(){const ids=[...new Set(settlementGroups().flatMap(g=>g.ids).map(Number).filter(Boolean))]; if(!ids.length){alert('已经全部结算');return;} if(!confirm(`确定结算所有未结算金额吗？共 ${ids.length} 单`))return; const r=await api('/api/orders/bulk_settle',{ids,settlement_status:'已结算'}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status='已结算'}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert('全部结算完成');}
+async function sendSettlementReport(){
+ const rows=(data.orders||[]).filter(o=>o.order_date===todayStr&&(o.settlement_status||'未结算')!=='已结算');
+ if(!rows.length){alert('今天没有未结算记录');return;}
+ const groups={};rows.forEach(o=>{const name=o.girl_name||'未填写女孩';const g=groups[name]||(groups[name]={name,count:0,total:0,nonCash:0});g.count++;g.total+=Number(o.store_profit||0);if(String(o.payment_method||'现金')!=='现金')g.nonCash+=Number(o.received_amount||0)});
+ const list=Object.values(groups).sort((a,b)=>b.total-a.total);const box=document.createElement('div');box.className='telegram-report-capture';
+ box.innerHTML=`<h2>💴 ${todayStr} 今日金额结算</h2><table><thead><tr><th>女孩</th><th>单数</th><th>今日收益</th><th>非现金</th><th>应收金额</th></tr></thead><tbody>${list.map(g=>`<tr><td>${escHtml(g.name)}</td><td>${g.count}</td><td>${yen(g.total)}</td><td>${yen(g.nonCash)}</td><td><b>${yen(g.total-g.nonCash)}</b></td></tr>`).join('')}</tbody></table><div class="report-total">应收合计：${yen(list.reduce((s,g)=>s+g.total-g.nonCash,0))}</div>`;
+ document.body.appendChild(box);beginBusy('正在生成并发送结算截图…');
+ try{const canvas=await html2canvas(box,{backgroundColor:null,scale:2,useCORS:true});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});alert(`已发送到 ${result.chat_title||'Alice内部群'}`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
+}
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function jsArg(v){return JSON.stringify(String(v??''));}
@@ -2258,6 +2280,36 @@ function clearQuickLinkForm(){qlId.value='';qlGroup.value='网址';qlTitle.value
 async function saveQuickLink(){await api('/api/quick_links',{id:qlId.value||null,group_name:qlGroup.value,title:qlTitle.value,content:qlContent.value,sort_order:Number(qlSort.value||0)}); clearQuickLinkForm(); await loadAll();}
 async function deleteQuickLink(id){if(!confirm('确认删除？'))return; await api('/api/quick_links',{delete_id:id}); await loadAll();}
 async function copyQuickLink(id){const r=(data.quick_links||[]).find(x=>Number(x.id)===Number(id)); if(!r)return; const text=r.content||''; try{await navigator.clipboard.writeText(text); alert('已复制');}catch(e){prompt('复制失败，请手动复制：', text);}}
+let systemUsers=[];
+function loginDuration(seconds){seconds=Math.max(0,Number(seconds||0));const h=Math.floor(seconds/3600),m=Math.floor(seconds%3600/60);return h?`${h}小时${m}分`:(m?`${m}分`:`${Math.floor(seconds)}秒`);}
+async function loadLoginAuditRecords(){
+ if(!loginAuditDate.value)loginAuditDate.value=todayStr;beginBusy('正在读取登录记录…');
+ try{const r=await timedFetch(`/api/login_audit?date=${encodeURIComponent(loginAuditDate.value)}&v=${Date.now()}`,{cache:'no-store',headers:authHeaders()});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取登录记录失败');const s=j.summary||{};loginAuditSummary.innerHTML=`记录 <b>${Number(s.total||0)}</b>｜账号 <b>${Number(s.users||0)}</b>｜IP <b>${Number(s.ips||0)}</b>｜在线 <b>${Number(s.active||0)}</b>｜密码警报 <b>${Number(s.alerts||0)}</b>`;loginAuditRecords.innerHTML='<div class="table"><table><thead><tr><th>登录时间</th><th>账号</th><th>角色</th><th>IP</th><th>在线时长</th><th>设备</th><th>状态</th><th>操作</th></tr></thead><tbody>'+((j.sessions||[]).map(x=>`<tr class="${x.is_alert||x.status==='password_alert'?'settle-overdue':''}"><td>${escHtml(x.login_at||'')}</td><td><b>${escHtml(x.username||'')}</b></td><td>${escHtml(x.role_label||x.role||'')}</td><td>${escHtml(x.ip||'')}</td><td>${loginDuration(x.duration_seconds)}</td><td style="max-width:280px;white-space:normal">${escHtml(x.user_agent||'')}</td><td>${escHtml(x.status_label||x.status||'')}</td><td>${x.status==='active'&&!x.logout_at?`<button class="danger" onclick="forceLogoutSystemUser('${String(x.username||'').replaceAll("'","\\'")}')">强制下线</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8">这一天还没有登录记录</td></tr>')+'</tbody></table></div>';}finally{endBusy();}
+}
+async function forceLogoutSystemUser(username){if(!confirm(`确认强制下线 ${username}？`))return;await api('/api/users/logout',{username});await Promise.all([loadLoginAuditRecords(),loadSystemUsers()]);}
+function renderPermissionChecks(selected){
+ selected=new Set(selected||[]);const boss=window.sysRole&&sysRole.value==='boss';
+ systemPermissionGrid.innerHTML=Object.entries(SYSTEM_MODULE_LABELS).map(([key,label])=>`<label class="permission-check"><input type="checkbox" data-permission="${key}" ${boss||selected.has(key)?'checked':''} ${boss?'disabled':''}> ${label}</label>`).join('');
+}
+function applyRolePermissionPreset(){renderPermissionChecks(ROLE_PERMISSION_PRESETS[sysRole.value]||[]);}
+function clearSystemUserForm(){sysUserId.value='';sysUsername.value='';sysLabel.value='';sysPassword.value='';sysRole.value='user';sysEnabled.value='1';applyRolePermissionPreset();}
+async function loadSystemUsers(){
+ beginBusy('正在读取登录账号…');
+ try{
+  const r=await timedFetch('/api/system/users?v='+Date.now(),{cache:'no-store',headers:authHeaders()});const j=await r.json();
+  if(!r.ok||!j.ok)throw new Error(j.error||'读取账号失败');systemUsers=j.users||[];
+  systemUsersTable.innerHTML='<div class="table"><table><thead><tr><th>账号</th><th>显示名称</th><th>角色</th><th>状态</th><th>当前登录</th><th>可见模块</th><th>操作</th></tr></thead><tbody>'+systemUsers.map((u,i)=>`<tr class="${Number(u.enabled)?'':'account-disabled'}"><td><b>${escHtml(u.username)}</b></td><td>${escHtml(u.label||'')}</td><td>${escHtml(u.role)}</td><td>${Number(u.enabled)?'启用':'停用'}</td><td>${Number(u.active_sessions||0)} 个会话</td><td>${(u.permissions||[]).map(x=>escHtml(SYSTEM_MODULE_LABELS[x]||x)).join('、')}</td><td><button class="soft" onclick="editSystemUser(${i})">编辑权限</button> <button class="danger" onclick="deleteSystemUser(${Number(u.id)})">删除</button></td></tr>`).join('')+'</tbody></table></div>';
+  if(!sysUserId.value)clearSystemUserForm();
+ }finally{endBusy();}
+}
+function editSystemUser(index){const u=systemUsers[index];if(!u)return;sysUserId.value=u.id;sysUsername.value=u.username||'';sysLabel.value=u.label||'';sysPassword.value='';sysRole.value=u.role||'user';sysEnabled.value=Number(u.enabled)?'1':'0';renderPermissionChecks(u.permissions||[]);document.getElementById('loginAudit').scrollIntoView({behavior:'smooth',block:'start'});}
+function selectedSystemPermissions(){return [...document.querySelectorAll('[data-permission]:checked')].map(x=>x.dataset.permission);}
+async function saveSystemUser(){
+ await api('/api/system/users',{id:sysUserId.value||null,username:sysUsername.value,label:sysLabel.value,password:sysPassword.value,role:sysRole.value,enabled:sysEnabled.value==='1',permissions:selectedSystemPermissions()});
+ clearSystemUserForm();await loadSystemUsers();alert('账号和权限已保存');
+}
+async function deleteSystemUser(id){if(!confirm('确认删除这个登录账号？'))return;await api('/api/system/users',{action:'delete',id});await loadSystemUsers();}
+
 function renderRooms(){
   if(!window.roomCalendar)return; refreshRoomControls();
   table('hotelRoomsTable',data.hotel_rooms||[],[{k:'hotel_name',t:'酒店名'},{k:'room_no',t:'房间号'},{k:'daily_cost',t:'每日成本',f:yen},{k:'remark',t:'备注'}],'hotel_rooms','editHotelRoomDummy');
@@ -2272,7 +2324,7 @@ function renderRooms(){
 function groupCost(filter){let m={};(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).forEach(r=>{const k=r.girl_name||'未安排房间';m[k]=(m[k]||0)+Number(r.daily_cost||0)});return m;}
 function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).reduce((s,r)=>s+Number(r.daily_cost||0),0);return {mainLabel:'成本',orderCount:(data.room_assignments||[]).filter(r=>filter({order_date:r.assignment_date,girl_name:r.girl_name})).length,gross:roomCost};}
 
-function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=auth&&auth.role==="user";kCustomers.textContent=isUser?"—":data.customers.length;kOrders.textContent=isUser?"—":data.orders.length;let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
+function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=!(canAccessModule('home')||canAccessModule('stats')||canAccessModule('settlement'));kCustomers.textContent=canAccessModule('customers')?data.customers.length:"—";kOrders.textContent=canAccessModule('orders')?data.orders.length:"—";let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
  table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"points_used",t:"使用积分"},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"新增积分"},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,preference_tags:prefTagsHtml(c.remark2),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型"},{k:"total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:yen},{k:"points",t:"积分"},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"偏好TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
  table("girlsTable",filteredGirls().map(g=>({...g,__praises:praiseRowsForGirl(g).length})),[{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"__praises",t:"客人好评",f:girlPraiseCell},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");

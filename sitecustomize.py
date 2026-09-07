@@ -59,7 +59,7 @@ _JS = r'''
   function ensureStyle(){
     if(document.getElementById("aliceSettleStyle")) return;
     var s=document.createElement("style"); s.id="aliceSettleStyle";
-    s.textContent="body.role-user #settlement,body.role-user #stats,body.role-user #loginAudit,body.role-user .user-hide,body.role-admin #home,body.role-admin #loginAudit,body.role-admin .admin-hide,body:not(.role-boss) .boss-only{display:none!important}.settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}.settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:#5d4566}.settle-amount-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settle-amount-input{width:120px}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}.login-alert-row{background:#fff1f2!important;color:#9f1239!important}.login-alert-badge{display:inline-block;border:1px solid #fb7185;border-radius:999px;background:#ffe4e6;color:#be123c;padding:2px 8px;font-weight:900}.user-admin-form{display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;align-items:center;margin:12px 0}.managed-username,.managed-pass{min-width:130px}.user-offline{color:#6b7280}.user-online{color:#15803d;font-weight:900}@media(max-width:760px){.settle-email-grid,.user-admin-form{grid-template-columns:1fr}}";
+    s.textContent="body:not(.role-boss) .boss-only{display:none!important}.settle-email-grid{display:grid;grid-template-columns:1fr 1.5fr auto;gap:8px;align-items:center}.settle-input{min-width:120px}.settle-picked{background:rgba(148,163,184,.28)!important;color:#6b7280!important}.settle-picked td{color:#6b7280!important}.settle-picked input,.settle-picked button{filter:grayscale(1);opacity:.78}.settle-state{display:inline-block;margin-left:6px;border:1px solid #9ca3af;border-radius:999px;padding:2px 8px;font-size:12px;color:#4b5563;background:#e5e7eb}.settle-summary-head{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:14px 0 8px}.settle-summary-head h3{margin:0}.settle-pick-hint{margin:8px 0;color:#6b7280;font-weight:700}.settle-yellow{background:#fff5c7!important}.settle-green{background:#dcfce7!important}.settle-overdue{background:#ffd8df!important}.settle-sign{display:inline-flex;align-items:center;gap:5px;margin-left:8px;font-weight:900;color:#5d4566}.settle-amount-cell{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.settle-amount-input{width:120px}.blink{animation:blinkBg .8s infinite}@keyframes blinkBg{50%{background:#ff6e92;color:white}}.login-alert-row{background:#fff1f2!important;color:#9f1239!important}.login-alert-badge{display:inline-block;border:1px solid #fb7185;border-radius:999px;background:#ffe4e6;color:#be123c;padding:2px 8px;font-weight:900}.user-admin-form{display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;align-items:center;margin:12px 0}.managed-username,.managed-pass{min-width:130px}.user-offline{color:#6b7280}.user-online{color:#15803d;font-weight:900}@media(max-width:760px){.settle-email-grid,.user-admin-form{grid-template-columns:1fr}}";
     document.head.appendChild(s);
   }
   function ensureSettlement(){
@@ -282,7 +282,7 @@ _JS = r'''
         var r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:loginUser.value,password:loginPass.value})});
         var j=await r.json().catch(function(){return {ok:false,error:"登录失败"};});
         if(!r.ok||!j.ok){ if(typeof setLoginActive==="function")setLoginActive(true,j.error||"登录失败"); else alert(j.error||"登录失败"); return; }
-        auth={username:j.username,role:j.role,label:j.label,session_token:j.session_token||""};
+        auth={username:j.username,role:j.role,label:j.label,permissions:j.permissions||[],session_token:j.session_token||""};
         authVerified=false;
         localStorage.setItem("alice_auth",JSON.stringify(auth));
         if(typeof setLoginActive==="function")setLoginActive(true,"正在读取数据...");
@@ -315,8 +315,7 @@ _JS = r'''
   function wrapLoginAuditShow(){
     var oldShow=window.show;
     if(typeof oldShow==="function"&&!oldShow.__loginAuditWrapped){
-      var blocked=function(id){ var role=(auth&&auth.role)||""; return (role==="user"&&(id==="home"||id==="stats"||id==="settlement"||id==="loginAudit")) || (role==="admin"&&(id==="home"||id==="loginAudit")); };
-      var showWrapped=function(id,btn){ if(blocked(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} var r=oldShow.apply(this,arguments); if(id==="loginAudit")setTimeout(loadLoginAudit,50); return r; };
+      var showWrapped=function(id,btn){ var r=oldShow.apply(this,arguments); if(id==="loginAudit"&&document.getElementById(id)&&document.getElementById(id).classList.contains("on")){ setTimeout(function(){ if(typeof loadLoginAuditRecords==="function")loadLoginAuditRecords(); if(typeof loadSystemUsers==="function")loadSystemUsers(); },50); } return r; };
       showWrapped.__loginAuditWrapped=true;
       window.show=showWrapped;
     }
@@ -366,7 +365,7 @@ _JS = r'''
       window.cancelChainOrder=cancelWrapped;
     }
   }
-  var oldRender=window.render; if(typeof oldRender==="function"&&!oldRender.__settleWrapped){ var wrapped=function(){ var r=oldRender.apply(this,arguments); setTimeout(function(){ loadReports().then(function(){ ensureSettlement(); ensureEmailPanel(); ensureLoginAudit(); patchLoginSession(); wrapLoginAuditShow(); renderEmails(); ensureChainFreeRefresh(); wrapChainRefreshers(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); if(document.getElementById("loginAudit")&&document.getElementById("loginAudit").classList.contains("on"))loadLoginAudit(); }); },0); return r; }; wrapped.__settleWrapped=true; window.render=wrapped; }
+  var oldRender=window.render; if(typeof oldRender==="function"&&!oldRender.__settleWrapped){ var wrapped=function(){ var r=oldRender.apply(this,arguments); setTimeout(function(){ loadReports().then(function(){ ensureSettlement(); ensureEmailPanel(); ensureLoginAudit(); patchLoginSession(); wrapLoginAuditShow(); renderEmails(); ensureChainFreeRefresh(); wrapChainRefreshers(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); if(document.getElementById("loginAudit")&&document.getElementById("loginAudit").classList.contains("on")&&typeof loadLoginAuditRecords==="function")loadLoginAuditRecords(); }); },0); return r; }; wrapped.__settleWrapped=true; window.render=wrapped; }
   document.addEventListener("DOMContentLoaded",function(){ ensureStyle(); ensureSettlement(); ensureEmailPanel(); ensureLoginAudit(); patchLoginSession(); wrapLoginAuditShow(); ensureChainFreeRefresh(); wrapChainRefreshers(); loadReports().then(function(){ renderEmails(); if(document.getElementById("settlement")&&document.getElementById("settlement").classList.contains("on"))renderSettlement(); }); });
 })();
 '''
@@ -693,7 +692,7 @@ def _install(module):
         return c.execute("SELECT * FROM app_users WHERE username=?", (username,)).fetchone()
 
     def _boss_required():
-        role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
+        role = str(module.current_role() or "")
         if role != "boss":
             return jsonify(ok=False, error="只有老板可以操作"), 403
         token = (request.headers.get("X-Alice-Session") or "").strip()
@@ -722,33 +721,30 @@ def _install(module):
             schema()
             d = request.get_json(silent=True) or {}
             username = str(d.get("username") or "").strip()
-            password = str(d.get("password") or "").strip()
             now = _now_jst()
+            response = app.make_response(old_login_view(*args, **kwargs))
+            payload = response.get_json(silent=True) or {}
             with conn() as c:
-                info = _app_user(c, username)
-                if not info or int(info["is_active"] or 0) != 1 or str(info["password"] or "") != password:
+                if response.status_code >= 400 or not payload.get("ok"):
                     day = now[:10]
                     failures = c.execute("""SELECT COUNT(*) FROM login_sessions
                                             WHERE username=? AND ip=? AND substr(login_at,1,10)=?
                                               AND status IN ('password_error','password_alert')""",
                                          (username, _client_ip(), day)).fetchone()[0] + 1
                     status = "password_alert" if failures >= 3 else "password_error"
-                    role = str(info["role"] if info else "")
-                    label = _role_label(role, str(info["label"] if info else ""))
                     c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,logout_at,status)
                                  VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                              (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), "", now, now, now, status))
-                    msg = "密码错误已达三次，已记录登录警报" if status == "password_alert" else "用户名或密码错误"
-                    return jsonify(ok=False, error=msg, alert=(status == "password_alert")), 401
-                role = str(info["role"] or "")
-                label = _role_label(role, str(info["label"] or ""))
-                token = secrets.token_urlsafe(24)
+                              (username, "", "", _client_ip(), request.headers.get("User-Agent", ""), "", now, now, now, status))
+                    return response
+                role = str(payload.get("role") or "")
+                label = str(payload.get("label") or _role_label(role))
+                token = str(payload.get("session_token") or "")
                 c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='replaced',updated_at=CURRENT_TIMESTAMP
                              WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
                 c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,status)
                              VALUES(?,?,?,?,?,?,?,?,?)""",
                           (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), token, now, now, "active"))
-            return jsonify(ok=True, username=username, role=role, label=label, session_token=token)
+            return response
         _login_audit_login._login_audit_wrapped = True
         app.view_functions["api_login"] = _login_audit_login
 
@@ -760,12 +756,11 @@ def _install(module):
         if request.path in public_api:
             return None
         token = (request.headers.get("X-Alice-Session") or "").strip()
-        role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
-        username = (request.headers.get("X-Alice-User") or "").strip()
+        session_info = module.current_session_info() or {}
+        role = str(session_info.get("role") or "")
+        username = str(session_info.get("username") or "")
         if role in ("boss", "admin", "user") and not token:
             return jsonify(ok=False, error="登录已失效，请重新登录"), 401
-        if role == "user" and (request.path.startswith("/api/settlements") or request.path == "/api/orders/bulk_settle"):
-            return jsonify(ok=False, error="普通用户不能查看金额结算"), 403
         try:
             now = _now_jst()
             with conn() as c:
@@ -798,7 +793,7 @@ def _install(module):
     @app.route("/api/login_audit", methods=["GET"])
     def _login_audit_list():
         schema()
-        role = (request.headers.get("X-Alice-Role") or request.args.get("role") or "").strip()
+        role = str(module.current_role() or "")
         if role != "boss":
             return jsonify(ok=False, error="只有老板可以查看登录检测"), 403
         day = str(request.args.get("date") or _now_jst()[:10]).strip()[:10]
@@ -1035,7 +1030,7 @@ def _install(module):
                 response.direct_passthrough = False
                 body = response.get_data(as_text=True)
                 if "alice_settlement_patch.js" not in body and "</body>" in body:
-                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260731b"></script></body>')
+                    body = body.replace("</body>", '<script src="/alice_settlement_patch.js?v=20260908"></script></body>')
                     response.set_data(body)
                     response.headers["Cache-Control"] = "no-store"
             except Exception:

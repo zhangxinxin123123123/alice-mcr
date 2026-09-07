@@ -74,8 +74,8 @@ button{cursor:pointer;font-weight:900}
   color:#e75ca2;
 }
 .preview{
-  width:298px;
-  min-height:600px;
+  width:min(390px,calc(100vw - 24px));
+  min-height:585px;
   margin:0 auto;
   background:
     linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.08)),
@@ -609,15 +609,15 @@ th{
 }
 .preview.mode-default .shift-list{gap:7px;padding:0 1px}
 .preview.mode-default .shift-card{
-  padding:7px;
+  padding:8px 10px;
   border:1px solid rgba(255,47,154,.78);
   border-radius:8px;
   background:linear-gradient(90deg,rgba(255,47,154,.24),rgba(13,16,32,.95) 42%,rgba(6,17,25,.98));
   box-shadow:inset 4px 0 0 var(--pink),0 0 12px rgba(255,47,154,.20);
 }
 .preview.mode-default .shift-card-inner{
-  grid-template-columns:50px minmax(0,1fr);
-  column-gap:8px;
+  grid-template-columns:54px minmax(0,1fr);
+  column-gap:10px;
 }
 .preview.mode-default .shift-avatar{
   border:2px solid var(--cyan);
@@ -721,7 +721,7 @@ th{
       <span class="count">出勤人数：<span id="shiftCount">0</span></span>
       <button class="soft" onclick="clearAll()">清空全部</button>
       <button class="soft" onclick="scrollToPreview()">定位截图区</button>
-      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">复制图片</button>
+      <button class="soft" onclick="window.print()">打印 / 保存PDF</button><button class="primary" onclick="copyShiftText()">一键复制文本</button><button class="primary" onclick="captureShift()">复制图片</button><button class="primary" onclick="sendShiftToTelegram()">📤 发送出勤表并同步TEL预约</button>
       <button class="soft" onclick="loadGirls()">刷新女孩表</button>
     </div>
   </div>
@@ -1242,6 +1242,21 @@ th{
         alert("当前浏览器不支持直接复制图片，已下载PNG。");
       }
     }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许复制或下载。"); }
+  };
+
+  window.sendShiftToTelegram = async function(){
+    const d=shiftDate.value||today;
+    if(!rowsForDate().length){alert("当前日期还没有出勤数据");return;}
+    if(window.parent&&window.parent.beginBusy)window.parent.beginBusy("正在发送出勤表并同步TEL预约…");
+    try{
+      applyPreviewStyle();
+      const canvas=await html2canvas(previewBox,{backgroundColor:null,scale:2.5,useCORS:true});
+      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:canvas.toDataURL('image/png')})});
+      const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
+      if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
+      alert(`出勤表已发送到 ${result.chat_title||'Alice内部群'}，TEL预约已同步 ${result.synced||0} 位女孩。`);
+    }catch(e){console.error(e);alert(e.message||"发送失败，请稍后重试");}
+    finally{if(window.parent&&window.parent.endBusy)window.parent.endBusy();}
   };
 
   function weekdayCN(dateStr){

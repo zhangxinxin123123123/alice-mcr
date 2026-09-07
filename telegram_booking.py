@@ -1,6 +1,8 @@
+import base64
 import json
 import os
 import re
+import secrets
 from html import escape
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -143,6 +145,28 @@ def register_telegram_booking(
             result = json.loads(resp.read().decode("utf-8"))
         if not result.get("ok"):
             raise RuntimeError(result.get("description") or f"Telegram {method} 调用失败")
+        return result.get("result")
+
+    def send_photo_bytes(chat_id, image_bytes, caption="", thread_id=0):
+        token = telegram_token()
+        if not token:
+            raise RuntimeError("服务器尚未配置 TELEGRAM_BOT_TOKEN")
+        boundary = "AliceBoundary" + secrets.token_hex(12)
+        chunks = []
+        fields = {"chat_id": str(chat_id), "caption": caption, "parse_mode": "HTML"}
+        if int(thread_id or 0):
+            fields["message_thread_id"] = str(int(thread_id))
+        for key, value in fields.items():
+            chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
+        chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"alice-report.png\"\r\nContent-Type: image/png\r\n\r\n".encode("utf-8"))
+        chunks.append(image_bytes)
+        chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        req = Request(f"https://api.telegram.org/bot{token}/sendPhoto", data=b"".join(chunks),
+                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urlopen(req, timeout=40) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        if not result.get("ok"):
+            raise RuntimeError(result.get("description") or "Telegram 图片发送失败")
         return result.get("result")
 
     def inline_keyboard(rows):
@@ -1195,8 +1219,6 @@ def register_telegram_booking(
     def telegram_settings_api():
         ensure_db()
         if request.method == "POST":
-            if request.headers.get("X-Alice-Role") not in ("boss", "admin"):
-                return jsonify(ok=False, error="只有老板或管理员可以修改 Telegram 设置"), 403
             data = request.json or {}
             allowed = set(DEFAULT_SETTINGS)
             with conn() as c:
@@ -1215,8 +1237,6 @@ def register_telegram_booking(
     @app.route("/api/telegram/bindings", methods=["POST"])
     def telegram_bindings_api():
         ensure_db()
-        if request.headers.get("X-Alice-Role") not in ("boss", "admin"):
-            return jsonify(ok=False, error="只有老板或管理员可以修改群绑定"), 403
         data = request.json or {}
         girl = str(data.get("girl_name") or "").strip()
         chat_id = str(data.get("chat_id") or "").strip()
@@ -1235,8 +1255,6 @@ def register_telegram_booking(
     @app.route("/api/telegram/daily-girls", methods=["POST"])
     def telegram_daily_girls_api():
         ensure_db()
-        if request.headers.get("X-Alice-Role") not in ("boss", "admin"):
-            return jsonify(ok=False, error="只有老板或管理员可以维护预约女孩"), 403
         data = request.json or {}
         day = str(data.get("date") or "").strip()
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
@@ -1280,8 +1298,6 @@ def register_telegram_booking(
     @app.route("/api/telegram/webhook/setup", methods=["POST"])
     def telegram_webhook_setup_api():
         ensure_db()
-        if request.headers.get("X-Alice-Role") not in ("boss", "admin"):
-            return jsonify(ok=False, error="只有老板或管理员可以设置 Webhook"), 403
         public_url = str((request.json or {}).get("public_base_url") or os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
         if not public_url.startswith("https://"):
             return jsonify(ok=False, error="请先配置 HTTPS PUBLIC_BASE_URL"), 400
@@ -1289,5 +1305,49 @@ def register_telegram_booking(
         result = tg("setWebhook", {"url": public_url + "/telegram/webhook", "secret_token": secret or None,
                                    "allowed_updates": ["message", "callback_query"]})
         return jsonify(ok=True, result=result, webhook_url=public_url + "/telegram/webhook")
+
+    @app.route("/api/telegram/report-photo", methods=["POST"])
+    def telegram_report_photo_api():
+        ensure_db()
+        data = request.json or {}
+        kind = str(data.get("kind") or "").strip()
+        day = str(data.get("date") or "").strip()
+        raw = str(data.get("image_data") or "")
+        if kind not in ("pure_shift", "settlement") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            return jsonify(ok=False, error="报表类型或日期不正确"), 400
+        if not raw.startswith("data:image/png;base64,"):
+            return jsonify(ok=False, error="请先生成 PNG 截图"), 400
+        try:
+            image_bytes = base64.b64decode(raw.split(",", 1)[1], validate=True)
+        except Exception:
+            return jsonify(ok=False, error="截图数据损坏，请重新生成"), 400
+        if not image_bytes or len(image_bytes) > 10 * 1024 * 1024:
+            return jsonify(ok=False, error="截图为空或超过10MB"), 400
+        cfg = settings()
+        chat_id = str(cfg.get("default_review_chat_id") or "")
+        if not valid_group_chat_id(chat_id):
+            return jsonify(ok=False, error="请先在内部群发送 /绑定审核群"), 400
+        thread_id = int(cfg.get("default_review_thread_id") or 0)
+        synced = 0
+        names = []
+        if kind == "pure_shift":
+            with conn() as c:
+                for shift in pure_shift_rows_for_date(c, day):
+                    name = str(shift.get("girl") or "").strip()
+                    if name and name not in names:
+                        names.append(name)
+            synced = len(names)
+            caption = f"📋 <b>{escape(day)} 爱丽丝出勤表</b>\n已同步 TEL预约女孩：{synced}人"
+        else:
+            caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
+        result = send_photo_bytes(chat_id, image_bytes, caption, thread_id)
+        if kind == "pure_shift":
+            with conn() as c:
+                c.execute("DELETE FROM telegram_daily_girls WHERE booking_date=?", (day,))
+                for index, name in enumerate(names):
+                    c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
+                                 VALUES(?,?,?,'attendance_send')""", (day, name, index))
+        return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), synced=synced,
+                       chat_title=cfg.get("default_review_chat_title") or "Alice内部群")
 
     ensure_db()
