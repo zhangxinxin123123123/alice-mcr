@@ -60,7 +60,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
-                          "telegram_chain_inbox"):
+                          "telegram_chain_inbox", "telegram_attendance_inquiries"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -617,6 +617,55 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             value = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='auto_chain_import_enabled'").fetchone()[0]
         self.assertEqual(value, "1")
+
+    def test_attendance_inquiry_writes_mcr_shift_and_unanswered_expires(self):
+        manager = {"id": 9700, "first_name": "店长"}
+        girl_user = {"id": 9701, "first_name": "娜娜子"}
+        internal = {"id": -30003, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -39999, "type": "supergroup", "title": "娜娜子群"}
+        today = self.app_module._tokyo_now().date().isoformat()
+        self.webhook({"message": {"message_id": 90, "chat": internal, "from": manager, "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 91, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 92, "chat": internal, "from": manager, "text": "询问出勤"}})
+        with self.app_module.conn() as c:
+            inquiry = dict(c.execute("SELECT * FROM telegram_attendance_inquiries WHERE inquiry_date=? AND girl_name='娜娜子'",
+                                     (today,)).fetchone())
+        self.assertEqual(inquiry["status"], "pending")
+        self.assertTrue(any(method == "sendMessage" and "chat_id=-39999" in body and "attendance%3Ayes%3A" in body
+                            for method, body in self.telegram_calls))
+
+        self.webhook({"callback_query": {"id": "att-yes", "from": girl_user,
+                                          "message": {"message_id": inquiry["message_id"], "chat": girl_chat},
+                                          "data": f"attendance:yes:{inquiry['id']}"}})
+        self.webhook({"callback_query": {"id": "att-start", "from": girl_user,
+                                          "message": {"message_id": inquiry["message_id"], "chat": girl_chat},
+                                          "data": f"attendance:start:{inquiry['id']}:1230"}})
+        self.webhook({"callback_query": {"id": "att-end", "from": girl_user,
+                                          "message": {"message_id": inquiry["message_id"], "chat": girl_chat},
+                                          "data": f"attendance:end:{inquiry['id']}:1440"}})
+        with self.app_module.conn() as c:
+            shift = c.execute("SELECT * FROM pure_shifts WHERE shift_date=? AND girl_name='娜娜子'", (today,)).fetchone()
+            daily = c.execute("SELECT 1 FROM telegram_daily_girls WHERE booking_date=? AND girl_name='娜娜子'", (today,)).fetchone()
+            status = c.execute("SELECT status FROM telegram_attendance_inquiries WHERE id=?", (inquiry["id"],)).fetchone()[0]
+        self.assertEqual((shift["start_time"], shift["end_time"]), ("20:30", "00:00"))
+        self.assertIsNotNone(daily)
+        self.assertEqual(status, "attending")
+
+        self.webhook({"message": {"message_id": 93, "chat": internal, "from": manager, "text": "询问出勤"}})
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_attendance_inquiries SET expires_at=datetime('now','-1 minute') WHERE id=?", (inquiry["id"],))
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 94, "chat": girl_chat, "from": girl_user, "text": "普通消息"}})
+        with self.app_module.conn() as c:
+            status = c.execute("SELECT status FROM telegram_attendance_inquiries WHERE id=?", (inquiry["id"],)).fetchone()[0]
+            remaining_shift = c.execute("SELECT 1 FROM pure_shifts WHERE shift_date=? AND girl_name='娜娜子'", (today,)).fetchone()
+            remaining_daily = c.execute("SELECT 1 FROM telegram_daily_girls WHERE booking_date=? AND girl_name='娜娜子'", (today,)).fetchone()
+        self.assertEqual(status, "absent")
+        self.assertIsNone(remaining_shift)
+        self.assertIsNone(remaining_daily)
+        self.assertTrue(any(method == "editMessageText" and "%E9%BB%98%E8%AE%A4%E4%B8%8D%E5%87%BA%E5%8B%A4" in body
+                            for method, body in self.telegram_calls))
 
     def test_order_delete_returns_local_patch_and_cleans_import_mapping(self):
         with self.app_module.conn() as c:

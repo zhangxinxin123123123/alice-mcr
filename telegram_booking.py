@@ -108,6 +108,15 @@ def register_telegram_booking(
                 processed_at TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY(chat_id,message_id))""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_tg_chain_inbox_pending ON telegram_chain_inbox(status,order_date,girl_name)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_attendance_inquiries(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, inquiry_date TEXT NOT NULL, girl_name TEXT NOT NULL,
+                chat_id TEXT NOT NULL, chat_title TEXT DEFAULT '', message_thread_id INTEGER DEFAULT 0,
+                message_id INTEGER DEFAULT 0, status TEXT DEFAULT 'pending', start_time TEXT DEFAULT '',
+                end_time TEXT DEFAULT '', responder_user_id TEXT DEFAULT '', responder_name TEXT DEFAULT '',
+                expires_at TEXT NOT NULL, requested_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                responded_at TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(inquiry_date,girl_name))""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_tg_attendance_expiry ON telegram_attendance_inquiries(status,expires_at)")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_chain_sync_state(
                 id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
                 last_result TEXT DEFAULT '')""")
@@ -1242,11 +1251,194 @@ def register_telegram_booking(
         send_message(chat.get("id"), f"✅ 接龙自动导入{label}。{suffix}")
         return True
 
+    def attendance_time_label(minutes, storage=False):
+        minutes = int(minutes)
+        if minutes == 24 * 60:
+            return "00:00" if storage else "24:00"
+        return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+    def attendance_time_keyboard(inquiry_id, mode, start_minutes=0):
+        if mode == "start":
+            values = range(12 * 60, 24 * 60, 30)
+        else:
+            values = range(int(start_minutes) + 30, 24 * 60 + 1, 30)
+        buttons = [callback_button(attendance_time_label(value),
+                                   f"attendance:{mode}:{int(inquiry_id)}:{value}") for value in values]
+        return inline_keyboard([buttons[i:i + 4] for i in range(0, len(buttons), 4)])
+
+    def start_attendance_inquiry(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        cfg = settings()
+        if str(chat.get("id")) != str(cfg.get("default_review_chat_id") or ""):
+            return True
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "❌ 只有店长、客服或群管理员可以发起出勤询问。")
+            return True
+        inquiry_date = tokyo_now().date().isoformat()
+        display_date = tokyo_now().strftime("%m月%d日")
+        with conn() as c:
+            bindings = [dict(row) for row in c.execute("""SELECT b.girl_name,b.chat_id,b.chat_title,b.message_thread_id
+                                                            FROM telegram_group_bindings b
+                                                            JOIN girls g ON g.name=b.girl_name
+                                                            WHERE b.enabled=1 AND COALESCE(g.girl_status,'在职')<>'离职'
+                                                            ORDER BY b.girl_name""").fetchall()]
+        sent_count, failed = 0, []
+        for binding in bindings:
+            try:
+                with conn() as c:
+                    c.execute("""INSERT INTO telegram_attendance_inquiries(
+                                    inquiry_date,girl_name,chat_id,chat_title,message_thread_id,message_id,status,
+                                    start_time,end_time,responder_user_id,responder_name,expires_at,requested_at,responded_at,updated_at)
+                                 VALUES(?,?,?,?,?,0,'pending','','','','',datetime('now','+30 minutes'),CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP)
+                                 ON CONFLICT(inquiry_date,girl_name) DO UPDATE SET
+                                    chat_id=excluded.chat_id,chat_title=excluded.chat_title,
+                                    message_thread_id=excluded.message_thread_id,message_id=0,
+                                    status='pending',start_time='',end_time='',responder_user_id='',responder_name='',
+                                    expires_at=datetime('now','+30 minutes'),requested_at=CURRENT_TIMESTAMP,
+                                    responded_at=NULL,updated_at=CURRENT_TIMESTAMP""",
+                              (inquiry_date, binding["girl_name"], str(binding["chat_id"]),
+                               str(binding.get("chat_title") or ""), int(binding.get("message_thread_id") or 0)))
+                    inquiry_id = int(c.execute("SELECT id FROM telegram_attendance_inquiries WHERE inquiry_date=? AND girl_name=?",
+                                               (inquiry_date, binding["girl_name"])).fetchone()[0])
+                sent = send_message(
+                    binding["chat_id"],
+                    f"🌙 <b>{display_date} 出勤确认</b>\n\n{escape(binding['girl_name'])}，今天是否出勤？\n"
+                    "请在 <b>30 分钟内</b>点击下方按钮；没有点击将默认今天不出勤。",
+                    inline_keyboard([[callback_button("✅ 出勤", f"attendance:yes:{inquiry_id}")]]),
+                    thread_id=int(binding.get("message_thread_id") or 0),
+                )
+                message_id = int((sent or {}).get("message_id") or 0)
+                with conn() as c:
+                    c.execute("UPDATE telegram_attendance_inquiries SET message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                              (message_id, inquiry_id))
+                sent_count += 1
+            except Exception as exc:
+                with conn() as c:
+                    c.execute("""UPDATE telegram_attendance_inquiries SET status='send_failed',updated_at=CURRENT_TIMESTAMP
+                                 WHERE inquiry_date=? AND girl_name=?""", (inquiry_date, binding["girl_name"]))
+                failed.append(f"{binding['girl_name']}（{str(exc)[:80]}）")
+        summary = f"✅ 已向 {sent_count} 个女孩专属群发送出勤询问，30 分钟未点击将默认不出勤。"
+        if failed:
+            summary += "\n⚠️ 发送失败：" + "、".join(escape(x) for x in failed[:20])
+        send_message(chat.get("id"), summary, thread_id=int(cfg.get("default_review_thread_id") or 0))
+        return True
+
+    def expire_attendance_inquiries():
+        with conn() as c:
+            expired = [dict(row) for row in c.execute("""SELECT * FROM telegram_attendance_inquiries
+                                                           WHERE status='pending' AND expires_at<=CURRENT_TIMESTAMP""").fetchall()]
+            if expired:
+                c.executemany("""UPDATE telegram_attendance_inquiries SET status='absent',updated_at=CURRENT_TIMESTAMP
+                                   WHERE id=? AND status='pending'""", [(row["id"],) for row in expired])
+                c.executemany("""DELETE FROM pure_shifts WHERE shift_date=? AND girl_name=?
+                                   AND source='telegram_attendance'""",
+                              [(row["inquiry_date"], row["girl_name"]) for row in expired])
+                c.executemany("""DELETE FROM telegram_daily_girls WHERE booking_date=? AND girl_name=?
+                                   AND source='attendance_inquiry'""",
+                              [(row["inquiry_date"], row["girl_name"]) for row in expired])
+        for row in expired:
+            try:
+                edit_message_text(row["chat_id"], row["message_id"],
+                                  f"🌙 <b>{escape(row['girl_name'])} 出勤确认已结束</b>\n\n30 分钟内未确认，今天默认不出勤。")
+            except Exception:
+                pass
+        return len(expired)
+
+    def handle_attendance_callback(callback):
+        data = str(callback.get("data") or "")
+        user = callback.get("from") or {}
+        msg = callback.get("message") or {}
+        chat_id = str((msg.get("chat") or {}).get("id") or "")
+        parts = data.split(":")
+        if len(parts) < 3:
+            answer_callback(callback.get("id"), "这个按钮已失效", True)
+            return
+        action, inquiry_id = parts[1], int(parts[2] or 0)
+        with conn() as c:
+            found = c.execute("SELECT *,expires_at<=CURRENT_TIMESTAMP AS expired FROM telegram_attendance_inquiries WHERE id=?",
+                              (inquiry_id,)).fetchone()
+            row = dict(found) if found else None
+        if not row or chat_id != str(row["chat_id"]):
+            answer_callback(callback.get("id"), "这个出勤确认不属于本群", True)
+            return
+        if action == "yes":
+            if row["status"] != "pending" or int(row.get("expired") or 0):
+                if row["status"] == "pending":
+                    with conn() as c:
+                        c.execute("UPDATE telegram_attendance_inquiries SET status='absent',updated_at=CURRENT_TIMESTAMP WHERE id=?", (inquiry_id,))
+                answer_callback(callback.get("id"), "确认已超过 30 分钟，请联系内部客服", True)
+                return
+            with conn() as c:
+                c.execute("""UPDATE telegram_attendance_inquiries SET status='selecting',responder_user_id=?,responder_name=?,
+                             responded_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                          (str(user.get("id") or ""), display_name(user), inquiry_id))
+            answer_callback(callback.get("id"), "请选择开始时间")
+            edit_message_text(chat_id, row["message_id"],
+                              f"✅ <b>{escape(row['girl_name'])} 今天出勤</b>\n\n请选择开始时间（12:00–24:00）：",
+                              attendance_time_keyboard(inquiry_id, "start"))
+            return
+        if row["status"] != "selecting":
+            answer_callback(callback.get("id"), "这个时间选择已经失效", True)
+            return
+        if action == "start" and len(parts) == 4:
+            start_minutes = int(parts[3])
+            start_time = attendance_time_label(start_minutes, storage=True)
+            with conn() as c:
+                c.execute("UPDATE telegram_attendance_inquiries SET start_time=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                          (start_time, inquiry_id))
+            answer_callback(callback.get("id"), "请选择结束时间")
+            edit_message_text(chat_id, row["message_id"],
+                              f"✅ <b>{escape(row['girl_name'])} 今天出勤</b>\n\n开始：<b>{attendance_time_label(start_minutes)}</b>\n请选择结束时间：",
+                              attendance_time_keyboard(inquiry_id, "end", start_minutes))
+            return
+        if action != "end" or len(parts) != 4 or not row.get("start_time"):
+            answer_callback(callback.get("id"), "请先选择开始时间", True)
+            return
+        end_minutes = int(parts[3])
+        end_time = attendance_time_label(end_minutes, storage=True)
+        inquiry_date, girl = row["inquiry_date"], row["girl_name"]
+        with conn() as c:
+            existing = c.execute("SELECT id FROM pure_shifts WHERE shift_date=? AND girl_name=? ORDER BY id LIMIT 1",
+                                 (inquiry_date, girl)).fetchone()
+            if existing:
+                c.execute("""UPDATE pure_shifts SET start_time=?,end_time=?,source='telegram_attendance',
+                             note='女孩群自助出勤',updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                          (row["start_time"], end_time, int(existing["id"])))
+            else:
+                memory = c.execute("SELECT tags,gold_tags FROM girl_tag_memory WHERE girl_name=?", (girl,)).fetchone()
+                max_sort = int(c.execute("SELECT COALESCE(MAX(sort_order),0) FROM pure_shifts WHERE shift_date=?",
+                                         (inquiry_date,)).fetchone()[0] or 0)
+                c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source,note)
+                             VALUES(?,?,?,?,?,?,?,'telegram_attendance','女孩群自助出勤')""",
+                          (inquiry_date, girl, row["start_time"], end_time,
+                           str(memory["tags"] or "") if memory else "",
+                           str(memory["gold_tags"] or "") if memory else "", max_sort + 1))
+            c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source,updated_at)
+                         VALUES(?,?,9999,'attendance_inquiry',CURRENT_TIMESTAMP)
+                         ON CONFLICT(booking_date,girl_name) DO UPDATE SET source='attendance_inquiry',updated_at=CURRENT_TIMESTAMP""",
+                      (inquiry_date, girl))
+            c.execute("""UPDATE telegram_attendance_inquiries SET status='attending',end_time=?,responded_at=CURRENT_TIMESTAMP,
+                         updated_at=CURRENT_TIMESTAMP WHERE id=?""", (end_time, inquiry_id))
+        answer_callback(callback.get("id"), "出勤时间已保存")
+        shown_end = "24:00" if end_time == "00:00" else end_time
+        edit_message_text(chat_id, row["message_id"],
+                          f"✅ <b>出勤登记完成</b>\n\n女孩：{escape(girl)}\n时间：<b>{row['start_time']}–{shown_end}</b>\n已自动写入 MCR 今日出勤表。")
+        cfg = settings()
+        internal_id = str(cfg.get("default_review_chat_id") or "")
+        if internal_id:
+            send_message(internal_id,
+                         f"✅ <b>女孩已确认出勤</b>\n女孩：{escape(girl)}\n时间：{row['start_time']}–{shown_end}\n已写入 MCR 今日出勤表。",
+                         thread_id=int(cfg.get("default_review_thread_id") or 0))
+
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
+        expire_attendance_inquiries()
         cache_chain_message(message)
         if handle_auto_import_control(message):
+            return
+        if re.fullmatch(r"/?询问出勤(?:@\w+)?", text.strip()):
+            start_attendance_inquiry(message)
             return
         if text.startswith("/绑定审核群"):
             bind_default_group(message)
@@ -1311,6 +1503,9 @@ def register_telegram_booking(
         user = callback.get("from") or {}
         msg = callback.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
+        if data.startswith("attendance:"):
+            handle_attendance_callback(callback)
+            return
         if not data.startswith("full:"):
             answer_callback(callback.get("id"))
         if data == "book":
@@ -1657,6 +1852,7 @@ def register_telegram_booking(
         while True:
             time.sleep(60)
             try:
+                expire_attendance_inquiries()
                 run_pending_chain_imports(force=False)
             except Exception:
                 pass
