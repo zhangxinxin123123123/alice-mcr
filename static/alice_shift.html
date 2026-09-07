@@ -1280,7 +1280,12 @@ th{
       const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
       const wp=result.wordpress||{};
-      const wpText=wp.synced?'官网“今日出勤”图片和文案已更新':`官网未更新：${wp.warning||'尚未配置'}`;
+      const visibility=wp.visibility||{};
+      const visibilityText=visibility.synced
+        ? `\n官网女孩状态：公开 ${visibility.published||0}｜私密 ${visibility.privated||0}｜无需修改 ${visibility.unchanged||0}`
+        : (wp.synced?`\n官网女孩状态未同步：${visibility.warning||((visibility.failed||[])[0]?.error)||'请检查女孩名称'}`:'');
+      const unmatched=(visibility.unmatched_attendance||[]).length?`\n官网未匹配出勤女孩：${visibility.unmatched_attendance.join('、')}`:'';
+      const wpText=wp.synced?`官网“今日出勤”图片和文案已更新${visibilityText}${unmatched}`:`官网未更新：${wp.warning||'尚未配置'}`;
       alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}\nTEL预约：${result.synced||0} 位女孩\n${wpText}`);
     }catch(e){console.error(e);alert(e.message||"发送失败，请稍后重试");}
     finally{if(window.parent&&window.parent.endBusy)window.parent.endBusy();}

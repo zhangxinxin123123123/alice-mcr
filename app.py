@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -24,7 +24,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v79_drag_sort_and_speed"
+APP_VERSION = "v80_wordpress_girl_visibility"
 
 @app.after_request
 def compress_large_json(response):
@@ -1058,7 +1058,108 @@ def _multipart_request(url, fields, filename, image_bytes, opener, referer):
     with opener.open(req, timeout=60) as response:
         return response.read().decode('utf-8', 'replace')
 
-def sync_alice_wordpress_attendance(day, image_bytes, service_text):
+def _wordpress_girl_key(value):
+    text = unicodedata.normalize('NFKC', str(value or '')).lower()
+    text = re.sub(r'[（(【\[].*?[）)】\]]', '', text)
+    text = re.sub(r'(?:新人女孩|新人女优|新人|女孩|回归|復帰)', '', text)
+    return re.sub(r'[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+', '', text)
+
+def _wordpress_model_posts(opener):
+    base = ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'
+    posts, seen, inline_nonce = [], set(), ''
+    page = 1
+    max_page = 1
+    while page <= max_page and page <= 30:
+        list_url = base + '&paged=' + str(page)
+        html, _ = opener_text(opener, list_url, timeout=40)
+        if page == 1:
+            page_numbers = [int(x) for x in re.findall(r'(?:[?&]|&amp;|&#038;)paged=(\d+)', html)]
+            max_page = max(page_numbers or [1])
+        if not inline_nonce:
+            for tag in re.findall(r'<input\b[^>]*>', html, re.I | re.S):
+                attrs = parse_input_attrs(tag)
+                if attrs.get('name') == '_inline_edit' or attrs.get('id') == '_inline_edit':
+                    inline_nonce = attrs.get('value') or ''
+                    break
+        found = 0
+        for match in re.finditer(r'<tr\b([^>]*)\bid=["\']post-(\d+)["\']([^>]*)>(.*?)</tr>', html, re.I | re.S):
+            post_id = int(match.group(2))
+            if post_id in seen:
+                continue
+            row_attrs = (match.group(1) or '') + ' ' + (match.group(3) or '')
+            row_html = match.group(4) or ''
+            title_match = re.search(r'<a\b[^>]*class=["\'][^"\']*row-title[^"\']*["\'][^>]*>(.*?)</a>', row_html, re.I | re.S)
+            if not title_match:
+                title_match = re.search(r'<a\b[^>]*href=["\'][^"\']*post=' + str(post_id) + r'[^"\']*["\'][^>]*>(.*?)</a>', row_html, re.I | re.S)
+            title = strip_html_text(html_unescape(title_match.group(1))) if title_match else ''
+            status_match = re.search(r'\bstatus-([a-z_-]+)', row_attrs, re.I)
+            status = (status_match.group(1).lower() if status_match else
+                      ('private' if re.search(r'(?:—|&mdash;)\s*私密', row_html, re.I) else
+                       ('draft' if re.search(r'(?:—|&mdash;)\s*草稿', row_html, re.I) else 'publish')))
+            if title:
+                posts.append({'id': post_id, 'title': title, 'status': status, 'list_url': list_url})
+                seen.add(post_id)
+                found += 1
+        if not found and page > 1:
+            break
+        page += 1
+    if not inline_nonce:
+        raise ValueError('找不到官网女孩列表的快速编辑授权码')
+    return posts, inline_nonce
+
+def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
+    data = {
+        'action': 'inline-save', '_inline_edit': inline_nonce, 'post_type': 'model',
+        'post_ID': str(post['id']), 'post_title': post['title'],
+        'post_status': desired_status,
+    }
+    req = Request(ALICE_BASE_URL + '/wp-admin/admin-ajax.php', data=urlencode(data).encode('utf-8'),
+                  method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
+                                          'Referer': post.get('list_url') or ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'})
+    with opener.open(req, timeout=45) as response:
+        result = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace').strip()
+    if result in ('', '0', '-1') or ('post-' + str(post['id'])) not in result:
+        raise ValueError('官网没有确认女孩状态更新成功')
+
+def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names):
+    attendance_keys = {_wordpress_girl_key(x) for x in (attendance_names or []) if _wordpress_girl_key(x)}
+    managed = {}
+    for name in all_girl_names or []:
+        key = _wordpress_girl_key(name)
+        if key:
+            managed.setdefault(key, str(name or '').strip())
+    posts, nonce = _wordpress_model_posts(opener)
+    matches = {}
+    for post in posts:
+        key = _wordpress_girl_key(post['title'])
+        if key in managed:
+            matches.setdefault(key, []).append(post)
+    result = {'synced': True, 'matched': 0, 'published': 0, 'privated': 0, 'unchanged': 0,
+              'failed': [], 'unmatched_attendance': []}
+    for key, mcr_name in managed.items():
+        candidates = sorted(matches.get(key, []), key=lambda x: x['id'], reverse=True)
+        if not candidates:
+            if key in attendance_keys:
+                result['unmatched_attendance'].append(mcr_name)
+            continue
+        result['matched'] += 1
+        for index, post in enumerate(candidates):
+            desired = 'publish' if key in attendance_keys and index == 0 else 'private'
+            if post['status'] == desired:
+                result['unchanged'] += 1
+                continue
+            try:
+                _wordpress_inline_model_status(opener, post, desired, nonce)
+                if desired == 'publish':
+                    result['published'] += 1
+                else:
+                    result['privated'] += 1
+            except Exception as exc:
+                result['failed'].append({'girl': mcr_name, 'post_id': post['id'], 'error': str(exc)})
+    result['synced'] = not result['failed']
+    return result
+
+def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None):
     user, pwd = alice_wordpress_credentials()
     if not user or not pwd:
         return {'configured': False, 'synced': False, 'warning': 'Render 尚未设置 ALICE_WP_ADMIN_USER 和 ALICE_WP_ADMIN_PASSWORD'}
@@ -1099,7 +1200,12 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text):
             result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
         if 'post.php' not in final_url and 'post.php' not in result_html:
             raise ValueError('官网没有确认保存成功')
-        return {'configured': True, 'synced': True, 'post_id': post_id, 'attachment_id': attachment_id}
+        try:
+            visibility = sync_alice_wordpress_girl_visibility(opener, attendance_names or [], all_girl_names or [])
+        except Exception as exc:
+            visibility = {'synced': False, 'warning': str(exc), 'matched': 0, 'published': 0, 'privated': 0}
+        return {'configured': True, 'synced': True, 'post_id': post_id, 'attachment_id': attachment_id,
+                'visibility': visibility}
     except Exception as exc:
         return {'configured': True, 'synced': False, 'warning': str(exc)}
 

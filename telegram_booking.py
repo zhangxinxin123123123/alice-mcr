@@ -1331,9 +1331,12 @@ def register_telegram_booking(
         thread_id = int(cfg.get("default_review_thread_id") or 0)
         synced = 0
         names = []
+        all_girl_names = []
         wordpress_result = {"configured": False, "synced": False}
         if kind == "pure_shift":
             with conn() as c:
+                all_girl_names = [str(r["name"] or "").strip() for r in c.execute(
+                    "SELECT name FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()]
                 for shift in pure_shift_rows_for_date(c, day):
                     name = str(shift.get("girl") or "").strip()
                     if name and name not in names:
@@ -1341,7 +1344,8 @@ def register_telegram_booking(
             synced = len(names)
             caption = f"📋 <b>{escape(day)} 爱丽丝出勤表</b>\n已同步 TEL预约女孩：{synced}人"
             if callable(sync_wordpress_attendance):
-                wordpress_result = sync_wordpress_attendance(day, image_bytes, str(data.get("service_text") or ""))
+                wordpress_result = sync_wordpress_attendance(
+                    day, image_bytes, str(data.get("service_text") or ""), names, all_girl_names)
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
         result = send_photo_bytes(chat_id, image_bytes, caption, thread_id)
