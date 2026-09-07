@@ -6,7 +6,7 @@ import secrets
 import threading
 import time
 from html import escape
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -1160,6 +1160,58 @@ def register_telegram_booking(
         except Exception:
             pass
 
+    def import_bound_chain_immediately(message):
+        """绑定女孩群新发当天 MMDD 接龙时立即同步，不受定时开关影响。"""
+        chat = message.get("chat") or {}
+        chain_text = str(message.get("text") or message.get("caption") or "").strip()
+        day, _unused = automatic_chain_header(chain_text)
+        if not day:
+            return False
+        with conn() as c:
+            binding = bound_girl(chat.get("id"), c)
+        if not binding or not int(binding.get("girl_id") or 0):
+            return False
+        row = {
+            "chat_id": str(chat.get("id")), "message_id": int(message.get("message_id") or 0),
+            "chat_title": str(chat.get("title") or ""), "order_date": day,
+            "girl_name": str(binding.get("girl_name") or ""), "chain_text": chain_text,
+        }
+        try:
+            if chain_is_empty(chain_text):
+                with conn() as c:
+                    c.execute("""UPDATE telegram_chain_inbox SET status='empty',last_error='',processed_at=CURRENT_TIMESTAMP
+                                 WHERE chat_id=? AND message_id=?""", (row["chat_id"], row["message_id"]))
+                return True
+            order_date, girl_name, girl_id = validate_attending_chain(chain_text, binding["girl_id"])
+            imported = import_chain_text(
+                chain_text, order_date=order_date, girl_id=girl_id, settlement_status="未结算",
+                source_chat_id=row["chat_id"], source_message_id=row["message_id"])
+            if int(imported.get("count") or 0) == 0:
+                raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
+            with conn() as c:
+                c.execute("""UPDATE telegram_chain_inbox SET status='imported',last_error='',processed_at=CURRENT_TIMESTAMP,
+                             order_date=?,girl_name=? WHERE chat_id=? AND message_id=?""",
+                          (order_date, girl_name, row["chat_id"], row["message_id"]))
+            changed = int(imported.get("inserted") or 0) + int(imported.get("updated") or 0)
+            if changed:
+                cfg = settings()
+                internal_id = str(cfg.get("default_review_chat_id") or "")
+                if valid_group_chat_id(internal_id):
+                    send_message(
+                        internal_id,
+                        f"✅ <b>接龙即时同步完成</b>\n来源群：{escape(row['chat_title'] or row['chat_id'])}"
+                        f"\n女孩：{escape(girl_name)}｜日期：{escape(order_date)}"
+                        f"\n新增：{int(imported.get('inserted') or 0)} 单｜修改：{int(imported.get('updated') or 0)} 单",
+                        thread_id=int(cfg.get("default_review_thread_id") or 0),
+                    )
+            return True
+        except Exception as exc:
+            with conn() as c:
+                c.execute("""UPDATE telegram_chain_inbox SET status='failed',last_error=?,processed_at=CURRENT_TIMESTAMP
+                             WHERE chat_id=? AND message_id=?""", (str(exc)[:1000], row["chat_id"], row["message_id"]))
+            notify_chain_failure(row, exc)
+            return True
+
     def run_pending_chain_imports(force=False):
         ensure_db()
         cfg = settings()
@@ -1249,7 +1301,25 @@ def register_telegram_booking(
         else:
             enabled = str(cfg.get("auto_chain_import_enabled") or "1")
         label = "已开启" if enabled == "1" else "已关闭"
-        suffix = "每 30 分钟检查一次。" if enabled == "1" else "需要时仍可回复接龙发送“导入”。"
+        interval = max(5, int(cfg.get("auto_chain_import_interval_minutes") or 30))
+        if enabled == "1" and action == "状态":
+            with conn() as c:
+                state = c.execute("SELECT last_started_at FROM telegram_chain_sync_state WHERE id=1").fetchone()
+            last_started = str(state["last_started_at"] or "") if state else ""
+            next_text = "预计 1 分钟内"
+            if last_started:
+                try:
+                    due_utc = datetime.strptime(last_started, "%Y-%m-%d %H:%M:%S") + timedelta(minutes=interval)
+                    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                    if due_utc > now_utc:
+                        next_text = (due_utc + timedelta(hours=9)).strftime("%m月%d日 %H:%M（东京时间）")
+                except ValueError:
+                    pass
+            suffix = f"每 {interval} 分钟检查一次。\n下次自动导入：<b>{next_text}</b>。"
+        elif enabled == "1":
+            suffix = f"每 {interval} 分钟检查一次。"
+        else:
+            suffix = "定时扫描已停止；绑定女孩群重发当天接龙仍会即时导入，也可回复接龙发送“导入”。"
         send_message(chat.get("id"), f"✅ 接龙自动导入{label}。{suffix}")
         return True
 
@@ -1432,11 +1502,14 @@ def register_telegram_booking(
                          f"✅ <b>女孩已确认出勤</b>\n女孩：{escape(girl)}\n时间：{row['start_time']}–{shown_end}\n已写入 MCR 今日出勤表。",
                          thread_id=int(cfg.get("default_review_thread_id") or 0))
 
-    def handle_message(message):
+    def handle_message(message, edited=False):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
         expire_attendance_inquiries()
-        cache_chain_message(message)
+        # 编辑旧消息不触发导入；必须重新发送一张带当天 MMDD 标题的完整接龙。
+        cached_chain = False if edited else cache_chain_message(message)
+        if cached_chain and import_bound_chain_immediately(message):
+            return
         if handle_auto_import_control(message):
             return
         if re.fullmatch(r"/?询问出勤(?:@\w+)?", text.strip()):
@@ -1625,7 +1698,7 @@ def register_telegram_booking(
         elif update.get("message"):
             handle_message(update["message"])
         elif update.get("edited_message"):
-            handle_message(update["edited_message"])
+            handle_message(update["edited_message"], edited=True)
         return jsonify(ok=True)
 
     @app.route("/api/telegram/settings", methods=["GET", "POST"])

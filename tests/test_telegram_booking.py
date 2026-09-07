@@ -564,10 +564,6 @@ class TelegramBookingFlowTest(unittest.TestCase):
         }})
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
-        scanned = self.client.post("/api/telegram/chain-import/run", headers=headers)
-        self.assertEqual(scanned.status_code, 200, scanned.get_data(as_text=True))
-        self.assertEqual(scanned.json["imported"], 1)
-        self.assertEqual(scanned.json["inserted"], 1)
         with self.app_module.conn() as c:
             self.assertIsNotNone(c.execute(
                 "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='自动导入客人'",
@@ -585,8 +581,6 @@ class TelegramBookingFlowTest(unittest.TestCase):
             "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
             "from": manager, "text": f"{date_keyword}\n1.20-21/15000/不应导入客人",
         }})
-        failed = self.client.post("/api/telegram/chain-import/run", headers=headers)
-        self.assertEqual(failed.json["failed"], 1)
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("chat_id=-30003" in body and "%E8%87%AA%E5%8A%A8%E6%8E%A5%E9%BE%99%E5%AF%BC%E5%85%A5%E5%A4%B1%E8%B4%A5" in body
                             for body in sent_bodies), sent_bodies)
@@ -600,8 +594,17 @@ class TelegramBookingFlowTest(unittest.TestCase):
             "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
             "from": manager, "text": f"{date_keyword}\n1.20-21/15000/修改后导入客人",
         }})
-        retried = self.client.post("/api/telegram/chain-import/run", headers=headers)
-        self.assertEqual(retried.json["imported"], 1)
+        with self.app_module.conn() as c:
+            self.assertIsNone(c.execute("SELECT 1 FROM orders WHERE order_date=? AND girl_name='未出勤女孩'",
+                                        (auto_day,)).fetchone())
+        self.webhook({"message": {
+            "message_id": 75,
+            "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
+            "from": manager, "text": f"{date_keyword}\n1.20-21/15000/修改后导入客人",
+        }})
+        with self.app_module.conn() as c:
+            self.assertIsNotNone(c.execute("SELECT 1 FROM orders WHERE order_date=? AND girl_name='未出勤女孩'",
+                                           (auto_day,)).fetchone())
 
     def test_auto_chain_date_only_uses_binding_empty_is_silent_and_internal_can_toggle(self):
         auto_day = self.app_module._tokyo_now().date().isoformat()
@@ -627,8 +630,6 @@ class TelegramBookingFlowTest(unittest.TestCase):
         }})
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
-        imported = self.client.post("/api/telegram/chain-import/run", headers=headers)
-        self.assertEqual(imported.json["imported"], 1, imported.get_data(as_text=True))
         with self.app_module.conn() as c:
             self.assertIsNotNone(c.execute(
                 "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='仅日期自动客人'",
@@ -636,18 +637,32 @@ class TelegramBookingFlowTest(unittest.TestCase):
 
         self.telegram_calls.clear()
         self.webhook({"message": {"message_id": 83, "chat": girl_chat, "from": manager, "text": date_keyword}})
-        empty = self.client.post("/api/telegram/chain-import/run", headers=headers)
-        self.assertEqual(empty.json["empty"], 1, empty.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            status = c.execute("SELECT status FROM telegram_chain_inbox WHERE chat_id=? AND message_id=83",
+                               (str(girl_chat["id"]),)).fetchone()[0]
+        self.assertEqual(status, "empty")
         self.assertFalse(any(method == "sendMessage" for method, _body in self.telegram_calls))
 
         self.webhook({"message": {"message_id": 84, "chat": internal, "from": manager, "text": "自动导入关闭"}})
         with self.app_module.conn() as c:
             value = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='auto_chain_import_enabled'").fetchone()[0]
         self.assertEqual(value, "0")
+        self.telegram_calls.clear()
+        changed_chain = f"{date_keyword}\n1.19:30-20:30/15000/仅日期自动客人"
+        self.webhook({"message": {"message_id": 841, "chat": girl_chat, "from": manager, "text": changed_chain}})
+        changed_notices = [body for method, body in self.telegram_calls if method == "sendMessage" and "chat_id=-30003" in body]
+        self.assertTrue(any("%E4%BF%AE%E6%94%B9%EF%BC%9A1" in body for body in changed_notices), changed_notices)
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 842, "chat": girl_chat, "from": manager, "text": changed_chain}})
+        self.assertFalse(any(method == "sendMessage" and "chat_id=-30003" in body for method, body in self.telegram_calls))
         self.webhook({"message": {"message_id": 85, "chat": internal, "from": manager, "text": "自动导入开启"}})
         with self.app_module.conn() as c:
             value = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='auto_chain_import_enabled'").fetchone()[0]
         self.assertEqual(value, "1")
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 86, "chat": internal, "from": manager, "text": "自动导入状态"}})
+        self.assertTrue(any(method == "sendMessage" and "%E4%B8%8B%E6%AC%A1%E8%87%AA%E5%8A%A8%E5%AF%BC%E5%85%A5" in body
+                            for method, body in self.telegram_calls))
 
     def test_attendance_inquiry_writes_mcr_shift_and_unanswered_expires(self):
         manager = {"id": 9700, "first_name": "店长"}
