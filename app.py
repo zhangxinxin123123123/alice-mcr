@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -24,6 +24,26 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
+APP_VERSION = "v79_drag_sort_and_speed"
+
+@app.after_request
+def compress_large_json(response):
+    """Reduce transfer time for the large MCR snapshot on mobile connections."""
+    if (response.status_code < 200 or response.status_code >= 300 or response.direct_passthrough
+            or response.headers.get('Content-Encoding') or response.mimetype != 'application/json'
+            or 'gzip' not in request.headers.get('Accept-Encoding', '').lower()):
+        return response
+    raw = response.get_data()
+    if len(raw) < 1400:
+        return response
+    packed = gzip.compress(raw, compresslevel=5)
+    if len(packed) >= len(raw):
+        return response
+    response.set_data(packed)
+    response.headers['Content-Encoding'] = 'gzip'
+    response.headers['Content-Length'] = str(len(packed))
+    response.headers['Vary'] = 'Accept-Encoding'
+    return response
 
 # 固定登录账号：需要改账号密码就在这里改
 USERS = {
@@ -99,7 +119,10 @@ def parse_header(lines):
             return f"{y}-{int(m.group(1)):02d}-{int(m.group(2)):02d}", (m.group(3) or '').strip()
     return None, ''
 
-def init_db():
+_DB_INIT_LOCK = threading.Lock()
+_DB_INITIALIZED_PATHS = set()
+
+def _init_db_schema():
     with conn() as c:
         c.execute("""CREATE TABLE IF NOT EXISTS customers(
             id INTEGER PRIMARY KEY AUTOINCREMENT, customer_no TEXT NOT NULL UNIQUE, name TEXT,
@@ -237,6 +260,23 @@ def init_db():
         c.execute("UPDATE quick_links SET title='网址' WHERE title='排班表'")
         c.execute("UPDATE quick_links SET group_name='常用短语' WHERE group_name='固定短语'")
         c.execute("UPDATE quick_links SET title='常用短语' WHERE title='固定短语'")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_recharges_customer_created ON recharge_records(customer_id, created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_points_customer_created ON points_records(customer_id, created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_schedules_date_id ON girl_schedules(schedule_date, id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_room_assignments_date ON room_assignments(assignment_date, hotel_name, room_no)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_customer_reservations_date ON customer_reservations(reserve_date, start_time, id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_pure_shifts_date_sort ON pure_shifts(shift_date, sort_order, id)")
+        c.execute("PRAGMA optimize")
+
+def init_db():
+    key = str(DB_PATH.resolve())
+    if key in _DB_INITIALIZED_PATHS:
+        return
+    with _DB_INIT_LOCK:
+        if key in _DB_INITIALIZED_PATHS:
+            return
+        _init_db_schema()
+        _DB_INITIALIZED_PATHS.add(key)
 
     try:
         GIRL_PRAISE_DIR.mkdir(parents=True, exist_ok=True)
@@ -393,7 +433,9 @@ def api_system_users():
 
 
 def conn():
-    c=sqlite3.connect(DB_PATH); c.row_factory=sqlite3.Row; return c
+    c=sqlite3.connect(DB_PATH, timeout=20); c.row_factory=sqlite3.Row
+    c.execute('PRAGMA busy_timeout=20000')
+    return c
 def rows(rs): return [dict(r) for r in rs]
 
 NEKO_SEED_GIRLS = [
@@ -1857,6 +1899,8 @@ def all_data():
             update_customer_type_by_history(c, None)
             LAST_FULL_MAINTENANCE_DAY = maintenance_day
         payload = {
+            'ok': True,
+            'version': APP_VERSION,
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
             'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
             'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type,
@@ -2904,7 +2948,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v77_wider_attendance_poster",
+            "version": APP_VERSION,
             "port": 5057,
         })
 
@@ -2923,7 +2967,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v77_wider_attendance_poster",
+            "version": APP_VERSION,
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],

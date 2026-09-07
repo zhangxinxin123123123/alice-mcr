@@ -672,10 +672,19 @@ def _install(module):
 
     old_init = getattr(module, "init_db", None)
     if callable(old_init):
+        patched_init_lock = threading.Lock()
+        patched_init_ready = set()
         def patched_init_db(*args, **kwargs):
-            result = old_init(*args, **kwargs)
-            schema()
-            return result
+            key = str(getattr(module, "DB_PATH", "default"))
+            if key in patched_init_ready:
+                return old_init(*args, **kwargs)
+            with patched_init_lock:
+                if key in patched_init_ready:
+                    return old_init(*args, **kwargs)
+                result = old_init(*args, **kwargs)
+                schema()
+                patched_init_ready.add(key)
+                return result
         module.init_db = patched_init_db
 
     def rows(result):

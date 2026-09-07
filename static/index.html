@@ -13,6 +13,7 @@
 .logo{padding:18px;border-radius:24px;background:linear-gradient(135deg,var(--pink),var(--lav));color:white;text-align:center;box-shadow:0 12px 28px #ff8fc755}.logo h1{margin:0;font-size:23px}.logo p{margin:8px 0 0;font-size:12px}.logo-link{display:block;text-decoration:none;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}.logo-link:hover{transform:translateY(-2px);box-shadow:0 16px 32px #ff8fc766}
 .nav button{width:100%;margin:7px 0;padding:11px;border:0;border-radius:18px;background:white;color:var(--ink);font-weight:800;text-align:left;cursor:pointer;box-shadow:0 5px 14px #d7a9c422}.nav button.on{outline:2px solid var(--pink);background:linear-gradient(90deg,var(--pink2),#fff)}
 .nav-more{margin:7px 0}.nav-more summary{padding:11px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;color:var(--ink);font-weight:900;cursor:pointer;list-style:none}.nav-more summary::-webkit-details-marker{display:none}.nav-more summary::after{content:'＋';float:right}.nav-more[open] summary::after{content:'－'}.nav-more button{margin-left:10px!important;width:calc(100% - 10px)!important}
+.nav-sort-hint{margin:10px 4px 5px;text-align:center;font-size:11px;font-weight:800;opacity:.68}.nav>.nav-dragging{opacity:.38;transform:scale(.98)}.nav>.nav-drop-before{box-shadow:0 -4px 0 #ff8fc7,0 5px 14px #d7a9c422}.nav-drag-ghost{position:fixed;z-index:10000;pointer-events:none;margin:0!important;padding:11px 15px;border:2px solid var(--pink);border-radius:16px;background:#fff;color:var(--ink);font-weight:900;box-shadow:0 15px 36px #8d52704d;opacity:.96;transform:translate(-50%,-55%)}body.nav-sorting{user-select:none;-webkit-user-select:none;cursor:grabbing}
 .main{padding:22px}.top{display:flex;gap:10px;justify-content:space-between;align-items:center;margin-bottom:15px;flex-wrap:wrap}.pill{padding:9px 14px;border-radius:999px;background:white;border:2px solid var(--line);font-weight:800}
 .panel{display:none}.panel.on{display:block}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}.card{background:rgba(255,255,255,.94);border:2px solid var(--line);border-radius:25px;padding:18px;box-shadow:0 10px 24px #b68bac1c;margin-bottom:16px}.card-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.card-title-row h2{margin:0}
 .num{font-size:26px;font-weight:900;color:#e75ca2;margin-top:8px}
@@ -31,7 +32,7 @@ button{touch-action:manipulation}button.primary,button.soft,button.danger{min-he
 .praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-tile.missing img{object-fit:contain;padding:14px;background:#fff0f7}.praise-tile.missing .praise-meta::after{content:"图片文件已丢失，请从接龙预约重新保存";color:#d6003d;font-weight:900}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
 @media(max-width:950px){
  .app{display:block;min-width:0}.side{position:sticky;top:0;z-index:80;padding:8px max(8px,env(safe-area-inset-right)) 7px max(8px,env(safe-area-inset-left));border-right:0;border-bottom:2px solid var(--line);box-shadow:0 5px 18px #b68bac26;background:rgba(255,255,255,.96)}
- .logo{padding:8px 12px;border-radius:15px;text-align:left}.logo h1{font-size:17px}.logo p,.side>.note{display:none}.logo-link:hover{transform:none}
+ .logo{padding:8px 12px;border-radius:15px;text-align:left}.logo h1{font-size:17px}.logo p,.side>.note{display:none}.logo-link:hover{transform:none}.nav-sort-hint{margin:5px 0 0;font-size:10px}
  .nav{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:7px 1px 2px}.nav::-webkit-scrollbar{display:none}.nav button{flex:0 0 auto;width:auto;min-height:42px;margin:0;padding:9px 12px;border-radius:14px;text-align:center;white-space:nowrap}.nav-more{display:flex;flex:0 0 auto;gap:7px;margin:0}.nav-more summary{min-height:42px;padding:9px 12px;border-radius:14px;white-space:nowrap}.nav-more button{margin:0!important;width:auto!important}
  .main{width:100%;min-width:0;padding:10px max(8px,env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}.top{gap:7px;margin-bottom:9px}.pill,.role-badge{padding:7px 10px;font-size:12px}.top button{min-height:38px;padding:7px 10px}
  .grid,.form,.split{grid-template-columns:minmax(0,1fr)}.grid{gap:9px}.card{min-width:0;margin-bottom:10px;padding:12px;border-radius:18px}.card h2{font-size:19px;margin-top:4px}.form{gap:8px}.form>*{min-width:0}.form>input:not([type="checkbox"]):not([type="radio"]),.form>select,.form>textarea,.form>button{width:100%}input:not([type="checkbox"]):not([type="radio"]),select,textarea{min-height:44px;font-size:16px}button.primary,button.soft,button.danger{min-height:44px}
@@ -130,6 +131,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 <div class="app">
 <aside class="side">
  <a class="logo logo-link" href="https://ailisi99.com/" target="_blank" rel="noopener noreferrer" title="打开爱丽丝官网"><h1>爱丽丝学院管理系统</h1><p>订单 · 客户 · 女孩 · TEL预约</p></a>
+ <p class="nav-sort-hint">长按模块即可拖动排序</p>
  <div class="nav">
   <button class="on" data-module="home" onclick="show('home',this)">🏫 学院总览</button>
   <button data-module="orders" onclick="show('orders',this)">🧾 订单/预约</button>
@@ -537,6 +539,7 @@ async function api(url,body){
 
 function applyRole(){
   if(!auth||!authVerified){setLoginActive(true);return;}
+  restoreNavOrder();
   setLoginActive(false);
   document.body.classList.toggle('role-user', auth.role==='user');
   document.body.classList.toggle('role-admin', auth.role==='admin');
@@ -573,6 +576,38 @@ async function doLogin(){
 }
 async function logout(){try{if(auth)await timedFetch('/api/login/logout',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({session_token:auth.session_token})},8000);}catch(e){}finally{localStorage.removeItem('alice_auth');auth=null;location.reload();}}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
+function navOrderStorageKey(){return `alice_nav_order:${auth?.username||'guest'}`;}
+function navTopItems(){return [...document.querySelectorAll('.nav > button, .nav > details')];}
+function navItemKey(el){return el.dataset.module||`group:${el.dataset.moduleGroup||''}`;}
+function restoreNavOrder(){
+ const nav=document.querySelector('.nav');if(!nav)return;
+ let saved=[];try{saved=JSON.parse(localStorage.getItem(navOrderStorageKey())||'[]');}catch(e){}
+ const items=navTopItems(),byKey=new Map(items.map(el=>[navItemKey(el),el]));
+ saved.forEach(key=>{const el=byKey.get(key);if(el){nav.appendChild(el);byKey.delete(key);}});
+ items.forEach(el=>{if(byKey.has(navItemKey(el)))nav.appendChild(el);});
+}
+function saveNavOrder(){try{localStorage.setItem(navOrderStorageKey(),JSON.stringify(navTopItems().map(navItemKey)));}catch(e){}}
+function initNavLongPressSort(){
+ const nav=document.querySelector('.nav');if(!nav||nav.dataset.sortReady)return;nav.dataset.sortReady='1';restoreNavOrder();
+ let timer=null,dragged=null,ghost=null,startX=0,startY=0,suppressUntil=0,activePointer=null;
+ const directItem=target=>{const button=target.closest?.('.nav > button');if(button)return button;const summary=target.closest?.('.nav > details > summary');return summary?summary.parentElement:null;};
+ const cleanup=()=>{clearTimeout(timer);timer=null;navTopItems().forEach(x=>x.classList.remove('nav-drop-before'));if(dragged)dragged.classList.remove('nav-dragging');ghost?.remove();ghost=null;dragged=null;document.body.classList.remove('nav-sorting');if(activePointer!==null&&nav.hasPointerCapture?.(activePointer))nav.releasePointerCapture(activePointer);activePointer=null;};
+ nav.addEventListener('pointerdown',e=>{
+  if(e.button!==undefined&&e.button!==0)return;const item=directItem(e.target);if(!item||item.hidden)return;
+  startX=e.clientX;startY=e.clientY;activePointer=e.pointerId;nav.setPointerCapture?.(e.pointerId);clearTimeout(timer);
+  timer=setTimeout(()=>{dragged=item;dragged.classList.add('nav-dragging');document.body.classList.add('nav-sorting');ghost=document.createElement('div');ghost.className='nav-drag-ghost';ghost.textContent=(item.tagName==='DETAILS'?item.querySelector('summary')?.textContent:item.textContent)||'';document.body.appendChild(ghost);ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px';navigator.vibrate?.(25);},430);
+ },{passive:true});
+ nav.addEventListener('pointermove',e=>{
+  if(!dragged){if(Math.hypot(e.clientX-startX,e.clientY-startY)>10){clearTimeout(timer);timer=null;}return;}
+  e.preventDefault();ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px';
+  const under=document.elementFromPoint(e.clientX,e.clientY);const target=directItem(under);navTopItems().forEach(x=>x.classList.remove('nav-drop-before'));
+  if(!target||target===dragged)return;const rect=target.getBoundingClientRect();const before=innerWidth<=950?e.clientX<rect.left+rect.width/2:e.clientY<rect.top+rect.height/2;
+  nav.insertBefore(dragged,before?target:target.nextSibling);if(before)target.classList.add('nav-drop-before');
+ },{passive:false});
+ const finish=()=>{if(dragged){saveNavOrder();suppressUntil=Date.now()+500;}cleanup();};
+ nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;}});
+ nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
+}
 function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录检测":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
@@ -597,9 +632,10 @@ async function loadAll(){
   if(!r.ok || data.ok===false || !Array.isArray(data.customers)){
     throw new Error((data&&data.error)||`读取失败 HTTP ${r.status}`);
   }
+  rebuildCustomerOrdersIndex();
   authVerified=true;
   setLoginActive(false);
-  let h=await timedFetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()},20000).then(x=>x.json()).catch(()=>null);
+  let h={ok:true,version:data.version||"unknown",customers_count:data.customers.length,girls_count:data.girls.length,orders_count:data.orders.length};
   debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length,girl_praises:(data.girl_praises||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>${(h&&h.version)||"v50_calligraphy_name_overlay"}</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
@@ -2061,9 +2097,12 @@ function linkCustomerName(v,o){
 
 
 
+let customerOrdersIndex=new Map();
+function rebuildCustomerOrdersIndex(){customerOrdersIndex=new Map();(data.orders||[]).forEach(o=>{const key=Number(o.customer_id||0)>0?`id:${o.customer_id}`:`no:${o.customer_no||''}`;if(!customerOrdersIndex.has(key))customerOrdersIndex.set(key,[]);customerOrdersIndex.get(key).push(o);});}
+function ordersForCustomer(c){return customerOrdersIndex.get(Number(c.id||0)>0?`id:${c.id}`:`no:${c.customer_no||''}`)||customerOrdersIndex.get(`no:${c.customer_no||''}`)||[];}
 function daysBetweenToday(d){ if(!d)return 9999; const a=new Date(todayStr), b=new Date(d); return Math.floor((a-b)/86400000); }
 function customerRetention(c){
-  const os=(data.orders||[]).filter(o=>String(o.customer_id)===String(c.id)||String(o.customer_no)===String(c.customer_no));
+  const os=ordersForCustomer(c);
   if(!os.length) return {days:'—', status:'新/未到店', cls:''};
   const last=os.map(o=>o.order_date).sort().pop(); const days=daysBetweenToday(last);
   if(days>=60) return {days, status:'高危流失', cls:'warn-red blink'};
@@ -2073,7 +2112,7 @@ function customerRetention(c){
   return {days, status:'正常', cls:''};
 }
 function customerPointExpire(c){
-  const os=(data.orders||[]).filter(o=>(String(o.customer_id)===String(c.id)||String(o.customer_no)===String(c.customer_no)) && Number(o.points||0)>0).sort((a,b)=>String(b.order_date).localeCompare(a.order_date));
+  const os=ordersForCustomer(c).filter(o=>Number(o.points||0)>0).sort((a,b)=>String(b.order_date).localeCompare(a.order_date));
   if(!os.length || Number(c.points||0)<=0) return {txt:'—',cls:''};
   const last=os[0].order_date; const expire=new Date(last); expire.setDate(expire.getDate()+30);
   const left=Math.ceil((expire-new Date(todayStr))/86400000);
@@ -2355,7 +2394,7 @@ document.addEventListener("change",e=>{
   }
 });
 
-window.addEventListener("DOMContentLoaded",()=>{initChainTimeSelects(); chooseLoginBackground(); setLoginActive(true); if(auth) loadAll(); else {playLoginCue(); applyRole();}});
+window.addEventListener("DOMContentLoaded",()=>{initNavLongPressSort();initChainTimeSelects(); chooseLoginBackground(); setLoginActive(true); if(auth) loadAll(); else {playLoginCue(); applyRole();}});
 
 // ===== 客用出勤表：纯前端动态画面，不写数据库 =====
 let attRows = [];
