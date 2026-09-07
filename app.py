@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v90_wordpress_visibility_retry"
+APP_VERSION = "v91_wordpress_visibility_fields_fix"
 
 @app.after_request
 def compress_large_json(response):
@@ -1150,8 +1150,11 @@ def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
     data = {
         'action': 'inline-save', '_inline_edit': inline_nonce, 'post_type': 'model',
         'post_ID': str(post['id']), 'post_title': post['title'],
-        'post_status': desired_status,
+        '_status': 'publish' if desired_status in ('publish', 'private') else desired_status,
+        'screen': 'edit-model', 'post_view': 'list', 'edit_date': 'true',
     }
+    if desired_status == 'private':
+        data['keep_private'] = 'private'
     req = Request(ALICE_BASE_URL + '/wp-admin/admin-ajax.php', data=urlencode(data).encode('utf-8'),
                   method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
                                           'Referer': post.get('list_url') or ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'})
@@ -1159,6 +1162,9 @@ def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
         result = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace').strip()
     if result in ('', '0', '-1') or ('post-' + str(post['id'])) not in result:
         raise ValueError('官网没有确认女孩状态更新成功')
+    is_private = bool(re.search(r'(?:status-private|(?:—|&mdash;)\s*私密)', result, re.I))
+    if (desired_status == 'private') != is_private:
+        raise ValueError('官网返回文章行，但公开/私密状态没有改变')
 
 def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names):
     attendance_keys = {_wordpress_girl_key(x) for x in (attendance_names or []) if _wordpress_girl_key(x)}
