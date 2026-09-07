@@ -623,6 +623,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
         self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
 
+    def test_shift_order_combines_20_day_popularity_and_two_day_surge(self):
+        target = self.app_module.datetime.strptime(self.day, "%Y-%m-%d").date()
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('稳定女孩','在职',18000)")
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('爆发女孩','在职',18000)")
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,sort_order)
+                         VALUES(?,?,?,?,?)""", (self.day, '稳定女孩', '19:00', '23:00', 1))
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,sort_order)
+                         VALUES(?,?,?,?,?)""", (self.day, '爆发女孩', '19:00', '23:00', 99))
+            for offset in range(3, 15):
+                c.execute("INSERT INTO orders(order_date,girl_name,order_status) VALUES(?,?,'已结束')",
+                          ((target - timedelta(days=offset)).isoformat(), '稳定女孩'))
+            for offset in (0, 0, 1, 1):
+                c.execute("INSERT INTO orders(order_date,girl_name,order_status) VALUES(?,?,'预约中')",
+                          ((target - timedelta(days=offset)).isoformat(), '爆发女孩'))
+            ranked = self.app_module.pure_shift_rows_for_date(c, self.day)
+        names = [row['girl'] for row in ranked]
+        self.assertLess(names.index('爆发女孩'), names.index('稳定女孩'))
+        burst = next(row for row in ranked if row['girl'] == '爆发女孩')
+        self.assertEqual(burst['orders_2d'], 4)
+        self.assertGreater(burst['popularity_score'], 0)
+
     def test_wordpress_photo_gallery_field_name_uses_legacy_plugin_controls(self):
         html = '''<form id="post"><div class="acf-field" data-key="field_gallery">
         照片(可以添加多个照片)<input name="apg_nonce" value="nonce123">

@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v92_avatar_persistence_multi_wp_images"
+APP_VERSION = "v93_price_categories_popularity_order"
 
 @app.after_request
 def compress_large_json(response):
@@ -1146,8 +1146,14 @@ def _wordpress_model_posts(opener):
             status = (status_match.group(1).lower() if status_match else
                       ('private' if re.search(r'(?:—|&mdash;)\s*私密', row_html, re.I) else
                        ('draft' if re.search(r'(?:—|&mdash;)\s*草稿', row_html, re.I) else 'publish')))
+            category_html_match = re.search(
+                r'<td\b[^>]*class=["\'][^"\']*taxonomy-model_category[^"\']*["\'][^>]*>(.*?)</td>',
+                row_html, re.I | re.S)
+            category_text = strip_html_text(html_unescape(category_html_match.group(1))) if category_html_match else ''
+            category_prices = {int(x) for x in re.findall(r'(?<!\d)(1[0-9]{4}|2[0-9]{4}|3[0-9]{4})(?!\d)', category_text)}
             if title:
-                posts.append({'id': post_id, 'title': title, 'status': status, 'list_url': list_url})
+                posts.append({'id': post_id, 'title': title, 'status': status, 'list_url': list_url,
+                              'category_text': category_text, 'category_prices': sorted(category_prices)})
                 seen.add(post_id)
                 found += 1
         if not found and page > 1:
@@ -1157,7 +1163,7 @@ def _wordpress_model_posts(opener):
         raise ValueError('找不到官网女孩列表的快速编辑授权码')
     return posts, inline_nonce
 
-def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
+def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce, category_term_id=None):
     data = {
         'action': 'inline-save', '_inline_edit': inline_nonce, 'post_type': 'model',
         'post_ID': str(post['id']), 'post_title': post['title'],
@@ -1166,6 +1172,8 @@ def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
     }
     if desired_status == 'private':
         data['keep_private'] = 'private'
+    if category_term_id:
+        data['tax_input[model_category][]'] = str(int(category_term_id))
     req = Request(ALICE_BASE_URL + '/wp-admin/admin-ajax.php', data=urlencode(data).encode('utf-8'),
                   method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
                                           'Referer': post.get('list_url') or ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'})
@@ -1176,6 +1184,78 @@ def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce):
     is_private = bool(re.search(r'(?:status-private|(?:—|&mdash;)\s*私密)', result, re.I))
     if (desired_status == 'private') != is_private:
         raise ValueError('官网返回文章行，但公开/私密状态没有改变')
+
+def _wordpress_model_price_terms(opener, create_prices=None):
+    terms_url = ALICE_BASE_URL + '/wp-admin/edit-tags.php?taxonomy=model_category&post_type=model'
+    html, _ = opener_text(opener, terms_url, timeout=40)
+
+    def parse_terms(source):
+        found = {}
+        for match in re.finditer(r'<tr\b[^>]*\bid=["\']tag-(\d+)["\'][^>]*>(.*?)</tr>', source, re.I | re.S):
+            title_match = re.search(r'class=["\'][^"\']*row-title[^"\']*["\'][^>]*>(.*?)</a>', match.group(2), re.I | re.S)
+            label = strip_html_text(html_unescape(title_match.group(1))) if title_match else ''
+            price_match = re.search(r'(?<!\d)(1[0-9]{4}|2[0-9]{4}|3[0-9]{4})(?!\d)', label)
+            if price_match:
+                found[int(price_match.group(1))] = {'id': int(match.group(1)), 'label': label}
+        return found
+
+    terms = parse_terms(html)
+    missing = sorted({int(x) for x in (create_prices or []) if int(x or 0) > 0} - set(terms))
+    if missing:
+        nonce_match = re.search(r'name=["\']_wpnonce_add-tag["\'][^>]*value=["\']([^"\']+)', html, re.I)
+        if not nonce_match:
+            raise ValueError('找不到官网新增价格分类的授权码')
+        nonce = html_unescape(nonce_match.group(1))
+        for price in missing:
+            label = f'一小时{price}'
+            payload = [('action', 'add-tag'), ('screen', 'edit-model_category'),
+                       ('taxonomy', 'model_category'), ('post_type', 'model'),
+                       ('tag-name', label), ('slug', ''), ('description', ''),
+                       ('_wpnonce_add-tag', nonce), ('_wp_http_referer', '/wp-admin/edit-tags.php?taxonomy=model_category&post_type=model')]
+            req = Request(ALICE_BASE_URL + '/wp-admin/edit-tags.php', data=urlencode(payload).encode('utf-8'),
+                          method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': terms_url})
+            with opener.open(req, timeout=40) as response:
+                response.read()
+        html, _ = opener_text(opener, terms_url + '&alice_refresh=1', timeout=40)
+        terms = parse_terms(html)
+    return terms
+
+def sync_alice_wordpress_girl_prices(opener, girl_prices):
+    managed = {}
+    for name, value in (girl_prices or {}).items():
+        key = _wordpress_girl_key(name)
+        price = int(value or 0)
+        if key and price > 0:
+            managed[key] = {'name': str(name).strip(), 'price': price}
+    posts, nonce = _wordpress_model_posts(opener)
+    terms = _wordpress_model_price_terms(opener, [x['price'] for x in managed.values()])
+    matches = {}
+    for post in posts:
+        matches.setdefault(_wordpress_girl_key(post['title']), []).append(post)
+    result = {'synced': True, 'matched': 0, 'updated': 0, 'unchanged': 0,
+              'failed': [], 'unmatched': [], 'missing_terms': []}
+    for key, info in managed.items():
+        candidates = sorted(matches.get(key, []), key=lambda x: x['id'], reverse=True)
+        if not candidates:
+            result['unmatched'].append(info['name'])
+            continue
+        term = terms.get(info['price'])
+        if not term:
+            result['missing_terms'].append(info['price'])
+            continue
+        result['matched'] += 1
+        for post in candidates:
+            if post.get('category_prices') == [info['price']]:
+                result['unchanged'] += 1
+                continue
+            try:
+                _wordpress_inline_model_status(opener, post, post.get('status') or 'publish', nonce, term['id'])
+                result['updated'] += 1
+            except Exception as exc:
+                result['failed'].append({'girl': info['name'], 'post_id': post['id'], 'error': str(exc)})
+    result['synced'] = not result['failed'] and not result['missing_terms']
+    result['missing_terms'] = sorted(set(result['missing_terms']))
+    return result
 
 def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names):
     attendance_keys = {_wordpress_girl_key(x) for x in (attendance_names or []) if _wordpress_girl_key(x)}
@@ -1215,7 +1295,8 @@ def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_name
     result['synced'] = not result['failed']
     return result
 
-def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None):
+def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
+                                    girl_prices=None):
     user, pwd = alice_wordpress_credentials()
     if not user or not pwd:
         return {'configured': False, 'synced': False, 'warning': 'Render 尚未设置 ALICE_WP_ADMIN_USER 和 ALICE_WP_ADMIN_PASSWORD'}
@@ -1297,9 +1378,14 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             visibility = sync_alice_wordpress_girl_visibility(opener, attendance_names or [], all_girl_names or [])
         except Exception as exc:
             visibility = {'synced': False, 'warning': str(exc), 'matched': 0, 'published': 0, 'privated': 0}
+        stage = '同步女孩每小时价格分类'
+        try:
+            price_categories = sync_alice_wordpress_girl_prices(opener, girl_prices or {})
+        except Exception as exc:
+            price_categories = {'synced': False, 'warning': str(exc), 'matched': 0, 'updated': 0}
         return {'configured': True, 'synced': True, 'post_id': post_id,
                 'attachment_id': attachment_ids[0], 'attachment_ids': attachment_ids,
-                'visibility': visibility}
+                'visibility': visibility, 'price_categories': price_categories}
     except Exception as exc:
         warning = str(exc)
         if not warning.startswith(('官网图片上传失败', '官网“今日出勤”保存失败')):
@@ -1411,6 +1497,21 @@ def api_wordpress_visibility_sync():
         return jsonify(ok=bool(result.get('synced')), date=day, attendance=attendance, **result)
     except Exception as exc:
         return jsonify(ok=False, date=day, error=str(exc)), 502
+
+@app.route('/api/wordpress/price-category-sync', methods=['POST'])
+def api_wordpress_price_category_sync():
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以同步官网价格分类'), 403
+    user, pwd = alice_wordpress_credentials()
+    try:
+        opener = alice_wordpress_login(user, pwd)
+        with conn() as c:
+            girl_prices = {str(row['name'] or '').strip(): int(row['list_price'] or 0)
+                           for row in c.execute("SELECT name,list_price FROM girls WHERE COALESCE(name,'')!=''").fetchall()}
+        result = sync_alice_wordpress_girl_prices(opener, girl_prices)
+        return jsonify(ok=bool(result.get('synced')), **result)
+    except Exception as exc:
+        return jsonify(ok=False, error=str(exc)), 502
 
 def acf_value_from_edit(edit_html, data_name):
     m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
@@ -3870,7 +3971,34 @@ def pure_shift_rows_for_date(c, date_str):
             'start': r['start_time'] or '00:00', 'end': r['end_time'] or '04:00', 'tags': tag_text,
             'goldTags': gold_text, 'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
         })
-    return pure + schedules
+    shifts = pure + schedules
+    try:
+        target = datetime.strptime(date_str, '%Y-%m-%d').date()
+        start20 = (target - timedelta(days=19)).isoformat()
+        start2 = (target - timedelta(days=1)).isoformat()
+        stats = {}
+        for row in c.execute("""SELECT girl_name,
+                    COUNT(*) AS orders_20d,
+                    SUM(CASE WHEN order_date>=? THEN 1 ELSE 0 END) AS orders_2d
+                FROM orders
+                WHERE order_date BETWEEN ? AND ? AND COALESCE(order_status,'')!='取消'
+                  AND COALESCE(girl_name,'')!=''
+                GROUP BY girl_name""", (start2, start20, date_str)).fetchall():
+            total = int(row['orders_20d'] or 0)
+            recent = int(row['orders_2d'] or 0)
+            prior = max(0, total - recent)
+            # 20天稳定人气 + 近2天权重 + 超出前18天平均速度的爆发奖励。
+            surge = max(0, recent * 9 - prior)
+            stats[str(row['girl_name'] or '').strip()] = (total * 10 + recent * 30 + surge * 6,
+                                                          total, recent, surge)
+        for shift in shifts:
+            score, total, recent, surge = stats.get(str(shift.get('girl') or '').strip(), (0, 0, 0, 0))
+            shift.update(popularity_score=score, orders_20d=total, orders_2d=recent, surge_score=surge)
+        shifts.sort(key=lambda row: (-int(row.get('popularity_score') or 0),
+                                     int(row.get('sort_order') or 0), str(row.get('girl') or '')))
+    except Exception:
+        pass
+    return shifts
 
 def copy_yesterday_pure_if_empty(c, date_str):
     try:

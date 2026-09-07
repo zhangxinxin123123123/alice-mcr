@@ -1297,7 +1297,11 @@ th{
     applyPreviewStyle();
     const page=previewPages()[index];
     if(!page) throw new Error("找不到这张出勤图");
-    return html2canvas(page,{backgroundColor:null,scale,useCORS:true,imageTimeout:20000});
+    const first=previewPages()[0];
+    const reference=first.getBoundingClientRect();
+    const width=Math.round(reference.width), height=Math.round(reference.height);
+    return html2canvas(page,{backgroundColor:null,scale,useCORS:true,imageTimeout:20000,
+      width,height,windowWidth:Math.max(document.documentElement.clientWidth,width)});
   }
 
   async function waitForShiftAvatarImages(){
@@ -1355,11 +1359,13 @@ th{
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
       const wp=result.wordpress||{};
       const visibility=wp.visibility||{};
+      const priceCategories=wp.price_categories||{};
       const visibilityText=visibility.synced
         ? `\n官网女孩状态：公开 ${visibility.published||0}｜私密 ${visibility.privated||0}｜无需修改 ${visibility.unchanged||0}`
         : (wp.synced?`\n官网女孩状态未同步：${visibility.warning||((visibility.failed||[])[0]?.error)||'请检查女孩名称'}`:'');
       const unmatched=(visibility.unmatched_attendance||[]).length?`\n官网未匹配出勤女孩：${visibility.unmatched_attendance.join('、')}`:'';
-      const wpText=wp.synced?`官网“今日出勤”图片和文案已更新${visibilityText}${unmatched}`:`官网未更新：${wp.warning||'尚未配置'}`;
+      const priceText=priceCategories.synced?`\n官网价格分类：更新 ${priceCategories.updated||0}｜无需修改 ${priceCategories.unchanged||0}`:(wp.synced?`\n官网价格分类未完成：${priceCategories.warning||'请查看内部群提示'}`:'');
+      const wpText=wp.synced?`官网“今日出勤”图片和文案已更新${visibilityText}${unmatched}${priceText}`:`官网未更新：${wp.warning||'尚未配置'}`;
       const avatarWarnings=[...(avatarResult.missing||[]),...(avatarResult.errors||[]).map(x=>x.girl_name)].filter(Boolean);
       const avatarText=avatarWarnings.length?`\nYY头像未识别：${avatarWarnings.join('、')}（已沿用女孩表已保存头像）`:'';
       alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}（${imageDataList.length} 张图）\nTEL预约：${result.synced||0} 位女孩\n${wpText}${avatarText}`);

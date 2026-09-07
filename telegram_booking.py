@@ -1337,11 +1337,14 @@ def register_telegram_booking(
         synced = 0
         names = []
         all_girl_names = []
+        girl_prices = {}
         wordpress_result = {"configured": False, "synced": False}
         if kind == "pure_shift":
             with conn() as c:
-                all_girl_names = [str(r["name"] or "").strip() for r in c.execute(
-                    "SELECT name FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()]
+                girl_rows = c.execute(
+                    "SELECT name,list_price FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()
+                all_girl_names = [str(r["name"] or "").strip() for r in girl_rows]
+                girl_prices = {str(r["name"] or "").strip(): int(r["list_price"] or 0) for r in girl_rows}
                 for shift in pure_shift_rows_for_date(c, day):
                     name = str(shift.get("girl") or "").strip()
                     if name and name not in names:
@@ -1350,7 +1353,8 @@ def register_telegram_booking(
             caption = f"📋 <b>{escape(day)} 爱丽丝出勤表</b>\n已同步 TEL预约女孩：{synced}人"
             if callable(sync_wordpress_attendance):
                 wordpress_result = sync_wordpress_attendance(
-                    day, wordpress_image_bytes_list, str(data.get("service_text") or ""), names, all_girl_names)
+                    day, wordpress_image_bytes_list, str(data.get("service_text") or ""), names, all_girl_names,
+                    girl_prices)
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
         result = None
@@ -1389,6 +1393,14 @@ def register_telegram_booking(
                     sync_warnings.append("官网公开/私密状态更新失败：" + "、".join(failed_names[:30]))
                 if not visibility.get("synced") and visibility.get("warning"):
                     sync_warnings.append("官网女孩状态同步失败：" + str(visibility.get("warning")))
+                price_categories = wordpress_result.get("price_categories") or {}
+                if not price_categories.get("synced"):
+                    detail = price_categories.get("warning")
+                    if not detail and price_categories.get("missing_terms"):
+                        detail = "缺少价格分类 " + "、".join(str(x) for x in price_categories.get("missing_terms") or [])
+                    if not detail and price_categories.get("failed"):
+                        detail = str((price_categories.get("failed") or [{}])[0].get("error") or "部分女孩更新失败")
+                    sync_warnings.append("官网每小时价格分类同步失败：" + str(detail or "请检查女孩名称和定价"))
             if sync_warnings:
                 warning_text = "⚠️ <b>全面同步检查</b>\n" + "\n".join("• " + escape(x) for x in sync_warnings)
                 try:
