@@ -623,6 +623,19 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
         self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
 
+    def test_tonight_page_is_public_and_uses_mcr_price(self):
+        page = self.client.get("/tonight")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("池袋今晚可约", page.get_data(as_text=True))
+        available = self.client.post("/api/customer_available", json={
+            "date": self.day, "client_now": f"{self.day}T10:00:00+09:00"
+        })
+        self.assertEqual(available.status_code, 200, available.get_data(as_text=True))
+        nana = next(row for row in available.json["girls"] if row["girl"] == "娜娜子")
+        self.assertEqual(nana["price"], 15000)
+        self.assertEqual(nana["start"], "19:00")
+        self.assertTrue(nana["slots"])
+
     def test_shift_order_combines_20_day_popularity_and_two_day_surge(self):
         target = self.app_module.datetime.strptime(self.day, "%Y-%m-%d").date()
         with self.app_module.conn() as c:

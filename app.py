@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v95_price_category_unmatched_warning"
+APP_VERSION = "v96_tonight_availability_page"
 
 @app.after_request
 def compress_large_json(response):
@@ -66,7 +66,7 @@ ROLE_DEFAULT_PERMISSIONS = {
 }
 ACTIVE_SESSIONS = {}
 LAST_FULL_MAINTENANCE_DAY = None
-PUBLIC_PATHS = {"/", "/reserve", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
+PUBLIC_PATHS = {"/", "/reserve", "/tonight", "/api/login", "/api/health", "/api/db_info", "/api/customer_register", "/api/customer_login", "/api/customer_available", "/api/customer_reserve"}
 
 def password_hash(password, salt=None):
     salt = salt or secrets.token_hex(16)
@@ -2296,6 +2296,8 @@ def create_or_update_order(c,d):
 def index(): return send_from_directory(APP_DIR/'static','index.html')
 @app.route('/reserve')
 def reserve_page(): return send_from_directory(APP_DIR/'static','reserve.html')
+@app.route('/tonight')
+def tonight_page(): return send_from_directory(APP_DIR/'static','tonight.html')
 @app.route('/girl_praises/<path:filename>')
 def girl_praise_file(filename):
     name = Path(str(filename or '')).name
@@ -4345,6 +4347,10 @@ def api_customer_available():
     with conn() as c:
         normalize_chain_order_times_for_date(c, day, girl_filter)
         shifts=pure_shift_rows_for_date(c, day)
+        profiles={str(row['name'] or '').strip(): row for row in c.execute(
+            """SELECT name,list_price,tags,avatar_url,avatar_updated_at FROM girls
+               WHERE COALESCE(girl_status,'')<>'离职'"""
+        ).fetchall()}
         cutoff=_current_business_minute_for_date(day, client_now)
         out=[]
         for sft in shifts:
@@ -4364,7 +4370,16 @@ def api_customer_available():
                 while x+30 <= free_end:
                     slots.append({'start':min_to_time(x),'end':min_to_time(x+30),'label':f"{min_to_time(x)}-{min_to_time(x+30)}"})
                     x += 30
-            out.append({'girl':girl,'start':min_to_time(st),'end':min_to_time(en),'price':sft.get('price') or 0,'slots':slots})
+            profile=profiles.get(girl)
+            out.append({'girl':girl,'start':min_to_time(st),'end':min_to_time(en),
+                        'price':int(profile['list_price'] or 0) if profile else 0,
+                        'tags':normalize_tag_text((sft.get('tags') or '') or (profile['tags'] if profile else '')),
+                        'avatar_url':str(profile['avatar_url'] or '') if profile else '',
+                        'avatar_updated_at':str(profile['avatar_updated_at'] or '') if profile else '',
+                        'orders_20d':int(sft.get('orders_20d') or 0),
+                        'orders_2d':int(sft.get('orders_2d') or 0),
+                        'trending':bool(int(sft.get('surge_score') or 0) > 0),
+                        'slots':slots})
         return jsonify(ok=True,date=day,girls=out)
 
 @app.route('/api/customer_reserve', methods=['POST'])
