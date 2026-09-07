@@ -1396,6 +1396,9 @@ def register_telegram_booking(
                 if not visibility.get("synced") and visibility.get("warning"):
                     sync_warnings.append("官网女孩状态同步失败：" + str(visibility.get("warning")))
                 price_categories = wordpress_result.get("price_categories") or {}
+                price_unmatched = [str(x) for x in price_categories.get("unmatched") or [] if str(x).strip()]
+                if price_unmatched:
+                    sync_warnings.append("官网价格分类未匹配女孩（请在女孩表填写官网马甲）：" + "、".join(price_unmatched[:30]))
                 if not price_categories.get("synced"):
                     detail = price_categories.get("warning")
                     if not detail and price_categories.get("missing_terms"):
