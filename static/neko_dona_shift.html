@@ -256,7 +256,7 @@ button,input,select{font:inherit;outline:none}
 
   function authHeaders(){
     const auth = JSON.parse(localStorage.getItem("alice_auth")||"null");
-    return auth ? {"X-Alice-Role":auth.role,"X-Alice-User":auth.username||"","X-Alice-Session":auth.session_token||""} : {};
+    return auth ? {"X-Alice-Role":auth.role,"X-Alice-Session":auth.session_token||""} : {};
   }
   function escapeHtml(v){return String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
   function jsAttr(v){

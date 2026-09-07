@@ -424,7 +424,6 @@ function authHeaders(){
   if(!auth)return {};
   const h={"X-Alice-Role":auth.role};
   if(auth.session_token)h["X-Alice-Session"]=auth.session_token;
-  if(auth.username)h["X-Alice-User"]=auth.username;
   return h;
 }
 function setLoginActive(active,message){

@@ -261,7 +261,7 @@ _JS = r'''
     if(window.__loginAuditAuthPatched)return;
     window.__loginAuditAuthPatched=true;
     var oldAuthHeaders=window.authHeaders;
-    window.authHeaders=function(){ var h=oldAuthHeaders?oldAuthHeaders():{}; try{ if(auth&&auth.session_token)h["X-Alice-Session"]=auth.session_token; if(auth&&auth.username)h["X-Alice-User"]=auth.username; }catch(e){} return h; };
+    window.authHeaders=function(){ var h=oldAuthHeaders?oldAuthHeaders():{}; try{ if(auth&&auth.session_token)h["X-Alice-Session"]=auth.session_token; }catch(e){} return h; };
     var oldApplyRole=window.applyRole;
     window.applyRole=function(){
       if(oldApplyRole)oldApplyRole();
