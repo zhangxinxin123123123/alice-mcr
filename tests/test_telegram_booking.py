@@ -623,6 +623,16 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
         self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
 
+    def test_wordpress_photo_gallery_field_name_uses_legacy_plugin_controls(self):
+        html = '''<form id="post"><div class="acf-field" data-key="field_gallery">
+        照片(可以添加多个照片)<input name="apg_nonce" value="nonce123">
+        <input name="acf-photo-gallery-groups[]" value="girl_photos">
+        <input name="acf-photo-gallery-field" value="field_gallery">
+        <input name="girl_photos[]" value="456"></div></form>'''
+        self.assertEqual(self.app_module._acf_gallery_field_key(html), "field_gallery")
+        self.assertEqual(self.app_module._wordpress_photo_gallery_field_name(html, "field_gallery"),
+                         "girl_photos")
+
 
 if __name__ == "__main__":
     unittest.main()

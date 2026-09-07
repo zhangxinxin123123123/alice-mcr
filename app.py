@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v86_wordpress_gallery_diagnostics"
+APP_VERSION = "v87_wordpress_gallery_field_fix"
 
 @app.after_request
 def compress_large_json(response):
@@ -1048,6 +1048,15 @@ def _acf_gallery_field_key(edit_html):
             return name_match.group(1)
     return ''
 
+def _wordpress_photo_gallery_field_name(edit_html, gallery_key):
+    pairs = _wordpress_form_pairs(edit_html)
+    declared_key = next((value for key, value in pairs if key == 'acf-photo-gallery-field'), '')
+    groups = [str(value or '').strip() for key, value in pairs
+              if key == 'acf-photo-gallery-groups[]' and str(value or '').strip()]
+    if declared_key and declared_key != gallery_key:
+        return ''
+    return groups[0] if groups else ''
+
 def _wordpress_rest_nonce(edit_html):
     patterns = [
         r'wpApiSettings\s*=\s*\{.*?["\']nonce["\']\s*:\s*["\']([^"\']+)',
@@ -1200,6 +1209,9 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         gallery_key = _acf_gallery_field_key(edit_html)
         if not gallery_key:
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key)
+        if not gallery_name:
+            raise ValueError('找不到旧版相册插件的图片字段名')
         stage = '上传今日出勤图片'
         try:
             attachment_id = _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes)
@@ -1223,17 +1235,17 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             raise ValueError(f'官网图片上传失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
         stage = '整理“今日出勤”表单'
         pairs = _wordpress_form_pairs(edit_html)
-        replace_names = {'acf[field_5d253ca06ccc7]', f'acf[{gallery_key}]', 'action', 'post_ID'}
+        replace_names = {'acf[field_5d253ca06ccc7]', f'acf[{gallery_key}]', gallery_name,
+                         gallery_name + '[]', 'action', 'post_ID'}
         pairs = [(k, v) for k, v in pairs if k not in replace_names]
         pairs.extend([
             ('action', 'editpost'), ('post_ID', str(post_id)),
             ('acf[field_5d253ca06ccc7]', str(service_text or '').strip()),
-            (f'acf[{gallery_key}]', str(attachment_id)), ('save', '更新'),
+            (gallery_name + '[]', str(attachment_id)), ('save', '更新'),
         ])
         stage = '保存“今日出勤”图片和文案'
         req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
                       method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
-        stage = '同步女孩公开/私密状态'
         try:
             with opener.open(req, timeout=60) as response:
                 final_url = response.geturl()
@@ -1243,6 +1255,7 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             raise ValueError(f'官网“今日出勤”保存失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
         if 'post.php' not in final_url and 'post.php' not in result_html:
             raise ValueError('官网没有确认保存成功')
+        stage = '同步女孩公开/私密状态'
         try:
             visibility = sync_alice_wordpress_girl_visibility(opener, attendance_names or [], all_girl_names or [])
         except Exception as exc:
@@ -1275,12 +1288,17 @@ def api_wordpress_diagnose():
         gallery_key = _acf_gallery_field_key(edit_html)
         if not gallery_key:
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key)
+        if not gallery_name:
+            raise ValueError('找不到旧版相册插件的图片字段名')
         checks.append({'stage': stage, 'ok': True, 'post_id': post_id, 'gallery_key': gallery_key,
+                       'gallery_name': gallery_name,
                        'final_url': final_url,
                        'gallery_inputs': [
                            {'name': key, 'value': str(value)[:100]}
                            for key, value in _wordpress_form_pairs(edit_html)
-                           if gallery_key in key
+                           if key in ('apg_nonce', 'acf-photo-gallery-field', 'acf-photo-gallery-groups[]',
+                                      gallery_name, gallery_name + '[]')
                        ]})
         rest_nonce = _wordpress_rest_nonce(edit_html)
         if rest_nonce:

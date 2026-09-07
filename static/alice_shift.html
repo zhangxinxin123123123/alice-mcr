@@ -1335,7 +1335,9 @@ th{
       const imageDataList=canvases.map(canvas=>canvas.toDataURL('image/png'));
       const wordpressCanvas=await renderShiftPageCanvas(0,2);
       const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data_list:imageDataList,wordpress_image_data:wordpressCanvas.toDataURL('image/png'),service_text:buildCopyText()})});
-      const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
+      const rawResult=await r.text();
+      let result;
+      try{result=JSON.parse(rawResult);}catch(_e){result={ok:false,error:`服务器返回异常（HTTP ${r.status}）`};}
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
       const wp=result.wordpress||{};
       const visibility=wp.visibility||{};
