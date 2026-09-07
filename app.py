@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v89_wordpress_visibility_diagnostics"
+APP_VERSION = "v90_wordpress_visibility_retry"
 
 @app.after_request
 def compress_large_json(response):
@@ -1363,6 +1363,24 @@ def api_wordpress_visibility_diagnose():
                        attendance=attendance, girls=rows_out)
     except Exception as exc:
         return jsonify(ok=False, error=str(exc)), 502
+
+@app.route('/api/wordpress/visibility-sync', methods=['POST'])
+def api_wordpress_visibility_sync():
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以同步官网状态'), 403
+    data = request.get_json(silent=True) or {}
+    day = str(data.get('date') or tokyo_today_date().isoformat())
+    user, pwd = alice_wordpress_credentials()
+    try:
+        opener = alice_wordpress_login(user, pwd)
+        with conn() as c:
+            attendance = [str(row['girl'] or '').strip() for row in pure_shift_rows_for_date(c, day)]
+            managed = [str(row['name'] or '').strip() for row in c.execute(
+                "SELECT name FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()]
+        result = sync_alice_wordpress_girl_visibility(opener, attendance, managed)
+        return jsonify(ok=bool(result.get('synced')), date=day, attendance=attendance, **result)
+    except Exception as exc:
+        return jsonify(ok=False, date=day, error=str(exc)), 502
 
 def acf_value_from_edit(edit_html, data_name):
     m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
