@@ -1313,17 +1313,20 @@ def register_telegram_booking(
         data = request.json or {}
         kind = str(data.get("kind") or "").strip()
         day = str(data.get("date") or "").strip()
-        raw = str(data.get("image_data") or "")
+        raw_items = data.get("image_data_list") or [data.get("image_data")]
+        if not isinstance(raw_items, list):
+            raw_items = [raw_items]
         if kind not in ("pure_shift", "settlement") or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             return jsonify(ok=False, error="报表类型或日期不正确"), 400
-        if not raw.startswith("data:image/png;base64,"):
+        if not raw_items or len(raw_items) > 6 or any(not str(raw or "").startswith("data:image/png;base64,") for raw in raw_items):
             return jsonify(ok=False, error="请先生成 PNG 截图"), 400
         try:
-            image_bytes = base64.b64decode(raw.split(",", 1)[1], validate=True)
+            image_bytes_list = [base64.b64decode(str(raw).split(",", 1)[1], validate=True) for raw in raw_items]
         except Exception:
             return jsonify(ok=False, error="截图数据损坏，请重新生成"), 400
-        if not image_bytes or len(image_bytes) > 10 * 1024 * 1024:
+        if any(not image_bytes or len(image_bytes) > 10 * 1024 * 1024 for image_bytes in image_bytes_list):
             return jsonify(ok=False, error="截图为空或超过10MB"), 400
+        image_bytes = image_bytes_list[0]
         cfg = settings()
         chat_id = str(cfg.get("default_review_chat_id") or "")
         if not valid_group_chat_id(chat_id):
@@ -1348,7 +1351,16 @@ def register_telegram_booking(
                     day, image_bytes, str(data.get("service_text") or ""), names, all_girl_names)
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
-        result = send_photo_bytes(chat_id, image_bytes, caption, thread_id)
+        result = None
+        message_ids = []
+        for page_index, page_bytes in enumerate(image_bytes_list):
+            page_caption = caption
+            if len(image_bytes_list) > 1:
+                page_caption += f"\n图片 {page_index + 1}/{len(image_bytes_list)}"
+            page_result = send_photo_bytes(chat_id, page_bytes, page_caption, thread_id)
+            if result is None:
+                result = page_result
+            message_ids.append(int((page_result or {}).get("message_id") or 0))
         sync_warnings = []
         if kind == "pure_shift":
             if not wordpress_result.get("synced"):
@@ -1380,7 +1392,7 @@ def register_telegram_booking(
                 for index, name in enumerate(names):
                     c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
                                  VALUES(?,?,?,'attendance_send')""", (day, name, index))
-        return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), synced=synced,
+        return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), message_ids=message_ids, synced=synced,
                        wordpress=wordpress_result,
                        sync_warnings=sync_warnings,
                        chat_title=cfg.get("default_review_chat_title") or "Alice内部群")

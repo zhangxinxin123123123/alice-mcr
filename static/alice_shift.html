@@ -623,13 +623,13 @@ th{
   box-shadow:inset 4px 0 0 var(--pink),0 0 12px rgba(255,47,154,.20);
 }
 .preview.mode-default .shift-card-inner{
-  grid-template-columns:64px minmax(0,1fr);
+  grid-template-columns:76px minmax(0,1fr);
   column-gap:12px;
 }
 .preview.mode-default .shift-avatar{
-  width:60px;
-  height:60px;
-  flex-basis:60px;
+  width:72px;
+  height:72px;
+  flex-basis:72px;
   border:2px solid var(--cyan);
   background:linear-gradient(145deg,#13273b,#2b1840);
   outline:1px solid rgba(255,47,154,.70);
@@ -642,14 +642,14 @@ th{
 }
 .preview.mode-default .shift-name{
   color:var(--name-color,#fff);
-  font-size:19px;
+  font-size:22px;
   line-height:1.12;
   -webkit-text-stroke:.15px rgba(255,255,255,.68);
   text-shadow:0 0 2px #fff,0 0 5px var(--name-color,#ff2f9a),0 0 10px var(--name-color,#ff2f9a);
 }
-.preview.mode-default .shift-meta-line{display:flex;align-items:center;gap:6px;min-width:0;margin-top:5px;white-space:nowrap;color:#dfffff;font-size:13px;font-weight:900;text-shadow:0 0 7px rgba(33,247,255,.44)}
+.preview.mode-default .shift-meta-line{display:flex;align-items:center;gap:6px;min-width:0;margin-top:6px;white-space:nowrap;color:#dfffff;font-size:15px;font-weight:900;text-shadow:0 0 7px rgba(33,247,255,.44)}
 .preview.mode-default .shift-meta-line .tag-wrap{flex:1 1 auto;display:flex;flex-wrap:nowrap;gap:3px;margin:0;min-width:0;overflow:hidden}
-.preview.mode-default .shift-meta-line .tag,.preview.mode-default .shift-meta-line .gold-tag{font-size:10px;padding:3px 5px;white-space:nowrap}
+.preview.mode-default .shift-meta-line .tag,.preview.mode-default .shift-meta-line .gold-tag{font-size:11px;padding:4px 6px;white-space:nowrap}
 .preview.mode-default .shift-time{white-space:nowrap}
 .preview.mode-default .shift-price{color:var(--yellow);white-space:nowrap;text-shadow:0 0 8px rgba(255,212,71,.5)}
 .preview.mode-default .time-price-line{
@@ -674,6 +674,7 @@ th{
   border:1px solid #ffd447;
   box-shadow:0 0 10px rgba(255,212,71,.52);
 }
+.preview-page-actions{width:min(528px,calc(100vw - 18px));margin:14px auto 8px;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}.preview-page-actions strong{color:#e75ca2}.extra-preview-pages{display:grid;gap:4px}.attendance-preview-page{margin-bottom:8px}
 .preview.mode-default .empty{
   color:#dfffff;
   text-shadow:0 0 10px rgba(33,247,255,.54);
@@ -776,16 +777,23 @@ th{
     </div>
   </div>
 
-  <div class="preview mode-default" id="previewBox">
+  <div class="preview-page-actions no-print" id="previewPageActions"><strong id="previewPageLabel">第 1 张</strong><button class="primary" onclick="copyShiftPage(0)">复制这张</button><button class="soft" onclick="downloadShiftPage(0)">下载这张</button></div>
+  <div class="preview mode-default attendance-preview-page" id="previewBox" data-page-index="0">
     <div class="preview-title"><span id="posterTitle"></span></div>
     <div class="preview-sub"><span id="previewDateText">出勤人数：</span><span id="previewCount">0</span></div>
     <div class="shift-list" id="shiftList"></div>
   </div>
+  <div class="extra-preview-pages" id="extraPreviewPages"></div>
 </div>
 
 <script>
 (function(){
-  const today = new Date().toISOString().slice(0,10);
+  function tokyoToday(){
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+    const values=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+  }
+  let today = tokyoToday();
   let girls = [];
   let shifts = [];
   let girlAvatars = {};
@@ -858,8 +866,10 @@ th{
 
   function syncPreviewModeControls(){
     const custom = previewMode === "custom";
-    previewBox.classList.toggle("mode-default", !custom);
-    previewBox.classList.toggle("mode-custom", custom);
+    previewPages().forEach(page=>{
+      page.classList.toggle("mode-default", !custom);
+      page.classList.toggle("mode-custom", custom);
+    });
     document.querySelectorAll(".custom-only").forEach(el => { el.hidden = !custom; });
     document.getElementById("defaultUiBtn")?.classList.toggle("active", !custom);
     document.getElementById("customUiBtn")?.classList.toggle("active", custom);
@@ -870,7 +880,7 @@ th{
     if(previewMode !== "custom"){
       document.documentElement.style.setProperty("--poster-scale", "1");
       document.documentElement.style.setProperty("--poster-text", "#0bbff2");
-      previewBox.style.backgroundSize = "cover";
+      previewPages().forEach(page=>{ page.style.backgroundSize = "cover"; });
       return;
     }
     const scale = Number(fontSizeRange?.value || 20) / 20;
@@ -878,7 +888,7 @@ th{
     const textColor = fontColorInput?.value || "#00d9ff";
     document.documentElement.style.setProperty("--poster-scale", String(scale));
     document.documentElement.style.setProperty("--poster-text", textColor);
-    previewBox.style.backgroundSize = bg + "% auto";
+    previewPages().forEach(page=>{ page.style.backgroundSize = bg + "% auto"; });
   }
 
   window.setPreviewMode = function(mode){
@@ -1030,6 +1040,7 @@ th{
       source:x.source || "manual"
     }));
     window.girlTagMemory = data.girl_tags || {};
+    window.girlGoldTagMemory = data.girl_gold_tags || {};
     await loadGirlAvatars().catch(e => console.warn("load avatars failed", e));
     render();
     maybeAutoSyncAliceAvatars();
@@ -1076,7 +1087,9 @@ th{
       shift.id = await saveShiftToDb(shift);
       shifts.push(shift);
       window.girlTagMemory = window.girlTagMemory || {};
+      window.girlGoldTagMemory = window.girlGoldTagMemory || {};
       window.girlTagMemory[girlName] = (shift.tags||[]).join(" ");
+      window.girlGoldTagMemory[girlName] = (shift.goldTags||[]).join(" ");
       goldTagInput.value = "";
       tagInput.value = "";
       render();
@@ -1116,6 +1129,21 @@ th{
     return shifts.filter(s => s.date === d);
   }
 
+  const SHIFT_PAGE_SIZE = 6;
+  function previewPages(){
+    return Array.from(document.querySelectorAll(".attendance-preview-page"));
+  }
+
+  function shiftCardsHtml(rows){
+    if(!rows.length) return '<div class="empty">这一天还没有出勤数据</div>';
+    return rows.map(s=>{
+      const p = getGirlPrice(s.girl);
+      const priceText = p > 0 ? `${yen(p)}${previewMode === "custom" ? " /h" : "/h"}` : "¥0";
+      const nameColor=attendanceNameColor(s);
+      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name" style="--name-color:${nameColor}">${escapeHtml(s.girl)}</div><div class="shift-meta-line">${renderTags(s.tags,s.goldTags)}<span class="shift-time">${escapeHtml(displayTimeRange(s.start,s.end))}</span><span class="shift-price">${priceText}</span></div></div></div></div>`;
+    }).join("");
+  }
+
   function renderTable(){
     const rows = rowsForDate();
     if(!rows.length){ dataTable.innerHTML = '<div class="note">当前日期还没有出勤数据。房间安排录入后会显示在这里。</div>'; return; }
@@ -1153,17 +1181,23 @@ th{
     const d = shiftDate.value || today;
     const rows = rowsForDate();
     const titleDate = d.replaceAll("-","").slice(4);
-    posterTitle.textContent = previewMode === "custom" ? `${titleDate}${weekdayCN(d)}出勤` : `${titleDate} ${weekdayCN(d)}出勤`;
+    const titleText = previewMode === "custom" ? `${titleDate}${weekdayCN(d)}出勤` : `${titleDate} ${weekdayCN(d)}出勤`;
+    posterTitle.textContent = titleText;
     previewDateText.textContent = previewMode === "custom" ? "出勤人数 " : "出勤人数：";
     previewCount.textContent = rows.length;
     shiftCount.textContent = rows.length;
-    if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
-    shiftList.innerHTML = rows.map(s=>{
-      const p = getGirlPrice(s.girl);
-      const priceText = p > 0 ? `${yen(p)}${previewMode === "custom" ? " /h" : "/h"}` : "¥0";
-      const nameColor=attendanceNameColor(s);
-      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name" style="--name-color:${nameColor}">${escapeHtml(s.girl)}</div><div class="shift-meta-line">${renderTags(s.tags,s.goldTags)}<span class="shift-time">${escapeHtml(displayTimeRange(s.start,s.end))}</span><span class="shift-price">${priceText}</span></div></div></div></div>`;
+    const chunks = [];
+    for(let i=0;i<rows.length;i+=SHIFT_PAGE_SIZE) chunks.push(rows.slice(i,i+SHIFT_PAGE_SIZE));
+    if(!chunks.length) chunks.push([]);
+    const totalPages = chunks.length;
+    previewPageLabel.textContent = `第 1 张 / 共 ${totalPages} 张`;
+    previewPageActions.style.display = rows.length ? "flex" : "none";
+    shiftList.innerHTML = shiftCardsHtml(chunks[0]);
+    extraPreviewPages.innerHTML = chunks.slice(1).map((pageRows,index)=>{
+      const pageIndex=index+1;
+      return `<div class="preview-page-actions no-print"><strong>第 ${pageIndex+1} 张 / 共 ${totalPages} 张</strong><button class="primary" onclick="copyShiftPage(${pageIndex})">复制这张</button><button class="soft" onclick="downloadShiftPage(${pageIndex})">下载这张</button></div><div class="preview attendance-preview-page mode-${previewMode === 'custom' ? 'custom' : 'default'}" data-page-index="${pageIndex}" style="${escapeHtml(previewBox.getAttribute('style')||'')}"><div class="preview-title"><span>${escapeHtml(titleText)}</span></div><div class="preview-sub"><span>${previewMode === 'custom' ? '出勤人数 ' : '出勤人数：'}</span><span>${rows.length}</span></div><div class="shift-list">${shiftCardsHtml(pageRows)}</div></div>`;
     }).join("");
+    applyPreviewStyle();
   }
 
   function renderGirlSuggest(keyword=""){
@@ -1180,6 +1214,7 @@ th{
     girlSuggest.style.display = "none";
     refreshPriceBySelectedGirl();
     tagInput.value = (window.girlTagMemory && window.girlTagMemory[name]) ? window.girlTagMemory[name] : "";
+    goldTagInput.value = (window.girlGoldTagMemory && window.girlGoldTagMemory[name]) ? window.girlGoldTagMemory[name] : "";
   };
 
   function girlSelectOptions(selected){
@@ -1210,7 +1245,9 @@ th{
     try{
       s.id = await saveShiftToDb(s);
       window.girlTagMemory = window.girlTagMemory || {};
+      window.girlGoldTagMemory = window.girlGoldTagMemory || {};
       window.girlTagMemory[s.girl] = (s.tags||[]).join(" ");
+      window.girlGoldTagMemory[s.girl] = (s.goldTags||[]).join(" ");
       closeEditModal();
       render();
     }catch(e){ console.error(e); alert(e.message || "保存失败"); }
@@ -1231,8 +1268,10 @@ th{
       gold:"linear-gradient(135deg,rgba(80,40,0,.52),rgba(255,220,120,.45)), radial-gradient(circle at 40% 25%,#fff0aa99 0 16%,transparent 17%), linear-gradient(160deg,#6c4300,#d19b22,#fff2b0)",
       blue:"linear-gradient(135deg,rgba(160,235,255,.58),rgba(230,245,255,.55)), radial-gradient(circle at 60% 25%,#ffffffaa 0 18%,transparent 19%), linear-gradient(160deg,#b8f0ff,#dff5ff,#f7fbff)"
     };
-    if(type === "clear") previewBox.style.removeProperty("--poster-bg");
-    else previewBox.style.setProperty("--poster-bg", bgs[type]);
+    previewPages().forEach(page=>{
+      if(type === "clear") page.style.removeProperty("--poster-bg");
+      else page.style.setProperty("--poster-bg", bgs[type]);
+    });
   };
 
   function canvasToBlob(canvas){
@@ -1254,29 +1293,47 @@ th{
     return true;
   }
 
-  window.captureShift = async function(){
+  async function renderShiftPageCanvas(index,scale=3){
+    applyPreviewStyle();
+    const page=previewPages()[index];
+    if(!page) throw new Error("找不到这张出勤图");
+    return html2canvas(page,{backgroundColor:null,scale,useCORS:true,imageTimeout:20000});
+  }
+
+  window.copyShiftPage = async function(index){
     try{
-      applyPreviewStyle();
-      const canvas = await html2canvas(previewBox,{backgroundColor:null,scale:3,useCORS:true});
+      const canvas = await renderShiftPageCanvas(index,3);
       const blob = await canvasToBlob(canvas);
       if(!blob) throw new Error("图片生成失败");
       const copied = await copyImageBlob(blob).catch(()=>false);
-      if(copied) alert("已复制出勤图片");
+      if(copied) alert(`已复制第 ${index+1} 张出勤图片`);
       else{
-        downloadBlob(blob, "alice_shift.png");
+        downloadBlob(blob, `alice_shift_${shiftDate.value||today}_${index+1}.png`);
         alert("当前浏览器不支持直接复制图片，已下载PNG。");
       }
     }catch(e){ console.error(e); alert("截图失败，请确认浏览器允许复制或下载。"); }
   };
+
+  window.downloadShiftPage = async function(index){
+    try{
+      const canvas=await renderShiftPageCanvas(index,3);
+      const blob=await canvasToBlob(canvas);
+      if(!blob) throw new Error("图片生成失败");
+      downloadBlob(blob,`alice_shift_${shiftDate.value||today}_${index+1}.png`);
+    }catch(e){console.error(e);alert("下载失败，请稍后重试。");}
+  };
+
+  window.captureShift = function(){ return window.copyShiftPage(0); };
 
   window.sendShiftToTelegram = async function(){
     const d=shiftDate.value||today;
     if(!rowsForDate().length){alert("当前日期还没有出勤数据");return;}
     if(window.parent&&window.parent.beginBusy)window.parent.beginBusy("正在全面同步 Telegram、TEL预约和官网…");
     try{
-      applyPreviewStyle();
-      const canvas=await html2canvas(previewBox,{backgroundColor:null,scale:4,useCORS:true,imageTimeout:20000});
-      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:canvas.toDataURL('image/png'),service_text:buildCopyText()})});
+      const canvases=[];
+      for(let index=0;index<previewPages().length;index++) canvases.push(await renderShiftPageCanvas(index,4));
+      const imageDataList=canvases.map(canvas=>canvas.toDataURL('image/png'));
+      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:imageDataList[0],image_data_list:imageDataList,service_text:buildCopyText()})});
       const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
       const wp=result.wordpress||{};
@@ -1286,7 +1343,7 @@ th{
         : (wp.synced?`\n官网女孩状态未同步：${visibility.warning||((visibility.failed||[])[0]?.error)||'请检查女孩名称'}`:'');
       const unmatched=(visibility.unmatched_attendance||[]).length?`\n官网未匹配出勤女孩：${visibility.unmatched_attendance.join('、')}`:'';
       const wpText=wp.synced?`官网“今日出勤”图片和文案已更新${visibilityText}${unmatched}`:`官网未更新：${wp.warning||'尚未配置'}`;
-      alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}\nTEL预约：${result.synced||0} 位女孩\n${wpText}`);
+      alert(`全面同步完成：\nTelegram：${result.chat_title||'Alice内部群'}（${imageDataList.length} 张图）\nTEL预约：${result.synced||0} 位女孩\n${wpText}`);
     }catch(e){console.error(e);alert(e.message||"发送失败，请稍后重试");}
     finally{if(window.parent&&window.parent.endBusy)window.parent.endBusy();}
   };
@@ -1334,7 +1391,7 @@ th{
       if(!file) return;
       activateCustomPreview();
       const reader = new FileReader();
-      reader.onload = ev => { previewBox.style.setProperty("--poster-bg", `url("${ev.target.result}")`); applyPreviewStyle(); };
+      reader.onload = ev => { previewPages().forEach(page=>page.style.setProperty("--poster-bg", `url("${ev.target.result}")`)); applyPreviewStyle(); };
       reader.readAsDataURL(file);
     });
     fontSizeRange.addEventListener("input", ()=>{ activateCustomPreview(); render(); });
@@ -1346,6 +1403,15 @@ th{
     });
     render();
   });
+  function refreshTokyoDate(){
+    const fresh=tokyoToday();
+    if(fresh===today) return;
+    const followedToday=shiftDate.value===today;
+    today=fresh;
+    if(followedToday){ shiftDate.value=today; loadPureShifts(true); }
+  }
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden) refreshTokyoDate(); });
+  setInterval(refreshTokyoDate,60000);
 })();
 </script>
 </body>

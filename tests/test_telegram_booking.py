@@ -597,13 +597,31 @@ class TelegramBookingFlowTest(unittest.TestCase):
             c.execute("INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_title','Alice内部群') ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value")
         response = self.client.post("/api/telegram/report-photo", headers=headers, json={
             "kind": "pure_shift", "date": self.day,
-            "image_data": "data:image/png;base64,ZmFrZS1wbmc="
+            "image_data_list": [
+                "data:image/png;base64,ZmFrZS1wbmctMQ==",
+                "data:image/png;base64,ZmFrZS1wbmctMg==",
+            ]
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.json["synced"], 2)
-        self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
+        self.assertEqual(len(response.json["message_ids"]), 2)
+        self.assertEqual(sum(method == "sendPhoto" for method, _body in self.telegram_calls), 2)
         self.assertTrue(any(method == "sendMessage" and "chat_id=-90000" in body
                             for method, body in self.telegram_calls))
+
+    def test_pure_shift_remembers_normal_and_gold_tags(self):
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        saved = self.client.post("/api/pure_shifts", headers=headers, json={
+            "date": self.day, "girl": "娜娜子", "start": "20:30", "end": "00:00",
+            "tags": ["年纪小", "新人"], "goldTags": ["房间", "推荐"]
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        later_day = (self.app_module._tokyo_now().date() + timedelta(days=2)).isoformat()
+        loaded = self.client.get(f"/api/pure_shifts?date={later_day}&autocopy=0", headers=headers)
+        self.assertEqual(loaded.status_code, 200, loaded.get_data(as_text=True))
+        self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
+        self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
 
 
 if __name__ == "__main__":

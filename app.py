@@ -24,7 +24,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v81_nav_click_and_sync_warning"
+APP_VERSION = "v82_shift_pages_and_tag_memory"
 
 @app.after_request
 def compress_large_json(response):
@@ -187,7 +187,7 @@ def _init_db_schema():
             sort_order INTEGER DEFAULT 0, source TEXT DEFAULT 'manual', note TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_tag_memory(
-            girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            girl_name TEXT PRIMARY KEY, tags TEXT DEFAULT '', gold_tags TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_avatar_cache(
             girl_name TEXT PRIMARY KEY, neko_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '',
             source_url TEXT DEFAULT '', updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -266,6 +266,9 @@ def _init_db_schema():
         c.execute("CREATE INDEX IF NOT EXISTS idx_room_assignments_date ON room_assignments(assignment_date, hotel_name, room_no)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_customer_reservations_date ON customer_reservations(reserve_date, start_time, id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_pure_shifts_date_sort ON pure_shifts(shift_date, sort_order, id)")
+        tag_memory_cols = [r[1] for r in c.execute('PRAGMA table_info(girl_tag_memory)').fetchall()]
+        if 'gold_tags' not in tag_memory_cols:
+            c.execute("ALTER TABLE girl_tag_memory ADD COLUMN gold_tags TEXT DEFAULT ''")
         c.execute("PRAGMA optimize")
 
 def init_db():
@@ -3638,13 +3641,16 @@ def pure_shift_rows_for_date(c, date_str):
         })
     schedules = []
     for r in c.execute("SELECT * FROM girl_schedules WHERE schedule_date=? AND COALESCE(status,'出勤')='出勤' ORDER BY id ASC", (date_str,)).fetchall():
-        mem = c.execute("SELECT tags FROM girl_tag_memory WHERE girl_name=?", (r['girl_name'],)).fetchone()
+        mem = c.execute("SELECT tags,gold_tags FROM girl_tag_memory WHERE girl_name=?", (r['girl_name'],)).fetchone()
         g = c.execute("SELECT tags FROM girls WHERE name=?", (r['girl_name'],)).fetchone()
         tag_text = normalize_tag_text((mem['tags'] if mem else '') or (g['tags'] if g else ''))
+        gold_text = normalize_gold_tag_text(mem['gold_tags'] if mem else '')
+        if '房间安排自动生成' in str(r['note'] or '') and '房间' not in gold_text.split():
+            gold_text = normalize_gold_tag_text((gold_text + ' 房间').strip())
         schedules.append({
             'id': f"schedule_{r['id']}", 'raw_id': r['id'], 'date': r['schedule_date'], 'girl': r['girl_name'],
             'start': r['start_time'] or '00:00', 'end': r['end_time'] or '04:00', 'tags': tag_text,
-            'goldTags': '房间' if '房间安排自动生成' in str(r['note'] or '') else '', 'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
+            'goldTags': gold_text, 'source': 'schedule', 'sort_order': 10000 + int(r['id'] or 0)
         })
     return pure + schedules
 
@@ -3671,8 +3677,10 @@ def api_pure_shifts_get():
     with conn() as c:
         copied = copy_yesterday_pure_if_empty(c, date_str) if autocopy else 0
         shifts = pure_shift_rows_for_date(c, date_str)
-        tags = {r['girl_name']: normalize_tag_text(r['tags']) for r in c.execute('SELECT * FROM girl_tag_memory').fetchall()}
-        return jsonify(ok=True, shifts=shifts, girl_tags=tags, copied=copied)
+        memory_rows = c.execute('SELECT * FROM girl_tag_memory').fetchall()
+        tags = {r['girl_name']: normalize_tag_text(r['tags']) for r in memory_rows}
+        gold_tags = {r['girl_name']: normalize_gold_tag_text(r['gold_tags']) for r in memory_rows}
+        return jsonify(ok=True, shifts=shifts, girl_tags=tags, girl_gold_tags=gold_tags, copied=copied)
 
 @app.route('/api/pure_shifts', methods=['POST'])
 def api_pure_shifts_save():
@@ -3688,8 +3696,9 @@ def api_pure_shifts_save():
     gold_tags = normalize_gold_tag_text(d.get('goldTags') if not isinstance(d.get('goldTags'), list) else ' '.join(d.get('goldTags')))
     raw_id = str(d.get('id') or '')
     with conn() as c:
-        c.execute("""INSERT INTO girl_tag_memory(girl_name,tags,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
-                     ON CONFLICT(girl_name) DO UPDATE SET tags=excluded.tags, updated_at=CURRENT_TIMESTAMP""", (girl, tags))
+        c.execute("""INSERT INTO girl_tag_memory(girl_name,tags,gold_tags,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
+                     ON CONFLICT(girl_name) DO UPDATE SET tags=excluded.tags,gold_tags=excluded.gold_tags,
+                     updated_at=CURRENT_TIMESTAMP""", (girl, tags, gold_tags))
         if raw_id.startswith('pure_'):
             sid = int(raw_id.split('_',1)[1])
             c.execute("""UPDATE pure_shifts SET shift_date=?,girl_name=?,start_time=?,end_time=?,tags=?,gold_tags=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, girl, start, end, tags, gold_tags, sid))
