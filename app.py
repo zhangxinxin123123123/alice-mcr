@@ -24,7 +24,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v80_wordpress_girl_visibility"
+APP_VERSION = "v81_nav_click_and_sync_warning"
 
 @app.after_request
 def compress_large_json(response):

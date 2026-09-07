@@ -1349,6 +1349,31 @@ def register_telegram_booking(
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
         result = send_photo_bytes(chat_id, image_bytes, caption, thread_id)
+        sync_warnings = []
+        if kind == "pure_shift":
+            if not wordpress_result.get("synced"):
+                sync_warnings.append("官网同步失败：" + str(wordpress_result.get("warning") or "官网账号尚未配置"))
+            else:
+                visibility = wordpress_result.get("visibility") or {}
+                unmatched = [str(x) for x in visibility.get("unmatched_attendance") or [] if str(x).strip()]
+                if unmatched:
+                    sync_warnings.append("官网女孩管理未识别出勤女孩：" + "、".join(unmatched[:30]))
+                failed = visibility.get("failed") or []
+                if failed:
+                    failed_names = []
+                    for item in failed:
+                        name = str((item or {}).get("girl") or "未知女孩")
+                        if name not in failed_names:
+                            failed_names.append(name)
+                    sync_warnings.append("官网公开/私密状态更新失败：" + "、".join(failed_names[:30]))
+                if not visibility.get("synced") and visibility.get("warning"):
+                    sync_warnings.append("官网女孩状态同步失败：" + str(visibility.get("warning")))
+            if sync_warnings:
+                warning_text = "⚠️ <b>全面同步检查</b>\n" + "\n".join("• " + escape(x) for x in sync_warnings)
+                try:
+                    send_message(chat_id, warning_text[:3900], thread_id=thread_id)
+                except Exception:
+                    pass
         if kind == "pure_shift":
             with conn() as c:
                 c.execute("DELETE FROM telegram_daily_girls WHERE booking_date=?", (day,))
@@ -1357,6 +1382,7 @@ def register_telegram_booking(
                                  VALUES(?,?,?,'attendance_send')""", (day, name, index))
         return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), synced=synced,
                        wordpress=wordpress_result,
+                       sync_warnings=sync_warnings,
                        chat_title=cfg.get("default_review_chat_title") or "Alice内部群")
 
     ensure_db()

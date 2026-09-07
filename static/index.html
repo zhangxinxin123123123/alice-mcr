@@ -594,8 +594,8 @@ function initNavLongPressSort(){
  const cleanup=()=>{clearTimeout(timer);timer=null;navTopItems().forEach(x=>x.classList.remove('nav-drop-before'));if(dragged)dragged.classList.remove('nav-dragging');ghost?.remove();ghost=null;dragged=null;document.body.classList.remove('nav-sorting');if(activePointer!==null&&nav.hasPointerCapture?.(activePointer))nav.releasePointerCapture(activePointer);activePointer=null;};
  nav.addEventListener('pointerdown',e=>{
   if(e.button!==undefined&&e.button!==0)return;const item=directItem(e.target);if(!item||item.hidden)return;
-  startX=e.clientX;startY=e.clientY;activePointer=e.pointerId;nav.setPointerCapture?.(e.pointerId);clearTimeout(timer);
-  timer=setTimeout(()=>{dragged=item;dragged.classList.add('nav-dragging');document.body.classList.add('nav-sorting');ghost=document.createElement('div');ghost.className='nav-drag-ghost';ghost.textContent=(item.tagName==='DETAILS'?item.querySelector('summary')?.textContent:item.textContent)||'';document.body.appendChild(ghost);ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px';navigator.vibrate?.(25);},430);
+  startX=e.clientX;startY=e.clientY;activePointer=e.pointerId;clearTimeout(timer);
+  timer=setTimeout(()=>{dragged=item;nav.setPointerCapture?.(activePointer);dragged.classList.add('nav-dragging');document.body.classList.add('nav-sorting');ghost=document.createElement('div');ghost.className='nav-drag-ghost';ghost.textContent=(item.tagName==='DETAILS'?item.querySelector('summary')?.textContent:item.textContent)||'';document.body.appendChild(ghost);ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px';navigator.vibrate?.(25);},430);
  },{passive:true});
  nav.addEventListener('pointermove',e=>{
   if(!dragged){if(Math.hypot(e.clientX-startX,e.clientY-startY)>10){clearTimeout(timer);timer=null;}return;}
@@ -605,7 +605,7 @@ function initNavLongPressSort(){
   nav.insertBefore(dragged,before?target:target.nextSibling);if(before)target.classList.add('nav-drop-before');
  },{passive:false});
  const finish=()=>{if(dragged){saveNavOrder();suppressUntil=Date.now()+500;}cleanup();};
- nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;}});
+ nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
 function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录检测":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}

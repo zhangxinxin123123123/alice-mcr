@@ -602,6 +602,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.json["synced"], 2)
         self.assertTrue(any(method == "sendPhoto" for method, _body in self.telegram_calls))
+        self.assertTrue(any(method == "sendMessage" and "chat_id=-90000" in body
+                            for method, body in self.telegram_calls))
 
 
 if __name__ == "__main__":
