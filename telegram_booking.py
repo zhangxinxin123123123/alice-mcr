@@ -1342,9 +1342,11 @@ def register_telegram_booking(
         if kind == "pure_shift":
             with conn() as c:
                 girl_rows = c.execute(
-                    "SELECT name,list_price FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()
+                    "SELECT name,girl_alias,list_price FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()
                 all_girl_names = [str(r["name"] or "").strip() for r in girl_rows]
-                girl_prices = {str(r["name"] or "").strip(): int(r["list_price"] or 0) for r in girl_rows}
+                girl_prices = {str(r["name"] or "").strip(): {
+                    "price": int(r["list_price"] or 0), "alias": str(r["girl_alias"] or "").strip()
+                } for r in girl_rows}
                 for shift in pure_shift_rows_for_date(c, day):
                     name = str(shift.get("girl") or "").strip()
                     if name and name not in names:

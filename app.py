@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v93_price_categories_popularity_order"
+APP_VERSION = "v94_price_categories_alias_and_paging"
 
 @app.after_request
 def compress_large_json(response):
@@ -1150,7 +1150,7 @@ def _wordpress_model_posts(opener):
                 r'<td\b[^>]*class=["\'][^"\']*taxonomy-model_category[^"\']*["\'][^>]*>(.*?)</td>',
                 row_html, re.I | re.S)
             category_text = strip_html_text(html_unescape(category_html_match.group(1))) if category_html_match else ''
-            category_prices = {int(x) for x in re.findall(r'(?<!\d)(1[0-9]{4}|2[0-9]{4}|3[0-9]{4})(?!\d)', category_text)}
+            category_prices = {int(x) for x in re.findall(r'(?<!\d)([1-9][0-9]{4,5})(?!\d)', category_text)}
             if title:
                 posts.append({'id': post_id, 'title': title, 'status': status, 'list_url': list_url,
                               'category_text': category_text, 'category_prices': sorted(category_prices)})
@@ -1194,7 +1194,13 @@ def _wordpress_model_price_terms(opener, create_prices=None):
         for match in re.finditer(r'<tr\b[^>]*\bid=["\']tag-(\d+)["\'][^>]*>(.*?)</tr>', source, re.I | re.S):
             title_match = re.search(r'class=["\'][^"\']*row-title[^"\']*["\'][^>]*>(.*?)</a>', match.group(2), re.I | re.S)
             label = strip_html_text(html_unescape(title_match.group(1))) if title_match else ''
-            price_match = re.search(r'(?<!\d)(1[0-9]{4}|2[0-9]{4}|3[0-9]{4})(?!\d)', label)
+            price_match = re.search(r'(?<!\d)([1-9][0-9]{4,5})(?!\d)', label)
+            if price_match:
+                found[int(price_match.group(1))] = {'id': int(match.group(1)), 'label': label}
+        # 父类别下拉包含全部分页项目，用它补齐第二页及以后价格分类。
+        for match in re.finditer(r'<option\b[^>]*value=["\'](\d+)["\'][^>]*>(.*?)</option>', source, re.I | re.S):
+            label = strip_html_text(html_unescape(match.group(2)))
+            price_match = re.search(r'(?<!\d)([1-9][0-9]{4,5})(?!\d)', label)
             if price_match:
                 found[int(price_match.group(1))] = {'id': int(match.group(1)), 'label': label}
         return found
@@ -1221,21 +1227,32 @@ def _wordpress_model_price_terms(opener, create_prices=None):
     return terms
 
 def sync_alice_wordpress_girl_prices(opener, girl_prices):
-    managed = {}
+    managed = []
+    managed_keys = {}
     for name, value in (girl_prices or {}).items():
-        key = _wordpress_girl_key(name)
-        price = int(value or 0)
-        if key and price > 0:
-            managed[key] = {'name': str(name).strip(), 'price': price}
+        detail = value if isinstance(value, dict) else {'price': value}
+        price = int(detail.get('price') or 0)
+        info = {'name': str(name).strip(), 'price': price, 'keys': []}
+        aliases = [detail.get('alias') or '']
+        aliases.extend(re.split(r'[,，、/]+', str(detail.get('alias') or '')))
+        for candidate in [name] + aliases:
+            key = _wordpress_girl_key(candidate)
+            if key and key not in info['keys']:
+                info['keys'].append(key)
+                managed_keys[key] = info
+        if info['keys'] and price > 0:
+            managed.append(info)
     posts, nonce = _wordpress_model_posts(opener)
-    terms = _wordpress_model_price_terms(opener, [x['price'] for x in managed.values()])
+    terms = _wordpress_model_price_terms(opener, [x['price'] for x in managed])
     matches = {}
     for post in posts:
-        matches.setdefault(_wordpress_girl_key(post['title']), []).append(post)
+        info = managed_keys.get(_wordpress_girl_key(post['title']))
+        if info:
+            matches.setdefault(info['name'], []).append(post)
     result = {'synced': True, 'matched': 0, 'updated': 0, 'unchanged': 0,
               'failed': [], 'unmatched': [], 'missing_terms': []}
-    for key, info in managed.items():
-        candidates = sorted(matches.get(key, []), key=lambda x: x['id'], reverse=True)
+    for info in managed:
+        candidates = sorted(matches.get(info['name'], []), key=lambda x: x['id'], reverse=True)
         if not candidates:
             result['unmatched'].append(info['name'])
             continue
@@ -1506,8 +1523,9 @@ def api_wordpress_price_category_sync():
     try:
         opener = alice_wordpress_login(user, pwd)
         with conn() as c:
-            girl_prices = {str(row['name'] or '').strip(): int(row['list_price'] or 0)
-                           for row in c.execute("SELECT name,list_price FROM girls WHERE COALESCE(name,'')!=''").fetchall()}
+            girl_prices = {str(row['name'] or '').strip(): {'price': int(row['list_price'] or 0),
+                                                            'alias': str(row['girl_alias'] or '').strip()}
+                           for row in c.execute("SELECT name,girl_alias,list_price FROM girls WHERE COALESCE(name,'')!=''").fetchall()}
         result = sync_alice_wordpress_girl_prices(opener, girl_prices)
         return jsonify(ok=bool(result.get('synced')), **result)
     except Exception as exc:
