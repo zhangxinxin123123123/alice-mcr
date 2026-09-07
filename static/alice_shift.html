@@ -1334,7 +1334,7 @@ th{
       for(let index=0;index<previewPages().length;index++) canvases.push(await renderShiftPageCanvas(index,3));
       const imageDataList=canvases.map(canvas=>canvas.toDataURL('image/png'));
       const wordpressCanvas=await renderShiftPageCanvas(0,2);
-      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data:imageDataList[0],image_data_list:imageDataList,wordpress_image_data:wordpressCanvas.toDataURL('image/png'),service_text:buildCopyText()})});
+      const r=await fetch('/api/telegram/report-photo',{method:'POST',headers:apiHeaders(),body:JSON.stringify({kind:'pure_shift',date:d,image_data_list:imageDataList,wordpress_image_data:wordpressCanvas.toDataURL('image/png'),service_text:buildCopyText()})});
       const result=await r.json().catch(()=>({ok:false,error:'服务器返回异常'}));
       if(!r.ok||!result.ok)throw new Error(result.error||'发送失败');
       const wp=result.wordpress||{};

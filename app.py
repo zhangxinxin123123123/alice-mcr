@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v85_wordpress_rest_media_upload"
+APP_VERSION = "v86_wordpress_gallery_diagnostics"
 
 @app.after_request
 def compress_large_json(response):
@@ -1276,7 +1276,12 @@ def api_wordpress_diagnose():
         if not gallery_key:
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
         checks.append({'stage': stage, 'ok': True, 'post_id': post_id, 'gallery_key': gallery_key,
-                       'final_url': final_url})
+                       'final_url': final_url,
+                       'gallery_inputs': [
+                           {'name': key, 'value': str(value)[:100]}
+                           for key, value in _wordpress_form_pairs(edit_html)
+                           if gallery_key in key
+                       ]})
         rest_nonce = _wordpress_rest_nonce(edit_html)
         if rest_nonce:
             stage = '检查官网 REST 媒体接口'
