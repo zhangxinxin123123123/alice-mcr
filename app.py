@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v97_auto_chain_import"
+APP_VERSION = "v98_auto_chain_import_controls"
 
 @app.after_request
 def compress_large_json(response):
@@ -2792,7 +2792,7 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
         fallback_sequence = 0
         for line in lines:
             line_date, line_girl = parse_header([line])
-            if line_date and line_girl and line_date == hd and line_girl == hg:
+            if line_date and line_date == hd and (not line_girl or line_girl == hg):
                 continue
             st, rest_raw = parse_chain_service_time(line, shift_intervals)
             if not st:
@@ -2809,9 +2809,12 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
             if parts and '包夜' in parts[0][0]:
                 parts.pop(0)
             if not parts:
-                continue
+                raise ValueError(f'接龙行缺少价格和客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
 
-            rec = yen_to_int(parts.pop(0)[0])
+            price_token = parts.pop(0)[0]
+            rec = yen_to_int(price_token)
+            if rec <= 0:
+                raise ValueError(f'接龙行价格无法识别：{line}。请填写例如 15000。')
             if not parts:
                 raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
             cust_token, force_name = parts.pop(0)

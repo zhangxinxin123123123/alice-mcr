@@ -558,6 +558,40 @@ class TelegramBookingFlowTest(unittest.TestCase):
         retried = self.client.post("/api/telegram/chain-import/run", headers=headers)
         self.assertEqual(retried.json["imported"], 1)
 
+    def test_auto_chain_date_only_uses_binding_empty_is_silent_and_internal_can_toggle(self):
+        manager = {"id": 9600, "first_name": "店长"}
+        internal = {"id": -30003, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -39999, "type": "supergroup", "title": "娜娜子群"}
+        self.webhook({"message": {"message_id": 80, "chat": internal, "from": manager, "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 81, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
+        self.webhook({"message": {
+            "message_id": 82, "chat": girl_chat, "from": manager,
+            "text": f"{self.day}\n1.19-20/15000/仅日期自动客人",
+        }})
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        imported = self.client.post("/api/telegram/chain-import/run", headers=headers)
+        self.assertEqual(imported.json["imported"], 1, imported.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            self.assertIsNotNone(c.execute(
+                "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='仅日期自动客人'",
+                (self.day,)).fetchone())
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 83, "chat": girl_chat, "from": manager, "text": self.day}})
+        empty = self.client.post("/api/telegram/chain-import/run", headers=headers)
+        self.assertEqual(empty.json["empty"], 1, empty.get_data(as_text=True))
+        self.assertFalse(any(method == "sendMessage" for method, _body in self.telegram_calls))
+
+        self.webhook({"message": {"message_id": 84, "chat": internal, "from": manager, "text": "自动导入关闭"}})
+        with self.app_module.conn() as c:
+            value = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='auto_chain_import_enabled'").fetchone()[0]
+        self.assertEqual(value, "0")
+        self.webhook({"message": {"message_id": 85, "chat": internal, "from": manager, "text": "自动导入开启"}})
+        with self.app_module.conn() as c:
+            value = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='auto_chain_import_enabled'").fetchone()[0]
+        self.assertEqual(value, "1")
+
     def test_order_delete_returns_local_patch_and_cleans_import_mapping(self):
         with self.app_module.conn() as c:
             girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]

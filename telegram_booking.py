@@ -1024,12 +1024,11 @@ def register_telegram_booking(
         if not chain_text:
             notify_internal("❌ 接龙导入失败：请回复一条接龙消息并发送 <code>导入</code>，也可以把接龙文字直接写在“导入”后面。")
             return
+        if chain_is_empty(chain_text):
+            return
         girl_id = None
         with conn() as c:
-            binding = c.execute("""SELECT b.girl_name,g.id AS girl_id FROM telegram_group_bindings b
-                                  LEFT JOIN girls g ON g.name=b.girl_name
-                                  WHERE b.chat_id=? AND b.enabled=1 ORDER BY b.updated_at DESC LIMIT 1""",
-                                (str(chat.get("id")),)).fetchone()
+            binding = bound_girl(chat.get("id"), c)
             if binding:
                 girl_id = binding["girl_id"]
         if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
@@ -1058,10 +1057,30 @@ def register_telegram_booking(
             return "", ""
         first = lines[0]
         # 只收集首行以日期开头的消息，避免把普通聊天里的日期误当成接龙。
-        if not re.match(r"^(?:#?接龙\s*)?(?:\d+[.、]\s*)?(?:\[|【)?(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?|\d{1,2}月\d{1,2}日?|\d{3,4})(?:\]|】)?(?:\s|[^\d])", first):
+        if not re.match(r"^(?:#?接龙\s*)?(?:\d+[.、]\s*)?(?:\[|【)?(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?|\d{1,2}月\d{1,2}日?|\d{3,4})(?:\]|】)?(?:\s|[^\d]|$)", first):
             return "", ""
         day, girl = parse_chain_header([first])
         return str(day or ""), str(girl or "").strip()
+
+    def chain_is_empty(chain_text):
+        lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
+        if len(lines) <= 1:
+            return True
+        empty_markers = re.compile(r"^(?:暂无(?:预约|接龙)?|没有预约|无预约|空|なし|予約なし)[。.!！]?$", re.I)
+        return all(empty_markers.match(re.sub(r"^\d+[.、]\s*", "", line).strip()) for line in lines[1:])
+
+    def bound_girl(chat_id, c=None):
+        own = c is None
+        c = c or conn()
+        try:
+            row = c.execute("""SELECT b.girl_name,g.id AS girl_id FROM telegram_group_bindings b
+                               LEFT JOIN girls g ON g.name=b.girl_name
+                               WHERE b.chat_id=? AND b.enabled=1 ORDER BY b.updated_at DESC LIMIT 1""",
+                            (str(chat_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            if own:
+                c.close()
 
     def validate_attending_chain(chain_text, preferred_girl_id=None):
         day, header_girl = chain_header(chain_text)
@@ -1092,6 +1111,10 @@ def register_telegram_booking(
         if not day or not message_id:
             return False
         with conn() as c:
+            if not girl:
+                binding = bound_girl(chat.get("id"), c)
+                if binding:
+                    girl = str(binding.get("girl_name") or "")
             c.execute("""INSERT INTO telegram_chain_inbox(
                             chat_id,message_id,chat_title,message_thread_id,chain_text,order_date,girl_name,status,last_error,updated_at)
                          VALUES(?,?,?,?,?,?,?,'pending','',CURRENT_TIMESTAMP)
@@ -1133,6 +1156,11 @@ def register_telegram_booking(
                 c.execute("UPDATE telegram_chain_sync_state SET last_started_at=CURRENT_TIMESTAMP WHERE id=1")
             pending = [dict(row) for row in c.execute(
                 "SELECT * FROM telegram_chain_inbox WHERE status='pending' ORDER BY message_id DESC").fetchall()]
+            for row in pending:
+                binding = bound_girl(row["chat_id"], c)
+                row["preferred_girl_id"] = int(binding["girl_id"] or 0) if binding else 0
+                if binding and not row.get("girl_name"):
+                    row["girl_name"] = str(binding.get("girl_name") or "")
         latest, superseded = [], []
         seen = set()
         for row in pending:
@@ -1144,10 +1172,17 @@ def register_telegram_booking(
                 c.executemany("UPDATE telegram_chain_inbox SET status='superseded',processed_at=CURRENT_TIMESTAMP WHERE chat_id=? AND message_id=?",
                               [(row["chat_id"], row["message_id"]) for row in superseded])
         result = {"skipped": False, "checked": len(latest), "imported": 0, "failed": 0,
-                  "inserted": 0, "updated": 0, "unchanged": 0}
+                  "empty": 0, "inserted": 0, "updated": 0, "unchanged": 0}
         for row in latest:
             try:
-                day, girl_name, girl_id = validate_attending_chain(row["chain_text"])
+                if chain_is_empty(row["chain_text"]):
+                    with conn() as c:
+                        c.execute("""UPDATE telegram_chain_inbox SET status='empty',last_error='',processed_at=CURRENT_TIMESTAMP
+                                     WHERE chat_id=? AND message_id=?""", (row["chat_id"], row["message_id"]))
+                    result["empty"] += 1
+                    continue
+                day, girl_name, girl_id = validate_attending_chain(
+                    row["chain_text"], row.get("preferred_girl_id") or None)
                 imported = import_chain_text(
                     row["chain_text"], order_date=day, girl_id=girl_id, settlement_status="未结算",
                     source_chat_id=row["chat_id"], source_message_id=row["message_id"])
@@ -1171,10 +1206,38 @@ def register_telegram_booking(
                       (json.dumps(result, ensure_ascii=False),))
         return result
 
+    def handle_auto_import_control(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        raw = re.sub(r"^/", "", str(message.get("text") or "").strip())
+        compact = re.sub(r"\s+", "", raw)
+        match = re.fullmatch(r"(?:自动导入(?:接龙)?|接龙自动导入)(开启|打开|开|关闭|停止|关|状态)", compact)
+        if not match:
+            return False
+        cfg = settings()
+        if str(chat.get("id")) != str(cfg.get("default_review_chat_id") or ""):
+            return True
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "❌ 只有店长、客服或群管理员可以修改自动导入设置。")
+            return True
+        action = match.group(1)
+        if action != "状态":
+            enabled = "0" if action in ("关闭", "停止", "关") else "1"
+            with conn() as c:
+                c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES('auto_chain_import_enabled',?)
+                             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""", (enabled,))
+        else:
+            enabled = str(cfg.get("auto_chain_import_enabled") or "1")
+        label = "已开启" if enabled == "1" else "已关闭"
+        suffix = "每 30 分钟检查一次。" if enabled == "1" else "需要时仍可回复接龙发送“导入”。"
+        send_message(chat.get("id"), f"✅ 接龙自动导入{label}。{suffix}")
+        return True
+
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
         cache_chain_message(message)
+        if handle_auto_import_control(message):
+            return
         if text.startswith("/绑定审核群"):
             bind_default_group(message)
             return
