@@ -1062,6 +1062,16 @@ def register_telegram_booking(
         day, girl = parse_chain_header([first])
         return str(day or ""), str(girl or "").strip()
 
+    def automatic_chain_header(chain_text):
+        """自动扫描只认首个非空行中的东京当日 MMDD，例如独立一行 0906。"""
+        lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
+        if not lines:
+            return "", ""
+        now = tokyo_now()
+        if not re.fullmatch(r"\d{4}", lines[0]) or lines[0] != now.strftime("%m%d"):
+            return "", ""
+        return now.date().isoformat(), ""
+
     def chain_is_empty(chain_text):
         lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
         if len(lines) <= 1:
@@ -1106,7 +1116,7 @@ def register_telegram_booking(
         if chat.get("type") not in ("group", "supergroup"):
             return False
         chain_text = str(message.get("text") or message.get("caption") or "").strip()
-        day, girl = chain_header(chain_text)
+        day, girl = automatic_chain_header(chain_text)
         message_id = int(message.get("message_id") or 0)
         if not day or not message_id:
             return False

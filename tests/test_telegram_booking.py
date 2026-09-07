@@ -509,16 +509,27 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any("%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body for body in sent_bodies))
 
     def test_automatic_chain_scan_imports_attending_girl_and_warns_internal_on_failure(self):
+        auto_day = self.app_module._tokyo_now().date().isoformat()
+        date_keyword = self.app_module._tokyo_now().strftime("%m%d")
+        manager = {"id": 9300, "first_name": "客服"}
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('未出勤女孩','在职',15000)")
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time)
+                         VALUES(?,?,?,?)""", (auto_day, "娜娜子", "19:00", "23:00"))
         self.webhook({"message": {
             "message_id": 70,
             "chat": {"id": -30003, "type": "supergroup", "title": "Alice内部群"},
-            "from": {"id": 9300, "first_name": "客服"}, "text": "/绑定审核群",
+            "from": manager, "text": "/绑定审核群",
         }})
         self.webhook({"message": {
             "message_id": 71,
             "chat": {"id": -39999, "type": "supergroup", "title": "娜娜子群"},
-            "from": {"id": 9400, "first_name": "群内客服"},
-            "text": f"{self.day} 娜娜子\n1.19-20/15000/自动导入客人",
+            "from": manager, "text": "/绑定女孩 娜娜子",
+        }})
+        self.webhook({"message": {
+            "message_id": 72,
+            "chat": {"id": -39999, "type": "supergroup", "title": "娜娜子群"},
+            "from": manager, "text": f"{date_keyword}\n1.19-20/15000/自动导入客人",
         }})
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
@@ -529,14 +540,19 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             self.assertIsNotNone(c.execute(
                 "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='自动导入客人'",
-                (self.day,)).fetchone())
+                (auto_day,)).fetchone())
 
         self.telegram_calls.clear()
         self.webhook({"message": {
-            "message_id": 72,
+            "message_id": 73,
             "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
-            "from": {"id": 9500, "first_name": "群内客服"},
-            "text": f"{self.day} 未出勤女孩\n1.20-21/15000/不应导入客人",
+            "from": manager, "text": "/绑定女孩 未出勤女孩",
+        }})
+        self.telegram_calls.clear()
+        self.webhook({"message": {
+            "message_id": 74,
+            "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
+            "from": manager, "text": f"{date_keyword}\n1.20-21/15000/不应导入客人",
         }})
         failed = self.client.post("/api/telegram/chain-import/run", headers=headers)
         self.assertEqual(failed.json["failed"], 1)
@@ -546,27 +562,37 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertFalse(any("chat_id=-38888" in body for body in sent_bodies))
 
         with self.app_module.conn() as c:
-            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('未出勤女孩','在职',15000)")
             c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time)
-                         VALUES(?,?,?,?)""", (self.day, "未出勤女孩", "20:00", "23:00"))
+                         VALUES(?,?,?,?)""", (auto_day, "未出勤女孩", "20:00", "23:00"))
         self.webhook({"edited_message": {
-            "message_id": 72,
+            "message_id": 74,
             "chat": {"id": -38888, "type": "supergroup", "title": "其他女孩群"},
-            "from": {"id": 9500, "first_name": "群内客服"},
-            "text": f"{self.day} 未出勤女孩\n1.20-21/15000/修改后导入客人",
+            "from": manager, "text": f"{date_keyword}\n1.20-21/15000/修改后导入客人",
         }})
         retried = self.client.post("/api/telegram/chain-import/run", headers=headers)
         self.assertEqual(retried.json["imported"], 1)
 
     def test_auto_chain_date_only_uses_binding_empty_is_silent_and_internal_can_toggle(self):
+        auto_day = self.app_module._tokyo_now().date().isoformat()
+        date_keyword = self.app_module._tokyo_now().strftime("%m%d")
         manager = {"id": 9600, "first_name": "店长"}
         internal = {"id": -30003, "type": "supergroup", "title": "Alice内部群"}
         girl_chat = {"id": -39999, "type": "supergroup", "title": "娜娜子群"}
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time)
+                         VALUES(?,?,?,?)""", (auto_day, "娜娜子", "19:00", "23:00"))
         self.webhook({"message": {"message_id": 80, "chat": internal, "from": manager, "text": "/绑定审核群"}})
         self.webhook({"message": {"message_id": 81, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
+        old_keyword = (self.app_module._tokyo_now() - timedelta(days=1)).strftime("%m%d")
+        self.webhook({"message": {"message_id": 810, "chat": girl_chat, "from": manager,
+                                  "text": f"{old_keyword}\n1.19-20/15000/旧日期不导入"}})
+        self.webhook({"message": {"message_id": 811, "chat": girl_chat, "from": manager,
+                                  "text": f"{date_keyword} 娜娜子\n1.19-20/15000/非独行日期不导入"}})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_chain_inbox").fetchone()[0], 0)
         self.webhook({"message": {
             "message_id": 82, "chat": girl_chat, "from": manager,
-            "text": f"{self.day}\n1.19-20/15000/仅日期自动客人",
+            "text": f"{date_keyword}\n1.19-20/15000/仅日期自动客人",
         }})
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
@@ -575,10 +601,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             self.assertIsNotNone(c.execute(
                 "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='仅日期自动客人'",
-                (self.day,)).fetchone())
+                (auto_day,)).fetchone())
 
         self.telegram_calls.clear()
-        self.webhook({"message": {"message_id": 83, "chat": girl_chat, "from": manager, "text": self.day}})
+        self.webhook({"message": {"message_id": 83, "chat": girl_chat, "from": manager, "text": date_keyword}})
         empty = self.client.post("/api/telegram/chain-import/run", headers=headers)
         self.assertEqual(empty.json["empty"], 1, empty.get_data(as_text=True))
         self.assertFalse(any(method == "sendMessage" for method, _body in self.telegram_calls))
