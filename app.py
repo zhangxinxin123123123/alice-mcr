@@ -2569,7 +2569,7 @@ def api_db_info():
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-            "version": "v72_latest_chain_command",
+            "version": "v73_unified_mobile_ui",
             "port": 5057,
         })
 
@@ -2588,7 +2588,7 @@ def api_health():
     with conn() as c:
         return jsonify({
             "ok": True,
-            "version": "v72_latest_chain_command",
+            "version": "v73_unified_mobile_ui",
             "port": 5057,
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
@@ -2855,7 +2855,7 @@ def api_settlements_sign():
             saved += 1
     return jsonify(ok=True, saved=saved, checked=checked)
 
-def send_plain_email(to_addrs, subject, body, display_name='Alice MCR', smtp=None):
+def send_plain_email(to_addrs, subject, body, display_name='Alice Management', smtp=None):
     to_addrs = [x for x in to_addrs if x]
     if not to_addrs:
         return {'sent': False, 'reason': 'no recipients'}

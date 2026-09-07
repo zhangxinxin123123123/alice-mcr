@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>爱丽丝学院 MCR v14+</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>爱丽丝学院管理系统</title>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js">
 </script>
 <style>
 :root{--pink:#ff8fc7;--pink2:#ffd6ea;--lav:#d9c8ff;--ink:#5d4566;--line:#f0c6dc;--danger:#ff6e92}
-*{box-sizing:border-box}body{margin:0;font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff)}
+*{box-sizing:border-box}html{min-width:0;overflow-x:hidden;-webkit-text-size-adjust:100%}body{margin:0;min-width:0;overflow-x:hidden;font-family:"Yu Gothic UI","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:linear-gradient(135deg,#fff7fb,#f5edff 50%,#eaf8ff)}
 .app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{padding:20px;background:rgba(255,255,255,.85);border-right:2px dashed var(--line)}
 .logo{padding:18px;border-radius:24px;background:linear-gradient(135deg,var(--pink),var(--lav));color:white;text-align:center;box-shadow:0 12px 28px #ff8fc755}.logo h1{margin:0;font-size:23px}.logo p{margin:8px 0 0;font-size:12px}.logo-link{display:block;text-decoration:none;cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}.logo-link:hover{transform:translateY(-2px);box-shadow:0 16px 32px #ff8fc766}
 .nav button{width:100%;margin:7px 0;padding:11px;border:0;border-radius:18px;background:white;color:var(--ink);font-weight:800;text-align:left;cursor:pointer;box-shadow:0 5px 14px #d7a9c422}.nav button.on{outline:2px solid var(--pink);background:linear-gradient(90deg,var(--pink2),#fff)}
@@ -17,9 +17,9 @@
 .num{font-size:26px;font-weight:900;color:#e75ca2;margin-top:8px}
 .chart-head{margin:8px 0 10px;padding:9px 12px;border:2px solid var(--line);border-radius:16px;background:#fffafd;font-size:13px;font-weight:900;line-height:1.6;color:var(--ink)}
 .chart-head b{color:#e75ca2}.form{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:12px 0}
-input,select,textarea{border:2px solid var(--line);border-radius:14px;padding:10px;background:white;color:var(--ink);outline:none}textarea{width:100%;min-height:150px}
-button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;border:0;font-weight:900;cursor:pointer}button.primary{background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}button.soft{background:white;border:2px solid var(--line);color:var(--ink)}button.danger{background:var(--danger);color:white}
-.table{overflow:auto;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
+input,select,textarea{max-width:100%;border:2px solid var(--line);border-radius:14px;padding:10px;background:white;color:var(--ink);outline:none}textarea{width:100%;min-height:150px}
+button{touch-action:manipulation}button.primary,button.soft,button.danger{min-height:42px;border-radius:15px;padding:10px 14px;border:0;font-weight:900;cursor:pointer}button.primary{background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}button.soft{background:white;border:2px solid var(--line);color:var(--ink)}button.danger{background:var(--danger);color:white}
+.table{max-width:100%;overflow:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:2px solid var(--line);border-radius:18px;background:white}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.split.vertical{grid-template-columns:1fr}.payment-chart canvas{max-height:320px}.month-date-card canvas{max-height:420px}.month-date-rows{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}.month-date-row{display:grid;grid-template-columns:86px 70px 1fr 1fr 1fr;gap:8px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:16px;background:#fffafd;font-size:13px;font-weight:800}.month-date-row .date{color:#e75ca2;font-size:15px}.month-date-row .week{opacity:.82}.month-date-row .rev{color:#2563eb}.month-date-row .cost{color:#ef4444}.month-date-row .diff{color:var(--ink);font-weight:900}.month-date-row.negative .diff{color:#d6003d}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}
 .modal{position:fixed;inset:0;background:#0006;display:none;align-items:center;justify-content:center;z-index:99}.modal.on{display:flex}.modal .box{background:white;border:3px solid var(--line);border-radius:24px;padding:20px;max-width:760px;width:92%;max-height:86vh;overflow:auto}
 
@@ -28,7 +28,17 @@ button.primary,button.soft,button.danger{border-radius:15px;padding:10px 14px;bo
 .chain-image-drop b{color:#e75ca2}.chain-upload-chip{display:inline-block;margin:8px 0 4px;padding:8px 14px;border-radius:999px;background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white;font-weight:900;box-shadow:0 8px 18px #ff8fc733}.chain-image-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:14px}
 .chain-image-card{border:2px solid var(--line);border-radius:20px;background:white;padding:12px;box-shadow:0 8px 18px #d7a9c422}.chain-image-card img{width:100%;border-radius:14px;border:1px solid #f1cfe0;display:block;cursor:pointer}.chain-image-card .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chain-image-card .hint{font-size:12px;opacity:.78;margin-top:6px}
 .praise-folder-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.praise-folder-head h2{margin:0;color:#e75ca2}.praise-folder-tools{display:flex;gap:8px;flex-wrap:wrap}.praise-folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}.praise-tile{position:relative;border:2px solid var(--line);border-radius:18px;background:#fff;padding:10px;box-shadow:0 8px 18px #d7a9c422}.praise-tile::before{content:"";position:absolute;left:16px;top:-10px;width:74px;height:18px;border:2px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;background:#fff0f7}.praise-tile img{position:relative;width:100%;aspect-ratio:3/4;object-fit:cover;border:1px solid #f1cfe0;border-radius:12px;display:block;cursor:pointer;background:#fffafd}.praise-tile.missing img{object-fit:contain;padding:14px;background:#fff0f7}.praise-tile.missing .praise-meta::after{content:"图片文件已丢失，请从接龙预约重新保存";color:#d6003d;font-weight:900}.praise-meta{display:grid;gap:3px;margin-top:8px;font-size:12px}.praise-meta b{color:#e75ca2}.praise-meta span{opacity:.76}.praise-empty{padding:28px;border:2px dashed var(--line);border-radius:18px;background:#fffafd;text-align:center;font-weight:900;color:#e75ca2}
-@media(max-width:950px){.app{grid-template-columns:1fr}.grid,.form,.split{grid-template-columns:1fr}.main{padding:14px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}}}
+@media(max-width:950px){
+ .app{display:block;min-width:0}.side{position:sticky;top:0;z-index:80;padding:8px max(8px,env(safe-area-inset-right)) 7px max(8px,env(safe-area-inset-left));border-right:0;border-bottom:2px solid var(--line);box-shadow:0 5px 18px #b68bac26;background:rgba(255,255,255,.96)}
+ .logo{padding:8px 12px;border-radius:15px;text-align:left}.logo h1{font-size:17px}.logo p,.side>.note{display:none}.logo-link:hover{transform:none}
+ .nav{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:7px 1px 2px}.nav::-webkit-scrollbar{display:none}.nav button{flex:0 0 auto;width:auto;min-height:42px;margin:0;padding:9px 12px;border-radius:14px;text-align:center;white-space:nowrap}.nav-more{display:flex;flex:0 0 auto;gap:7px;margin:0}.nav-more summary{min-height:42px;padding:9px 12px;border-radius:14px;white-space:nowrap}.nav-more button{margin:0!important;width:auto!important}
+ .main{width:100%;min-width:0;padding:10px max(8px,env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))}.top{gap:7px;margin-bottom:9px}.pill,.role-badge{padding:7px 10px;font-size:12px}.top button{min-height:38px;padding:7px 10px}
+ .grid,.form,.split{grid-template-columns:minmax(0,1fr)}.grid{gap:9px}.card{min-width:0;margin-bottom:10px;padding:12px;border-radius:18px}.card h2{font-size:19px;margin-top:4px}.form{gap:8px}.form>*{min-width:0}.form>input:not([type="checkbox"]):not([type="radio"]),.form>select,.form>textarea,.form>button{width:100%}input:not([type="checkbox"]):not([type="radio"]),select,textarea{min-height:44px;font-size:16px}button.primary,button.soft,button.danger{min-height:44px}
+ .table{width:100%}table{min-width:860px}th,td{padding:9px 7px}.quick-table{overflow:auto}.quick-table table{min-width:640px}.month-date-row{grid-template-columns:1fr 1fr;gap:6px}.month-date-row .diff{grid-column:1/-1}.modal{align-items:flex-end}.modal .box{width:100%;max-width:none;max-height:88dvh;border-radius:24px 24px 0 0;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom))}.pure-shift-frame{height:calc(100dvh - 140px);min-height:560px}canvas{max-height:280px}.room-cal{min-width:720px}.tg-phone{min-height:330px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.busy-overlay{position:fixed;inset:0;z-index:9998;display:grid;place-items:center;padding:24px;background:rgba(255,247,251,.72);backdrop-filter:blur(5px);opacity:0;visibility:hidden;transition:opacity .16s ease,visibility .16s ease}.busy-overlay.on{opacity:1;visibility:visible}.busy-card{min-width:min(290px,88vw);padding:22px;border:2px solid var(--line);border-radius:22px;background:rgba(255,255,255,.97);box-shadow:0 18px 50px #b65b8f35;text-align:center}.busy-spinner{display:block;width:42px;height:42px;margin:0 auto 12px;border:4px solid var(--pink2);border-top-color:#e75ca2;border-radius:50%;animation:busySpin .75s linear infinite}.busy-card strong,.busy-card small{display:block}.busy-card small{margin-top:7px;opacity:.72}.busy-slow{display:none}.busy-overlay.slow .busy-slow{display:block}@keyframes busySpin{to{transform:rotate(360deg)}}
 
 body.login-active{min-height:100vh;overflow:hidden;background:#fff2f8}
 body.login-active .app,body.login-active .modal{display:none!important}
@@ -94,7 +104,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 .free-dona-name{min-width:0;color:#fff;font-size:15px;font-weight:900;line-height:1.12;text-shadow:2px 0 #ff2f9a,0 0 12px rgba(255,255,255,.34);word-break:break-word}
 .free-dona-time{margin-top:4px;color:#dfffff;font-size:12px;font-weight:900;line-height:1.25;text-shadow:0 0 8px rgba(33,247,255,.42);word-break:break-word}
 .free-dona-empty{padding:18px 10px;color:#dfffff;font-weight:900;text-align:center;text-shadow:0 0 10px rgba(33,247,255,.54)}
-@media(max-width:950px){.pure-shift-frame{height:calc(100vh - 120px);min-height:720px}.free-dona-wrap{grid-template-columns:1fr}.free-dona-card{width:100%;max-width:360px;margin:0 auto}}
+@media(max-width:950px){.pure-shift-frame{height:calc(100dvh - 140px);min-height:560px}.free-dona-wrap{grid-template-columns:1fr}.free-dona-card{width:100%;max-width:360px;margin:0 auto}.login-bg,.login-bg-frame,.login-panel{animation:none}.login-brand,.login-box,.login-deco{backdrop-filter:none}}
 </style>
 </head>
 <body class="login-active">
@@ -109,9 +119,9 @@ body:not(.role-boss) .boss-only{display:none!important}
   <div class="login-overlay"></div>
   <div class="login-panel">
     <div class="login-brand">
-      <span class="login-kicker">ALICE MCR</span>
+      <span class="login-kicker">ALICE MANAGEMENT</span>
       <h1>爱丽丝学院</h1>
-      <p>管理后台</p>
+      <p>综合管理系统</p>
     </div>
     <form class="login-box" onsubmit="event.preventDefault();doLogin();">
       <h2>登录</h2>
@@ -124,7 +134,7 @@ body:not(.role-boss) .boss-only{display:none!important}
 </div>
 <div class="app">
 <aside class="side">
- <a class="logo logo-link" href="https://ailisi99.com/" target="_blank" rel="noopener noreferrer" title="打开爱丽丝官网"><h1>爱丽丝学院</h1><p>v14+ · 纯出勤表静态页版 · 5057</p></a>
+ <a class="logo logo-link" href="https://ailisi99.com/" target="_blank" rel="noopener noreferrer" title="打开爱丽丝官网"><h1>爱丽丝学院管理系统</h1><p>订单 · 客户 · 女孩 · TEL预约</p></a>
  <div class="nav">
   <button class="on user-hide admin-hide" onclick="show('home',this)">🏫 学院总览</button>
   <button class="admin-only" onclick="show('orders',this)">🧾 订单/预约</button>
@@ -133,7 +143,7 @@ body:not(.role-boss) .boss-only{display:none!important}
   <button class="admin-only user-hide" onclick="show('settlement',this)">💴 金额结算</button>
   <button class="admin-only" onclick="show('quickLinks',this)">🔗 链接跳转</button>
   <button onclick="show('importer',this)">📥 接龙导入</button>
-  <button class="admin-only" onclick="show('telegramBooking',this)">✈️ Telegram预约</button>
+  <button class="admin-only" onclick="show('telegramBooking',this)">✈️ TEL预约</button>
   <button class="admin-only" onclick="show('chainReserve',this)">🧩 接龙预约</button>
   <button class="admin-only" onclick="show('pureShift',this)">📋 纯出勤表</button>
   <details class="nav-more admin-only"><summary>🧰 低频功能</summary>
@@ -145,7 +155,7 @@ body:not(.role-boss) .boss-only{display:none!important}
   <button class="user-hide" onclick="show('stats',this)">🥧 收益图表</button>
   <button class="admin-only" onclick="show('debug',this)">🩺 数据诊断</button>
  </div>
- <p class="note">数据库：alice_academy_mcr.db<br>页面打开会自动读取全部数据。</p>
+ <p class="note">统一管理订单、客户、女孩、接龙、出勤与 TEL 预约。<br>数据库会自动安全读取。</p>
 </aside>
 <main class="main">
  <div class="top">
@@ -271,7 +281,7 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="telegramBooking" class="panel">
-  <div class="card"><h2>Telegram 预约设置</h2>
+  <div class="card"><h2>TEL 预约设置</h2>
    <p class="note">Bot 显示下方“当日自动预约女孩”名单；是否有房不会影响预约。专属群未绑定时，预约统一发送到默认审核群。Bot Token 只保存在服务器环境变量中，本页面不会显示。</p>
    <div id="tgStatus" class="note">正在读取 Bot 状态...</div>
    <div class="form">
@@ -283,7 +293,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <input id="tgPointRate" type="number" min="1" placeholder="每积分抵扣日元，默认 1">
     <input id="tgHotelTimeout" type="number" min="30" placeholder="酒店资料时限/秒">
    </div>
-   <button class="primary" onclick="saveTelegramSettings()">保存 Bot 设置</button>
+   <button class="primary" onclick="saveTelegramSettings()">保存 TEL 预约设置</button>
    <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
   </div>
   <div class="card"><h2>客户流程编辑器</h2>
@@ -379,6 +389,14 @@ body:not(.role-boss) .boss-only{display:none!important}
 </main>
 </div>
 
+<div class="busy-overlay" id="busyOverlay" aria-hidden="true" aria-live="polite">
+ <div class="busy-card" role="status">
+  <span class="busy-spinner" aria-hidden="true"></span>
+  <strong id="busyText">正在处理，请稍候…</strong>
+  <small class="busy-slow">服务器正在处理较多数据，请不要重复点击。</small>
+ </div>
+</div>
+
 <div class="modal" id="editModal"><div class="box"><h2 id="editTitle">编辑</h2><div id="editFields" class="form"></div><button class="primary" onclick="saveModalEdit()">保存修改</button> <button class="soft" onclick="closeModal()">取消</button></div></div>
 
 <script>
@@ -472,15 +490,39 @@ function clearAuthAndShowLogin(message){
 const todayStr=new Date().toISOString().slice(0,10); today.textContent=todayStr; iDate.value=todayStr; sDay.value=todayStr; sMonth.value=todayStr.slice(0,7); if(window.schDate) schDate.value=todayStr; if(window.cDate) cDate.value=todayStr; if(window.previewDate) previewDate.value=todayStr;
 const yen=n=>"¥"+Math.round(Number(n||0)).toLocaleString();
 const moneyInput=v=>{v=String(v||"").replace(/[（）()¥円,]/g,"").trim();if(!v)return 0;if(v.includes("万"))return Math.round(parseFloat(v)*10000);let n=parseFloat(v)||0;return n>0&&n<100?Math.round(n*10000):Math.round(n);}
+let busyCount=0,busyShowTimer=null,busySlowTimer=null;
+function beginBusy(message="正在处理，请稍候…"){
+ busyCount++;
+ if(window.busyText)busyText.textContent=message;
+ clearTimeout(busyShowTimer);clearTimeout(busySlowTimer);
+ busyShowTimer=setTimeout(()=>{if(busyCount>0&&window.busyOverlay){busyOverlay.classList.add("on");busyOverlay.setAttribute("aria-hidden","false");document.body.setAttribute("aria-busy","true");}},120);
+ busySlowTimer=setTimeout(()=>{if(busyCount>0&&window.busyOverlay)busyOverlay.classList.add("slow");},5000);
+}
+function endBusy(){
+ busyCount=Math.max(0,busyCount-1);
+ if(busyCount)return;
+ clearTimeout(busyShowTimer);clearTimeout(busySlowTimer);
+ if(window.busyOverlay){busyOverlay.classList.remove("on","slow");busyOverlay.setAttribute("aria-hidden","true");}
+ document.body.removeAttribute("aria-busy");
+}
+async function timedFetch(url,options={},timeoutMs=60000){
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
+ try{return await fetch(url,{...options,signal:controller.signal});}
+ catch(e){if(e&&e.name==="AbortError")throw new Error("服务器处理超时，请稍后重试");throw e;}
+ finally{clearTimeout(timer);}
+}
 async function api(url,body){
- body={...(body||{}),client_now:new Date().toISOString()};
- let r=await fetch(url,{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
- let text=await r.text();
- let j;
- try{j=text?JSON.parse(text):{};}catch(e){console.error("API returned non-JSON",url,r.status,text);j={ok:false,error:`接口返回异常 HTTP ${r.status}`};}
- if(r.status===401){clearAuthAndShowLogin(j.error||'登录已失效，请重新登录');}
- if(!r.ok || j.ok===false){ alert(j.error || ("保存失败 HTTP "+r.status)); throw new Error(j.error||"保存失败"); }
- return j;
+ beginBusy("正在保存并更新数据…");
+ try{
+  body={...(body||{}),client_now:new Date().toISOString()};
+  let r=await timedFetch(url,{method:"POST",cache:"no-store",headers:{"Content-Type":"application/json",...authHeaders()},body:JSON.stringify(body)});
+  let text=await r.text();
+  let j;
+  try{j=text?JSON.parse(text):{};}catch(e){console.error("API returned non-JSON",url,r.status,text);j={ok:false,error:`接口返回异常 HTTP ${r.status}`};}
+  if(r.status===401){clearAuthAndShowLogin(j.error||'登录已失效，请重新登录');}
+  if(!r.ok || j.ok===false){ alert(j.error || ("保存失败 HTTP "+r.status)); throw new Error(j.error||"保存失败"); }
+  return j;
+ }finally{endBusy();}
 }
 
 function applyRole(){
@@ -518,12 +560,13 @@ async function doLogin(){
 }
 function logout(){localStorage.removeItem('alice_auth');auth=null;location.reload();}
 function ensurePureShiftFrame(){const f=document.getElementById("pureShiftFrame"); if(f && !f.getAttribute("src")) f.setAttribute("src", f.dataset.src || "/static/alice_shift.html");}
-function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id!=="pureShift")render(); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录监测":"当前账号不能查看该页面");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
+ beginBusy("正在读取管理系统数据…");
  try{
   dbInfo.innerHTML="🌸 正在读取全部数据库 /api/all ...";
-  let r=await fetch("/api/all?v="+Date.now(),{cache:"no-store",headers:authHeaders()});
+  let r=await timedFetch("/api/all?v="+Date.now(),{cache:"no-store",headers:authHeaders()});
   let text=await r.text();
   let parsed=null;
   try{parsed=text?JSON.parse(text):null;}catch(e){}
@@ -543,7 +586,7 @@ async function loadAll(){
   }
   authVerified=true;
   setLoginActive(false);
-  let h=await fetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()}).then(x=>x.json()).catch(()=>null);
+  let h=await timedFetch("/api/health?v="+Date.now(),{cache:"no-store",headers:authHeaders()},20000).then(x=>x.json()).catch(()=>null);
   debugText.textContent=JSON.stringify({health:h, api_all_counts:{customers:data.customers.length,girls:data.girls.length,orders:data.orders.length,enums:data.enums.length,customer_accounts:(data.customer_accounts||[]).length,customer_reservations:(data.customer_reservations||[]).length,quick_links:(data.quick_links||[]).length,girl_praises:(data.girl_praises||[]).length}, first_order:data.orders[0], first_customer:data.customers[0], first_girl:data.girls[0]},null,2);
   dbInfo.innerHTML=`✅ 已直接读取全部表｜客户 <b>${data.customers.length}</b>｜女孩 <b>${data.girls.length}</b>｜订单 <b>${data.orders.length}</b><br>版本：<b>${(h&&h.version)||"v50_calligraphy_name_overlay"}</b>｜端口：<b>5057</b>`;
   render(); if(window.cDate && document.getElementById("chainReserve")?.classList.contains("on")){loadChainPage().catch(console.error);}
@@ -553,7 +596,7 @@ async function loadAll(){
   if(!authVerified)setLoginActive(true,`读取数据失败：${e.message}`);
   console.error(e);
   return false;
- }
+ }finally{endBusy();}
 }
 function customerTypeOptions(selected=""){
   const vals=["新客","回头客","老客","VIP","SVIP"];
@@ -2245,7 +2288,9 @@ function render(){applyRole();refreshSelects();refreshRoomControls();const isUse
    const netMonthMap=groupCost(o=>String(o.order_date).startsWith(sm)); chart("netMonthChart",netMonthMap,costMeta(o=>String(o.order_date).startsWith(sm),netMonthMap)); renderCostNetTable("netMonthChartTable",netMonthMap,o=>String(o.order_date).startsWith(sm)); const monthDateMap=groupByDate(o=>String(o.order_date).startsWith(sm)); const monthDateCostMap=groupCostByDate(o=>String(o.order_date).startsWith(sm)); monthDateRevenueCostChart("monthDateChart",monthDateMap,monthDateCostMap);
  }
  let daily={};data.orders.filter(o=>!isUser || o.order_date===todayStr).forEach(o=>{let d=o.order_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].count++;daily[d].received+=+o.received_amount||0;daily[d].girl+=+o.girl_take_home||0;daily[d].profit+=+o.store_profit||0});(data.room_assignments||[]).forEach(r=>{let d=r.assignment_date;daily[d]=daily[d]||{id:d,date:d,count:0,received:0,girl:0,profit:0,room:0,net:0};daily[d].room+=+r.daily_cost||0});Object.values(daily).forEach(x=>x.net=x.profit-x.room);table("dailyTable",Object.values(daily).sort((a,b)=>String(b.date).localeCompare(a.date)),[{k:"date",t:"日期"},{k:"count",t:"单数"},{k:"received",t:"客人支付",f:yen},{k:"girl",t:"女孩到手",f:yen},{k:"profit",t:"纯利润",f:yen},{k:"room",t:"房间成本",f:yen},{k:"net",t:"扣房后收益",f:yen}],"orders","editOrder"); if(window.customerAccountTable) renderAdvanceReserve()}
-document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))render()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ")renderSettlement()});
+let filterRenderTimer=null;
+function scheduleFilterRender(){clearTimeout(filterRenderTimer);filterRenderTimer=setTimeout(()=>{requestAnimationFrame(()=>render())},180)}
+document.addEventListener("input",e=>{if(e.target.id&&e.target.id.startsWith("q"))scheduleFilterRender()});document.addEventListener("change",e=>{if(e.target.id&&e.target.id.startsWith("q"))scheduleFilterRender()});document.addEventListener("input",e=>{if(e.target.id==="settleGirlQ"){clearTimeout(filterRenderTimer);filterRenderTimer=setTimeout(()=>renderSettlement(),140)}});
 document.addEventListener("input",e=>{if(e.target.id==="coPrice")chainPriceTouched=true;});
 document.addEventListener("input",e=>{if(e.target.id==="coTakeHome")chainTakeHomeTouched=true;});
 document.addEventListener("change",e=>{
@@ -2397,7 +2442,7 @@ function editTelegramBinding(r){
   document.getElementById('telegramBooking').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function editTelegramBindingAt(index){editTelegramBinding(((telegramConfig&&telegramConfig.bindings)||[])[index]||{});}
-async function saveTelegramSettings(successMessage='Telegram Bot 设置已保存'){
+async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
   telegramConfig=await api('/api/telegram/settings',{
     ...telegramFlowDraft,bot_display_name:tgBotName.value,website_url:tgWebsite.value,
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
@@ -2418,7 +2463,7 @@ async function saveTelegramBinding(){
   alert('女孩群绑定已保存');
 }
 async function setupTelegramWebhook(){
-  if(!confirm('确认把 Telegram Webhook 指向当前 MCR 网址？'))return;
+  if(!confirm('确认把 Telegram Webhook 指向当前系统网址？'))return;
   const origin=location.origin;
   const result=await api('/api/telegram/webhook/setup',{public_base_url:origin});
   alert(`Webhook 已启用：${result.webhook_url}`);

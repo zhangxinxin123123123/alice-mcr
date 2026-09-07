@@ -899,7 +899,7 @@ def register_telegram_booking(
         with conn() as c:
             exists = c.execute("SELECT 1 FROM girls WHERE name=?", (girl,)).fetchone()
             if not exists:
-                send_message(chat.get("id"), f"MCR 女孩表中没有找到“{girl}”。")
+                send_message(chat.get("id"), f"管理系统女孩表中没有找到“{girl}”。")
                 return
             c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,message_thread_id,enabled,updated_at)
                          VALUES(?,?,?,?,1,CURRENT_TIMESTAMP)
@@ -1000,7 +1000,7 @@ def register_telegram_booking(
                 source_chat_id=chat.get("id"), source_message_id=source_message_id,
             )
             notify_internal(
-                f"✅ MCR 接龙导入完成\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>"
+                f"✅ 管理系统接龙导入完成\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>"
                 f"\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}"
                 f"\n新增：{int(result['inserted'])} 单｜修改：{int(result['updated'])} 单｜未变化：{int(result['unchanged'])} 单"
             )
