@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from flask import Flask, request, jsonify, send_from_directory, Response
 APP_DIR=Path(__file__).resolve().parent
@@ -24,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v82_shift_pages_and_tag_memory"
+APP_VERSION = "v83_wordpress_image_upload_fix"
 
 @app.after_request
 def compress_large_json(response):
@@ -1180,10 +1181,14 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             nonce_match = re.search(r'name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', edit_html, re.I)
         if not nonce_match:
             raise ValueError('找不到官网图片上传授权码')
-        upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
-            ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
-            ('_wpnonce', html_unescape(nonce_match.group(1)))
-        ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
+        try:
+            upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
+                ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
+                ('_wpnonce', html_unescape(nonce_match.group(1)))
+            ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
+        except HTTPError as exc:
+            detail = exc.read().decode('utf-8', 'replace').strip()[:300]
+            raise ValueError(f'官网图片上传失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
         upload_data = json.loads(upload_raw)
         attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
         if not upload_data.get('success') or not attachment_id:
@@ -1198,9 +1203,13 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         ])
         req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
                       method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
-        with opener.open(req, timeout=60) as response:
-            final_url = response.geturl()
-            result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
+        try:
+            with opener.open(req, timeout=60) as response:
+                final_url = response.geturl()
+                result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
+        except HTTPError as exc:
+            detail = exc.read().decode('utf-8', 'replace').strip()[:300]
+            raise ValueError(f'官网“今日出勤”保存失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
         if 'post.php' not in final_url and 'post.php' not in result_html:
             raise ValueError('官网没有确认保存成功')
         try:

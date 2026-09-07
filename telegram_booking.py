@@ -1327,6 +1327,17 @@ def register_telegram_booking(
         if any(not image_bytes or len(image_bytes) > 10 * 1024 * 1024 for image_bytes in image_bytes_list):
             return jsonify(ok=False, error="截图为空或超过10MB"), 400
         image_bytes = image_bytes_list[0]
+        wordpress_image_bytes = image_bytes
+        wordpress_raw = str(data.get("wordpress_image_data") or "")
+        if wordpress_raw:
+            if not wordpress_raw.startswith("data:image/png;base64,"):
+                return jsonify(ok=False, error="官网截图格式不正确"), 400
+            try:
+                wordpress_image_bytes = base64.b64decode(wordpress_raw.split(",", 1)[1], validate=True)
+            except Exception:
+                return jsonify(ok=False, error="官网截图数据损坏"), 400
+            if not wordpress_image_bytes or len(wordpress_image_bytes) > 6 * 1024 * 1024:
+                return jsonify(ok=False, error="官网截图为空或超过6MB"), 400
         cfg = settings()
         chat_id = str(cfg.get("default_review_chat_id") or "")
         if not valid_group_chat_id(chat_id):
@@ -1348,7 +1359,7 @@ def register_telegram_booking(
             caption = f"📋 <b>{escape(day)} 爱丽丝出勤表</b>\n已同步 TEL预约女孩：{synced}人"
             if callable(sync_wordpress_attendance):
                 wordpress_result = sync_wordpress_attendance(
-                    day, image_bytes, str(data.get("service_text") or ""), names, all_girl_names)
+                    day, wordpress_image_bytes, str(data.get("service_text") or ""), names, all_girl_names)
         else:
             caption = f"💴 <b>{escape(day)} 今日金额结算</b>"
         result = None
