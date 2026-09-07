@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v88_wordpress_gallery_verification"
+APP_VERSION = "v89_wordpress_visibility_diagnostics"
 
 @app.after_request
 def compress_large_json(response):
@@ -1333,6 +1333,36 @@ def api_wordpress_diagnose():
                        error=strip_html_text(detail) or str(exc)), 502
     except Exception as exc:
         return jsonify(ok=False, stage=stage, checks=checks, error=str(exc)), 502
+
+@app.route('/api/wordpress/visibility-diagnose', methods=['GET'])
+def api_wordpress_visibility_diagnose():
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以运行官网诊断'), 403
+    day = request.args.get('date') or tokyo_today_date().isoformat()
+    user, pwd = alice_wordpress_credentials()
+    try:
+        opener = alice_wordpress_login(user, pwd)
+        posts, nonce = _wordpress_model_posts(opener)
+        with conn() as c:
+            attendance = [str(row['girl'] or '').strip() for row in pure_shift_rows_for_date(c, day)]
+            managed = [str(row['name'] or '').strip() for row in c.execute(
+                "SELECT name FROM girls WHERE COALESCE(name,'')!='' ORDER BY id DESC").fetchall()]
+        post_map = {}
+        for post in posts:
+            post_map.setdefault(_wordpress_girl_key(post['title']), []).append(post)
+        rows_out = []
+        attendance_keys = {_wordpress_girl_key(name) for name in attendance}
+        for name in managed:
+            key = _wordpress_girl_key(name)
+            matches = sorted(post_map.get(key, []), key=lambda item: item['id'], reverse=True)
+            desired = 'publish' if key in attendance_keys else 'private'
+            rows_out.append({'girl': name, 'attendance': key in attendance_keys, 'desired': desired,
+                             'matches': [{'id': item['id'], 'title': item['title'], 'status': item['status']}
+                                         for item in matches]})
+        return jsonify(ok=True, date=day, inline_nonce_found=bool(nonce), wordpress_posts=len(posts),
+                       attendance=attendance, girls=rows_out)
+    except Exception as exc:
+        return jsonify(ok=False, error=str(exc)), 502
 
 def acf_value_from_edit(edit_html, data_name):
     m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
