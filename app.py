@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v96_tonight_availability_page"
+APP_VERSION = "v97_auto_chain_import"
 
 @app.after_request
 def compress_large_json(response):
@@ -108,12 +108,16 @@ def round_yen_1000_half_up(n):
     return ((n + 500) // 1000) * 1000
 
 def parse_header(lines):
-    """识别接龙首行：0524小樱 / 1.0524小樱 / 2026-05-24 小樱。"""
+    """识别接龙首行：0524小樱 / 9月8日 小樱 / 2026-05-24 小樱。"""
     for line in lines or []:
         s = strip_chain_prefix(line) if 'strip_chain_prefix' in globals() else str(line or '').strip()
         m = re.search(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\s*([^\s/]+)?", s)
         if m:
             return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}", (m.group(4) or '').strip()
+        m = re.search(r"(?:\[|【)?(\d{1,2})月(\d{1,2})日?(?:\]|】)?\s*([^\s/]+)?", s)
+        if m:
+            y = date.today().year
+            return f"{y}-{int(m.group(1)):02d}-{int(m.group(2)):02d}", (m.group(3) or '').strip()
         # 紧凑日期（0524小樱）只用于接龙首行；包含 7.30到8.30 / 7.30-8.30 的预约行不能误判成 0830 日期。
         if re.search(r"\d{1,2}(?:[:.]\d{1,2})?\s*(?:[-~ー～]|到|至)\s*\d{1,2}(?:[:.]\d{1,2})?", s):
             continue
@@ -4477,6 +4481,7 @@ register_telegram_booking(
     ensure_customer=ensure_customer,
     recalc_customer_points=recalc_customer_points,
     sync_wordpress_attendance=sync_alice_wordpress_attendance,
+    parse_chain_header=parse_header,
 )
 
 import os

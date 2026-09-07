@@ -3,6 +3,8 @@ import json
 import os
 import re
 import secrets
+import threading
+import time
 from html import escape
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
@@ -45,6 +47,8 @@ DEFAULT_SETTINGS = {
     "button_send_hotel": "🏨 发送酒店信息",
     "button_reschedule": "📅 申请改期",
     "points_yen_per_point": "1",
+    "auto_chain_import_enabled": "1",
+    "auto_chain_import_interval_minutes": "30",
 }
 
 
@@ -66,6 +70,7 @@ def register_telegram_booking(
     ensure_customer,
     recalc_customer_points,
     sync_wordpress_attendance=None,
+    parse_chain_header=None,
 ):
     def ensure_db():
         init_main_db()
@@ -95,6 +100,18 @@ def register_telegram_booking(
                 telegram_user_id TEXT PRIMARY KEY, customer_id INTEGER NOT NULL,
                 telegram_username TEXT DEFAULT '', display_name TEXT DEFAULT '',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_chain_inbox(
+                chat_id TEXT NOT NULL, message_id INTEGER NOT NULL, chat_title TEXT DEFAULT '',
+                message_thread_id INTEGER DEFAULT 0, chain_text TEXT NOT NULL,
+                order_date TEXT DEFAULT '', girl_name TEXT DEFAULT '', status TEXT DEFAULT 'pending',
+                last_error TEXT DEFAULT '', received_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                processed_at TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(chat_id,message_id))""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_tg_chain_inbox_pending ON telegram_chain_inbox(status,order_date,girl_name)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_chain_sync_state(
+                id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
+                last_result TEXT DEFAULT '')""")
+            c.execute("INSERT OR IGNORE INTO telegram_chain_sync_state(id) VALUES(1)")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
             cols = [r[1] for r in c.execute("PRAGMA table_info(customer_reservations)").fetchall()]
@@ -1020,10 +1037,13 @@ def register_telegram_booking(
             return
         try:
             source_message_id = reply.get("message_id") or message.get("message_id") or ""
+            order_date, _detected_girl, girl_id = validate_attending_chain(chain_text, girl_id)
             result = import_chain_text(
-                chain_text, girl_id=girl_id, settlement_status="未结算",
+                chain_text, order_date=order_date, girl_id=girl_id, settlement_status="未结算",
                 source_chat_id=chat.get("id"), source_message_id=source_message_id,
             )
+            if int(result.get("count") or 0) == 0:
+                raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
             notify_internal(
                 f"✅ 管理系统接龙导入完成\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>"
                 f"\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}"
@@ -1032,9 +1052,129 @@ def register_telegram_booking(
         except Exception as exc:
             notify_internal(f"❌ 接龙导入失败\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>\n原因：{escape(str(exc))}")
 
+    def chain_header(chain_text):
+        lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
+        if not lines or not callable(parse_chain_header):
+            return "", ""
+        first = lines[0]
+        # 只收集首行以日期开头的消息，避免把普通聊天里的日期误当成接龙。
+        if not re.match(r"^(?:#?接龙\s*)?(?:\d+[.、]\s*)?(?:\[|【)?(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?|\d{1,2}月\d{1,2}日?|\d{3,4})(?:\]|】)?(?:\s|[^\d])", first):
+            return "", ""
+        day, girl = parse_chain_header([first])
+        return str(day or ""), str(girl or "").strip()
+
+    def validate_attending_chain(chain_text, preferred_girl_id=None):
+        day, header_girl = chain_header(chain_text)
+        if not day:
+            raise ValueError("接龙首行必须以日期开头，例如：0908娜娜子 或 2026-09-08 娜娜子。")
+        with conn() as c:
+            preferred = c.execute("SELECT id,name FROM girls WHERE id=?", (int(preferred_girl_id),)).fetchone() if preferred_girl_id else None
+            girl_name = str(header_girl or (preferred["name"] if preferred else "")).strip()
+            if preferred and header_girl and header_girl != preferred["name"]:
+                raise ValueError(f"接龙女孩“{header_girl}”与本群绑定女孩“{preferred['name']}”不一致。")
+            attendance = {str(row.get("girl") or "").strip() for row in pure_shift_rows_for_date(c, day)}
+            if not girl_name:
+                raise ValueError("接龙首行缺少女孩名。")
+            if girl_name not in attendance:
+                raise ValueError(f"{day} 出勤表中没有“{girl_name}”，本次不会导入。")
+            girl = preferred or c.execute("SELECT id,name FROM girls WHERE name=? LIMIT 1", (girl_name,)).fetchone()
+            if not girl:
+                raise ValueError(f"女孩表中没有“{girl_name}”。")
+            return day, girl_name, int(girl["id"])
+
+    def cache_chain_message(message):
+        chat = message.get("chat") or {}
+        if chat.get("type") not in ("group", "supergroup"):
+            return False
+        chain_text = str(message.get("text") or message.get("caption") or "").strip()
+        day, girl = chain_header(chain_text)
+        message_id = int(message.get("message_id") or 0)
+        if not day or not message_id:
+            return False
+        with conn() as c:
+            c.execute("""INSERT INTO telegram_chain_inbox(
+                            chat_id,message_id,chat_title,message_thread_id,chain_text,order_date,girl_name,status,last_error,updated_at)
+                         VALUES(?,?,?,?,?,?,?,'pending','',CURRENT_TIMESTAMP)
+                         ON CONFLICT(chat_id,message_id) DO UPDATE SET
+                            chat_title=excluded.chat_title,message_thread_id=excluded.message_thread_id,
+                            chain_text=excluded.chain_text,order_date=excluded.order_date,girl_name=excluded.girl_name,
+                            status='pending',last_error='',processed_at=NULL,updated_at=CURRENT_TIMESTAMP""",
+                      (str(chat.get("id")), message_id, str(chat.get("title") or ""),
+                       int(message.get("message_thread_id") or 0), chain_text, day, girl))
+        return True
+
+    def notify_chain_failure(row, error):
+        cfg = settings()
+        internal_chat_id = str(cfg.get("default_review_chat_id") or "")
+        if not valid_group_chat_id(internal_chat_id):
+            return
+        text = (f"⚠️ <b>自动接龙导入失败</b>\n来源群：<b>{escape(row.get('chat_title') or row.get('chat_id'))}</b>"
+                f"\n日期：{escape(row.get('order_date') or '未识别')}｜女孩：{escape(row.get('girl_name') or '未识别')}"
+                f"\n原因：{escape(str(error))}\n\n请修改原接龙消息；Bot 收到编辑后会在下一轮重新检查。也可以回复接龙发送 <code>导入</code>。")
+        try:
+            send_message(internal_chat_id, text[:3900], thread_id=int(cfg.get("default_review_thread_id") or 0))
+        except Exception:
+            pass
+
+    def run_pending_chain_imports(force=False):
+        ensure_db()
+        cfg = settings()
+        if not force and str(cfg.get("auto_chain_import_enabled") or "1") != "1":
+            return {"skipped": True, "reason": "disabled", "imported": 0, "failed": 0}
+        interval = max(5, int(cfg.get("auto_chain_import_interval_minutes") or 30))
+        with conn() as c:
+            if not force:
+                claimed = c.execute("""UPDATE telegram_chain_sync_state SET last_started_at=CURRENT_TIMESTAMP
+                                       WHERE id=1 AND (last_started_at IS NULL OR
+                                       last_started_at<=datetime('now',?))""", (f"-{interval} minutes",))
+                if not claimed.rowcount:
+                    return {"skipped": True, "reason": "not_due", "imported": 0, "failed": 0}
+            else:
+                c.execute("UPDATE telegram_chain_sync_state SET last_started_at=CURRENT_TIMESTAMP WHERE id=1")
+            pending = [dict(row) for row in c.execute(
+                "SELECT * FROM telegram_chain_inbox WHERE status='pending' ORDER BY message_id DESC").fetchall()]
+        latest, superseded = [], []
+        seen = set()
+        for row in pending:
+            key = (row["chat_id"], row["order_date"], row["girl_name"])
+            (latest if key not in seen else superseded).append(row)
+            seen.add(key)
+        if superseded:
+            with conn() as c:
+                c.executemany("UPDATE telegram_chain_inbox SET status='superseded',processed_at=CURRENT_TIMESTAMP WHERE chat_id=? AND message_id=?",
+                              [(row["chat_id"], row["message_id"]) for row in superseded])
+        result = {"skipped": False, "checked": len(latest), "imported": 0, "failed": 0,
+                  "inserted": 0, "updated": 0, "unchanged": 0}
+        for row in latest:
+            try:
+                day, girl_name, girl_id = validate_attending_chain(row["chain_text"])
+                imported = import_chain_text(
+                    row["chain_text"], order_date=day, girl_id=girl_id, settlement_status="未结算",
+                    source_chat_id=row["chat_id"], source_message_id=row["message_id"])
+                if int(imported.get("count") or 0) == 0:
+                    raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
+                with conn() as c:
+                    c.execute("""UPDATE telegram_chain_inbox SET status='imported',last_error='',processed_at=CURRENT_TIMESTAMP,
+                                 order_date=?,girl_name=? WHERE chat_id=? AND message_id=?""",
+                              (day, girl_name, row["chat_id"], row["message_id"]))
+                result["imported"] += 1
+                for key in ("inserted", "updated", "unchanged"):
+                    result[key] += int(imported.get(key) or 0)
+            except Exception as exc:
+                with conn() as c:
+                    c.execute("""UPDATE telegram_chain_inbox SET status='failed',last_error=?,processed_at=CURRENT_TIMESTAMP
+                                 WHERE chat_id=? AND message_id=?""", (str(exc)[:1000], row["chat_id"], row["message_id"]))
+                result["failed"] += 1
+                notify_chain_failure(row, exc)
+        with conn() as c:
+            c.execute("""UPDATE telegram_chain_sync_state SET last_completed_at=CURRENT_TIMESTAMP,last_result=? WHERE id=1""",
+                      (json.dumps(result, ensure_ascii=False),))
+        return result
+
     def handle_message(message):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
+        cache_chain_message(message)
         if text.startswith("/绑定审核群"):
             bind_default_group(message)
             return
@@ -1214,6 +1354,8 @@ def register_telegram_booking(
             handle_callback(update["callback_query"])
         elif update.get("message"):
             handle_message(update["message"])
+        elif update.get("edited_message"):
+            handle_message(update["edited_message"])
         return jsonify(ok=True)
 
     @app.route("/api/telegram/settings", methods=["GET", "POST"])
@@ -1304,7 +1446,7 @@ def register_telegram_booking(
             return jsonify(ok=False, error="请先配置 HTTPS PUBLIC_BASE_URL"), 400
         secret = str(os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
         result = tg("setWebhook", {"url": public_url + "/telegram/webhook", "secret_token": secret or None,
-                                   "allowed_updates": ["message", "callback_query"]})
+                                   "allowed_updates": ["message", "edited_message", "callback_query"]})
         return jsonify(ok=True, result=result, webhook_url=public_url + "/telegram/webhook")
 
     @app.route("/api/telegram/report-photo", methods=["POST"])
@@ -1423,4 +1565,29 @@ def register_telegram_booking(
                        sync_warnings=sync_warnings,
                        chat_title=cfg.get("default_review_chat_title") or "Alice内部群")
 
+    @app.route("/api/telegram/chain-import/run", methods=["POST"])
+    def telegram_chain_import_run_api():
+        return jsonify(ok=True, **run_pending_chain_imports(force=True))
+
+    def auto_chain_import_loop():
+        public_url = str(os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+        render_host = str(os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "").strip()
+        if not public_url and render_host:
+            public_url = "https://" + render_host
+        if public_url.startswith("https://"):
+            try:
+                tg("setWebhook", {"url": public_url + "/telegram/webhook",
+                                   "secret_token": str(os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip() or None,
+                                   "allowed_updates": ["message", "edited_message", "callback_query"]})
+            except Exception:
+                pass
+        while True:
+            time.sleep(60)
+            try:
+                run_pending_chain_imports(force=False)
+            except Exception:
+                pass
+
     ensure_db()
+    if str(os.environ.get("ALICE_DISABLE_CHAIN_SCHEDULER") or "") != "1":
+        threading.Thread(target=auto_chain_import_loop, name="alice-chain-import", daemon=True).start()
