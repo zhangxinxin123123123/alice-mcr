@@ -508,6 +508,37 @@ class TelegramBookingFlowTest(unittest.TestCase):
         sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body for body in sent_bodies))
 
+    def test_bound_group_reply_import_and_date_prefix_accept_compact_chain(self):
+        manager = {"id": 9750, "first_name": "客服"}
+        member = {"id": 9751, "first_name": "女孩"}
+        internal = {"id": -30003, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -39999, "type": "supergroup", "title": "娜娜子群"}
+        keyword = self.app_module.datetime.strptime(self.day, "%Y-%m-%d").strftime("%m%d")
+        chain = f"{keyword}\n1.7-8（1.6）1547\n2.8-10 3.3 0016 积分折扣"
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('1547','编号1547')")
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('0016','编号0016')")
+        self.webhook({"message": {"message_id": 100, "chat": internal, "from": manager, "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 101, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
+        self.webhook({"message": {
+            "message_id": 102, "chat": girl_chat, "from": member, "text": "/导入",
+            "reply_to_message": {"message_id": 99, "text": chain},
+        }})
+        with self.app_module.conn() as c:
+            rows = c.execute("SELECT service_time,received_amount,customer_no FROM orders WHERE order_date=? AND girl_name='娜娜子' ORDER BY service_time",
+                             (self.day,)).fetchall()
+        self.assertEqual([(row["service_time"], row["received_amount"], row["customer_no"]) for row in rows],
+                         [("19:00-20:00", 16000, "1547"), ("20:00-22:00", 33000, "0016")])
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 103, "chat": girl_chat, "from": member, "text": "导入" + chain}})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM orders WHERE order_date=? AND girl_name='娜娜子'", (self.day,)).fetchone()[0], 2)
+        sent_bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("chat_id=-30003" in body and "%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body
+                            for body in sent_bodies), sent_bodies)
+        self.assertFalse(any("chat_id=-39999" in body for body in sent_bodies))
+
     def test_automatic_chain_scan_imports_attending_girl_and_warns_internal_on_failure(self):
         auto_day = self.app_module._tokyo_now().date().isoformat()
         date_keyword = self.app_module._tokyo_now().strftime("%m%d")

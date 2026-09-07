@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v100_attendance_inquiry"
+APP_VERSION = "v101_chain_import_prefix"
 
 @app.after_request
 def compress_large_json(response):

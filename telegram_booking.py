@@ -1036,11 +1036,13 @@ def register_telegram_booking(
         if chain_is_empty(chain_text):
             return
         girl_id = None
+        binding = None
         with conn() as c:
             binding = bound_girl(chat.get("id"), c)
             if binding:
                 girl_id = binding["girl_id"]
-        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+        # 女孩专属群已经通过群 ID 绑定，群内成员可直接导入；未绑定群仍需客服或管理员权限。
+        if not binding and not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
             notify_internal(f"❌ 接龙导入被拒绝：{escape(display_name(user))} 不是店长、客服或该群管理员。")
             return
         try:
@@ -1449,7 +1451,7 @@ def register_telegram_booking(
         if re.match(r"^/?最新接龙(?:@\w+)?(?:\s|$)", text):
             send_latest_chain_from_group(message)
             return
-        if re.match(r"^/?导入(?:接龙)?(?:@\w+)?(?:\s|$)", text):
+        if re.match(r"^/?导入(?:接龙)?(?:@\w+)?(?=\s|\d|$)", text):
             import_chain_from_group(message)
             return
         if chat.get("type") != "private":
