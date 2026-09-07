@@ -74,8 +74,8 @@ button{cursor:pointer;font-weight:900}
   color:#e75ca2;
 }
 .preview{
-  width:min(390px,calc(100vw - 24px));
-  min-height:585px;
+  width:min(440px,calc(100vw - 18px));
+  min-height:660px;
   margin:0 auto;
   background:
     linear-gradient(rgba(255,255,255,.08),rgba(255,255,255,.08)),
@@ -631,11 +631,11 @@ th{
   text-shadow:0 0 8px rgba(33,247,255,.62);
 }
 .preview.mode-default .shift-name{
-  color:#fff;
+  color:var(--name-color,#fff);
   font-size:15px;
   line-height:1.12;
-  -webkit-text-stroke:0;
-  text-shadow:2px 0 var(--pink),0 0 12px rgba(255,255,255,.34);
+  -webkit-text-stroke:.25px rgba(255,255,255,.82);
+  text-shadow:0 0 3px #fff,0 0 8px var(--name-color,#ff2f9a),0 0 15px var(--name-color,#ff2f9a),2px 0 var(--pink),-2px 0 var(--cyan);
 }
 .preview.mode-default .time-price-line{
   color:#dfffff;
@@ -1134,10 +1134,12 @@ th{
     previewCount.textContent = rows.length;
     shiftCount.textContent = rows.length;
     if(!rows.length){ shiftList.innerHTML = '<div class="empty">这一天还没有出勤数据</div>'; return; }
-    shiftList.innerHTML = rows.map(s=>{
+    const nameColors=["#ff70b9","#72f5ff","#ffd447","#c890ff","#78ffad","#ff9b65","#ffffff","#ff667f"];
+    shiftList.innerHTML = rows.map((s,index)=>{
       const p = getGirlPrice(s.girl);
       const priceText = p > 0 ? `<span>${yen(p)}${previewMode === "custom" ? " /h" : "/h"}</span>` : `<span>¥0</span>`;
-      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
+      const nameColor=nameColors[index%nameColors.length];
+      return `<div class="shift-card"><div class="shift-card-inner">${renderAvatar(s.girl)}<div class="shift-copy"><div class="shift-name" style="--name-color:${nameColor}">${escapeHtml(s.girl)}${renderTags(s.tags,s.goldTags)}</div><div class="time-price-line"><span>${escapeHtml(displayTimeRange(s.start,s.end))}</span>${priceText}</div></div></div></div>`;
     }).join("");
   }
 
