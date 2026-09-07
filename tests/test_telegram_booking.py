@@ -632,6 +632,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(self.app_module._acf_gallery_field_key(html), "field_gallery")
         self.assertEqual(self.app_module._wordpress_photo_gallery_field_name(html, "field_gallery"),
                          "girl_photos")
+        gallery_html = '<li class="acf-photo-gallery-mediabox acf-photo-gallery-mediabox-456"></li>'
+        self.assertEqual(self.app_module._wordpress_photo_gallery_attachment_ids(gallery_html), [456])
 
 
 if __name__ == "__main__":

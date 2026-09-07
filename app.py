@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v87_wordpress_gallery_field_fix"
+APP_VERSION = "v88_wordpress_gallery_verification"
 
 @app.after_request
 def compress_large_json(response):
@@ -1057,6 +1057,9 @@ def _wordpress_photo_gallery_field_name(edit_html, gallery_key):
         return ''
     return groups[0] if groups else ''
 
+def _wordpress_photo_gallery_attachment_ids(edit_html):
+    return [int(value) for value in re.findall(r'acf-photo-gallery-mediabox-(\d+)', str(edit_html or ''), re.I)]
+
 def _wordpress_rest_nonce(edit_html):
     patterns = [
         r'wpApiSettings\s*=\s*\{.*?["\']nonce["\']\s*:\s*["\']([^"\']+)',
@@ -1255,6 +1258,11 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             raise ValueError(f'官网“今日出勤”保存失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
         if 'post.php' not in final_url and 'post.php' not in result_html:
             raise ValueError('官网没有确认保存成功')
+        stage = '确认“今日出勤”相册已替换'
+        verify_html, _ = opener_text(opener, edit_url + '&alice_verify=1', timeout=40)
+        verified_ids = _wordpress_photo_gallery_attachment_ids(verify_html)
+        if verified_ids != [attachment_id]:
+            raise ValueError(f'旧版相册插件没有保存新图片（期望 {attachment_id}，实际 {verified_ids or "空"}）')
         stage = '同步女孩公开/私密状态'
         try:
             visibility = sync_alice_wordpress_girl_visibility(opener, attendance_names or [], all_girl_names or [])
@@ -1293,6 +1301,7 @@ def api_wordpress_diagnose():
             raise ValueError('找不到旧版相册插件的图片字段名')
         checks.append({'stage': stage, 'ok': True, 'post_id': post_id, 'gallery_key': gallery_key,
                        'gallery_name': gallery_name,
+                       'gallery_attachment_ids': _wordpress_photo_gallery_attachment_ids(edit_html),
                        'final_url': final_url,
                        'gallery_inputs': [
                            {'name': key, 'value': str(value)[:100]}
