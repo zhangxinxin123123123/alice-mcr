@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v84_wordpress_sync_diagnostics"
+APP_VERSION = "v85_wordpress_rest_media_upload"
 
 @app.after_request
 def compress_large_json(response):
@@ -1048,6 +1048,29 @@ def _acf_gallery_field_key(edit_html):
             return name_match.group(1)
     return ''
 
+def _wordpress_rest_nonce(edit_html):
+    patterns = [
+        r'wpApiSettings\s*=\s*\{.*?["\']nonce["\']\s*:\s*["\']([^"\']+)',
+        r'["\']wpApiSettings["\']\s*:\s*\{.*?["\']nonce["\']\s*:\s*["\']([^"\']+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, str(edit_html or ''), re.I | re.S)
+        if match:
+            return html_unescape(match.group(1)).replace('\\/', '/')
+    return ''
+
+def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes):
+    nonce = _wordpress_rest_nonce(edit_html)
+    if not nonce:
+        return 0
+    filename = f'alice-attendance-{day}.png'
+    req = Request(ALICE_BASE_URL + '/wp-json/wp/v2/media', data=image_bytes, method='POST', headers={
+        'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{filename}"',
+        'X-WP-Nonce': nonce, 'Referer': edit_url, 'Accept': 'application/json'})
+    with opener.open(req, timeout=90) as response:
+        payload = json.loads(response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace'))
+    return int(payload.get('id') or 0)
+
 def _multipart_request(url, fields, filename, image_bytes, opener, referer):
     boundary = 'AliceWpBoundary' + secrets.token_hex(12)
     parts = []
@@ -1177,26 +1200,27 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         gallery_key = _acf_gallery_field_key(edit_html)
         if not gallery_key:
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
-        stage = '读取官网媒体上传页'
-        media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
-        nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
-        if not nonce_match:
-            nonce_match = re.search(r'name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', edit_html, re.I)
-        if not nonce_match:
-            raise ValueError('找不到官网图片上传授权码')
         stage = '上传今日出勤图片'
         try:
-            upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
-                ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
-                ('_wpnonce', html_unescape(nonce_match.group(1)))
-            ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
+            attachment_id = _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes)
+            if not attachment_id:
+                stage = '读取官网媒体上传页'
+                media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
+                nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
+                if not nonce_match:
+                    raise ValueError('找不到官网图片上传授权码')
+                stage = '上传今日出勤图片'
+                upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
+                    ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
+                    ('_wpnonce', html_unescape(nonce_match.group(1)))
+                ], f'alice-attendance-{day}.png', image_bytes, opener, edit_url)
+                upload_data = json.loads(upload_raw)
+                attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
+                if not upload_data.get('success') or not attachment_id:
+                    raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
         except HTTPError as exc:
             detail = exc.read().decode('utf-8', 'replace').strip()[:300]
             raise ValueError(f'官网图片上传失败（HTTP {exc.code}）' + (f'：{strip_html_text(detail)}' if detail else '')) from exc
-        upload_data = json.loads(upload_raw)
-        attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
-        if not upload_data.get('success') or not attachment_id:
-            raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
         stage = '整理“今日出勤”表单'
         pairs = _wordpress_form_pairs(edit_html)
         replace_names = {'acf[field_5d253ca06ccc7]', f'acf[{gallery_key}]', 'action', 'post_ID'}
@@ -1253,13 +1277,24 @@ def api_wordpress_diagnose():
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
         checks.append({'stage': stage, 'ok': True, 'post_id': post_id, 'gallery_key': gallery_key,
                        'final_url': final_url})
+        rest_nonce = _wordpress_rest_nonce(edit_html)
+        if rest_nonce:
+            stage = '检查官网 REST 媒体接口'
+            req = Request(ALICE_BASE_URL + '/wp-json/wp/v2/media?per_page=1&context=edit', headers={
+                'X-WP-Nonce': rest_nonce, 'Referer': edit_url, 'Accept': 'application/json'})
+            with opener.open(req, timeout=40) as response:
+                json.loads(response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace'))
+            checks.append({'stage': stage, 'ok': True})
+            return jsonify(ok=True, checks=checks, upload_method='wordpress_rest_api',
+                           next_stage='上传图片（诊断未执行写入）')
         stage = '读取官网媒体上传页'
         media_html, media_url = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
         nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
         if not nonce_match:
             raise ValueError('找不到官网图片上传授权码')
         checks.append({'stage': stage, 'ok': True, 'final_url': media_url})
-        return jsonify(ok=True, checks=checks, next_stage='上传图片（诊断未执行写入）')
+        return jsonify(ok=True, checks=checks, upload_method='legacy_async_upload',
+                       next_stage='上传图片（诊断未执行写入）')
     except HTTPError as exc:
         detail = exc.read().decode('utf-8', 'replace').strip()[:300]
         return jsonify(ok=False, stage=stage, http_status=exc.code, checks=checks,
