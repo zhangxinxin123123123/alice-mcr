@@ -25,7 +25,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v83_wordpress_image_upload_fix"
+APP_VERSION = "v84_wordpress_sync_diagnostics"
 
 @app.after_request
 def compress_large_json(response):
@@ -1168,19 +1168,23 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
     if not user or not pwd:
         return {'configured': False, 'synced': False, 'warning': 'Render 尚未设置 ALICE_WP_ADMIN_USER 和 ALICE_WP_ADMIN_PASSWORD'}
     post_id = int(os.environ.get('ALICE_WP_ATTENDANCE_POST_ID') or 9744)
+    stage = '登录官网后台'
     try:
         opener = alice_wordpress_login(user, pwd)
+        stage = '读取“今日出勤”编辑页'
         edit_url = f'{ALICE_BASE_URL}/wp-admin/post.php?post={post_id}&action=edit'
         edit_html, _ = opener_text(opener, edit_url, timeout=40)
         gallery_key = _acf_gallery_field_key(edit_html)
         if not gallery_key:
             raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        stage = '读取官网媒体上传页'
         media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
         nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
         if not nonce_match:
             nonce_match = re.search(r'name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', edit_html, re.I)
         if not nonce_match:
             raise ValueError('找不到官网图片上传授权码')
+        stage = '上传今日出勤图片'
         try:
             upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
                 ('name', f'alice-attendance-{day}.png'), ('action', 'upload-attachment'),
@@ -1193,6 +1197,7 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
         if not upload_data.get('success') or not attachment_id:
             raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
+        stage = '整理“今日出勤”表单'
         pairs = _wordpress_form_pairs(edit_html)
         replace_names = {'acf[field_5d253ca06ccc7]', f'acf[{gallery_key}]', 'action', 'post_ID'}
         pairs = [(k, v) for k, v in pairs if k not in replace_names]
@@ -1201,8 +1206,10 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             ('acf[field_5d253ca06ccc7]', str(service_text or '').strip()),
             (f'acf[{gallery_key}]', str(attachment_id)), ('save', '更新'),
         ])
+        stage = '保存“今日出勤”图片和文案'
         req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
                       method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
+        stage = '同步女孩公开/私密状态'
         try:
             with opener.open(req, timeout=60) as response:
                 final_url = response.geturl()
@@ -1219,7 +1226,46 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         return {'configured': True, 'synced': True, 'post_id': post_id, 'attachment_id': attachment_id,
                 'visibility': visibility}
     except Exception as exc:
-        return {'configured': True, 'synced': False, 'warning': str(exc)}
+        warning = str(exc)
+        if not warning.startswith(('官网图片上传失败', '官网“今日出勤”保存失败')):
+            warning = f'{stage}失败：{warning}'
+        return {'configured': True, 'synced': False, 'stage': stage, 'warning': warning}
+
+@app.route('/api/wordpress/diagnose', methods=['GET'])
+def api_wordpress_diagnose():
+    """Read-only checks for every WordPress page needed before an attendance update."""
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以运行官网诊断'), 403
+    user, pwd = alice_wordpress_credentials()
+    if not user or not pwd:
+        return jsonify(ok=False, stage='读取配置', error='Render 尚未设置官网账号密码'), 400
+    post_id = int(os.environ.get('ALICE_WP_ATTENDANCE_POST_ID') or 9744)
+    checks = []
+    stage = '登录官网后台'
+    try:
+        opener = alice_wordpress_login(user, pwd)
+        checks.append({'stage': stage, 'ok': True})
+        stage = '读取“今日出勤”编辑页'
+        edit_url = f'{ALICE_BASE_URL}/wp-admin/post.php?post={post_id}&action=edit'
+        edit_html, final_url = opener_text(opener, edit_url, timeout=40)
+        gallery_key = _acf_gallery_field_key(edit_html)
+        if not gallery_key:
+            raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        checks.append({'stage': stage, 'ok': True, 'post_id': post_id, 'gallery_key': gallery_key,
+                       'final_url': final_url})
+        stage = '读取官网媒体上传页'
+        media_html, media_url = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
+        nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
+        if not nonce_match:
+            raise ValueError('找不到官网图片上传授权码')
+        checks.append({'stage': stage, 'ok': True, 'final_url': media_url})
+        return jsonify(ok=True, checks=checks, next_stage='上传图片（诊断未执行写入）')
+    except HTTPError as exc:
+        detail = exc.read().decode('utf-8', 'replace').strip()[:300]
+        return jsonify(ok=False, stage=stage, http_status=exc.code, checks=checks,
+                       error=strip_html_text(detail) or str(exc)), 502
+    except Exception as exc:
+        return jsonify(ok=False, stage=stage, checks=checks, error=str(exc)), 502
 
 def acf_value_from_edit(edit_html, data_name):
     m = re.search(r'<div[^>]+class=["\'][^"\']*acf-field[^"\']*["\'][^>]+data-name=["\']' + re.escape(data_name) + r'["\'][^>]*>', edit_html, re.S | re.I)
