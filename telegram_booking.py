@@ -219,6 +219,30 @@ def register_telegram_booking(
             raise RuntimeError(result.get("description") or "Telegram 图片发送失败")
         return result.get("result")
 
+    def send_document_bytes(chat_id, image_bytes, caption="", thread_id=0, filename="alice-report.png"):
+        """以 PNG 文件发送，保留原始像素，避免 Telegram 照片压缩导致文字发白或模糊。"""
+        token = telegram_token()
+        if not token:
+            raise RuntimeError("服务器尚未配置 TELEGRAM_BOT_TOKEN")
+        boundary = "AliceBoundary" + secrets.token_hex(12)
+        chunks = []
+        fields = {"chat_id": str(chat_id), "caption": caption, "parse_mode": "HTML"}
+        if int(thread_id or 0):
+            fields["message_thread_id"] = str(int(thread_id))
+        for key, value in fields.items():
+            chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n".encode("utf-8"))
+        safe_filename = re.sub(r"[^A-Za-z0-9_.-]", "-", str(filename or "alice-report.png"))
+        chunks.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"{safe_filename}\"\r\nContent-Type: image/png\r\n\r\n".encode("utf-8"))
+        chunks.append(image_bytes)
+        chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        req = Request(f"https://api.telegram.org/bot{token}/sendDocument", data=b"".join(chunks),
+                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urlopen(req, timeout=40) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        if not result.get("ok"):
+            raise RuntimeError(result.get("description") or "Telegram 高清原图发送失败")
+        return result.get("result")
+
     def inline_keyboard(rows):
         return {"inline_keyboard": rows}
 
@@ -2196,7 +2220,12 @@ def register_telegram_booking(
             page_caption = caption
             if len(image_bytes_list) > 1:
                 page_caption += f"\n图片 {page_index + 1}/{len(image_bytes_list)}"
-            page_result = send_photo_bytes(chat_id, page_bytes, page_caption, thread_id)
+            if kind == "settlement":
+                page_result = send_document_bytes(
+                    chat_id, page_bytes, page_caption, thread_id,
+                    filename=f"alice-settlement-{day}-{page_index + 1}.png")
+            else:
+                page_result = send_photo_bytes(chat_id, page_bytes, page_caption, thread_id)
             if result is None:
                 result = page_result
             message_ids.append(int((page_result or {}).get("message_id") or 0))

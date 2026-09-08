@@ -1033,6 +1033,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.json['closing']['sent'], 1)
         self.assertEqual(response.json['closing']['unbound'], 1)
+        self.assertTrue(any(method == 'sendDocument' and 'alice-settlement-' in body
+                            for method, body in self.telegram_calls))
         self.assertTrue(any(method == 'sendMessage' and 'chat_id=-52001' in body for method, body in self.telegram_calls))
 
     def test_pure_shift_remembers_normal_and_gold_tags(self):
