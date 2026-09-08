@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v102_instant_bound_chain_import"
+APP_VERSION = "v103_points_lookup_audit"
 
 @app.after_request
 def compress_large_json(response):
@@ -143,6 +143,12 @@ def _init_db_schema():
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'user', label TEXT DEFAULT '', permissions TEXT DEFAULT '[]', enabled INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS operation_logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, actor_name TEXT NOT NULL, actor_role TEXT DEFAULT '',
+            method TEXT NOT NULL, target TEXT NOT NULL, detail TEXT DEFAULT '', response_status INTEGER DEFAULT 0,
+            ip TEXT DEFAULT '', user_agent TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(created_at,id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_actor ON operation_logs(actor_name,created_at)")
         if not c.execute("SELECT 1 FROM system_users LIMIT 1").fetchone():
             seed_users = []
             if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_users'").fetchone():
@@ -322,7 +328,7 @@ def required_module_for_api(path):
         kind = str((request.get_json(silent=True) or {}).get('kind') or '')
         return 'settlement' if kind == 'settlement' else 'pureShift'
     rules = [
-        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/telegram/', 'telegramBooking'),
+        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'loginAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
         ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
@@ -449,12 +455,55 @@ def api_system_users():
                     session.update(username=username, role=role, permissions=permissions)
     return jsonify(ok=True)
 
+@app.route('/api/operation_logs', methods=['GET'])
+def api_operation_logs():
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以查看操作日志'), 403
+    init_db()
+    selected_date = str(request.args.get('date') or tokyo_today_date())[:10]
+    limit = min(500, max(20, int(request.args.get('limit') or 200)))
+    with conn() as c:
+        items = rows(c.execute("""SELECT id,actor_name,actor_role,method,target,detail,response_status,ip,user_agent,
+                                         datetime(created_at,'+9 hours') AS created_at
+                                  FROM operation_logs
+                                  WHERE date(datetime(created_at,'+9 hours'))=?
+                                  ORDER BY id DESC LIMIT ?""", (selected_date, limit)).fetchall())
+    return jsonify(ok=True, date=selected_date, logs=items)
+
 
 def conn():
     c=sqlite3.connect(DB_PATH, timeout=20); c.row_factory=sqlite3.Row
     c.execute('PRAGMA busy_timeout=20000')
     return c
 def rows(rs): return [dict(r) for r in rs]
+
+@app.after_request
+def record_admin_operation(response):
+    """记录已登录后台账号的写操作；密码、图片和大段正文不会进入日志。"""
+    try:
+        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
+            return response
+        if request.path in ('/api/login', '/api/health'):
+            return response
+        session = current_session_info()
+        actor = str(session.get('username') or '')
+        if not actor:
+            return response
+        payload = request.get_json(silent=True) or {}
+        safe_keys = ('id','action','date','order_date','shift_date','girl','girl_name','customer_no',
+                     'status','order_status','settlement_status','kind','username','role','delete_id')
+        safe = {key: payload.get(key) for key in safe_keys if key in payload and payload.get(key) not in (None, '')}
+        detail = json.dumps(safe, ensure_ascii=False, separators=(',', ':'))[:1200]
+        forwarded = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+        with conn() as c:
+            c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,ip,user_agent)
+                         VALUES(?,?,?,?,?,?,?,?)""",
+                      (actor, str(session.get('role') or ''), request.method, request.path, detail,
+                       int(response.status_code or 0), forwarded or str(request.remote_addr or ''),
+                       str(request.headers.get('User-Agent') or '')[:500]))
+    except Exception:
+        pass
+    return response
 
 NEKO_SEED_GIRLS = [
     {"name":"新人女孩 夏織（かおり）性感日妹","thumbnail":"https://neko-miaomiao.com/wp-content/uploads/2026/04/20260423_WechatIMG14-1.thumb.jpg"},
@@ -2246,12 +2295,18 @@ def detect_payment_method_from_note(*texts):
 def create_or_update_order(c,d):
     old_customer_id = None
     old_points_used = 0
+    old_order_points = 0
+    old_order_remark = ''
     old_raw_text = ''
     if d.get('id'):
-        old = c.execute("SELECT customer_id,COALESCE(points_used,0) AS points_used,COALESCE(raw_text,'') AS raw_text FROM orders WHERE id=?", (int(d['id']),)).fetchone()
+        old = c.execute("""SELECT customer_id,COALESCE(points,0) AS points,
+                                  COALESCE(points_used,0) AS points_used,COALESCE(remark,'') AS remark,
+                                  COALESCE(raw_text,'') AS raw_text FROM orders WHERE id=?""", (int(d['id']),)).fetchone()
         if old:
             old_customer_id = old["customer_id"]
             old_points_used = int(old["points_used"] or 0)
+            old_order_points = int(old["points"] or 0)
+            old_order_remark = str(old["remark"] or '')
             old_raw_text = str(old["raw_text"] or '')
 
     g = None
@@ -2278,21 +2333,40 @@ def create_or_update_order(c,d):
         th = take_home(g,h)
     prof = round_yen_1000_half_up(rec - th)
     cust = ensure_customer(c,d.get('customer_raw',''),d.get('remark',''))
-    pts = math.floor(rec/20)
-    points_used = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
+    remark = str(d.get('remark') or '')
+    discount_requested = '积分折扣' in (remark + ' ' + str(d.get('remark2') or '') + ' ' + str(d.get('raw_text') or ''))
+    discount_already_applied = bool(
+        d.get('id') and old_customer_id == cust['id'] and '积分抵扣金额' in old_order_remark
+    )
+    if discount_requested:
+        pts = 500
+        if discount_already_applied:
+            points_used = old_points_used
+            discount_amount = old_points_used
+        else:
+            available = max(0, int(cust['points'] or 0))
+            if d.get('id') and old_customer_id == cust['id']:
+                available = max(0, available - old_order_points + old_points_used)
+            points_used = available
+            discount_amount = available
+        remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
+        remark = f"{remark}｜积分抵扣金额：¥{discount_amount:,}"
+    else:
+        pts = math.floor(rec/20)
+        points_used = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
     auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
     payment_method = auto_payment or (d.get('payment_method') or '现金')
 
     if d.get('id'):
         c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,points_used=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,raw_text=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text',old_raw_text),d.get('id')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,remark,d.get('remark2',''),d.get('raw_text',old_raw_text),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
             recalc_customer_points(c, old_customer_id)
         recalc_customer_points(c, cust['id'])
     else:
         c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,points_used,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,d.get('remark',''),d.get('remark2',''),d.get('raw_text','')))
+                  (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,remark,d.get('remark2',''),d.get('raw_text','')))
         recalc_customer_points(c, cust['id'])
 
 

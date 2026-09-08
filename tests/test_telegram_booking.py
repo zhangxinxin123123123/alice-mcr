@@ -60,7 +60,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
-                          "telegram_chain_inbox", "telegram_attendance_inquiries"):
+                          "telegram_chain_inbox", "telegram_attendance_inquiries", "operation_logs"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -539,6 +539,49 @@ class TelegramBookingFlowTest(unittest.TestCase):
                             for body in sent_bodies), sent_bodies)
         self.assertFalse(any("chat_id=-39999" in body for body in sent_bodies))
 
+    def test_points_discount_clears_old_points_adds_500_and_bot_queries_customer(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('0420','积分测试客人')")
+            customer_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,customer_name,
+                         received_amount,points,points_used,order_status) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                      (self.day, "18:00-19:00", girl_id, "娜娜子", customer_id, "0420", "积分测试客人",
+                       30000, 1500, 0, "已结束"))
+            self.app_module.recalc_customer_points(c, customer_id, update_types=False)
+            self.app_module.create_or_update_order(c, {
+                "order_date": self.day, "service_time": "19:00-20:00", "girl_id": girl_id,
+                "received_amount": 12345, "customer_raw": "0420", "remark": "积分折扣",
+                "order_status": "预约中", "settlement_status": "未结算",
+            })
+            discount_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            discount = c.execute("SELECT * FROM orders WHERE id=?", (discount_id,)).fetchone()
+            customer = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        self.assertEqual(discount["received_amount"], 12345)
+        self.assertEqual(discount["points_used"], 1500)
+        self.assertEqual(discount["points"], 500)
+        self.assertIn("积分抵扣金额：¥1,500", discount["remark"])
+        self.assertEqual(customer["points"], 500)
+
+        with self.app_module.conn() as c:
+            self.app_module.create_or_update_order(c, {
+                "id": discount_id, "order_date": self.day, "service_time": "19:00-20:00", "girl_id": girl_id,
+                "received_amount": 12345, "customer_raw": "0420", "remark": "积分折扣",
+                "order_status": "预约中", "settlement_status": "未结算",
+            })
+            customer = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        self.assertEqual(customer["points"], 500)
+
+        manager = {"id": 9760, "first_name": "客服"}
+        internal = {"id": -30003, "type": "supergroup", "title": "Alice内部群"}
+        self.webhook({"message": {"message_id": 110, "chat": internal, "from": manager, "text": "/绑定审核群"}})
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 111, "chat": internal, "from": manager, "text": "积分查询+0420"}})
+        self.assertTrue(any(method == "sendMessage" and "500" in body and "0420" in body for method, body in self.telegram_calls))
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 112, "chat": internal, "from": manager, "text": "编号查询+积分测试客人"}})
+        self.assertTrue(any(method == "sendMessage" and "0420" in body for method, body in self.telegram_calls))
+
     def test_automatic_chain_scan_imports_attending_girl_and_warns_internal_on_failure(self):
         auto_day = self.app_module._tokyo_now().date().isoformat()
         date_keyword = self.app_module._tokyo_now().strftime("%m%d")
@@ -795,6 +838,19 @@ class TelegramBookingFlowTest(unittest.TestCase):
         listing = self.client.get("/api/system/users", headers=headers).json["users"]
         uid = next(x["id"] for x in listing if x["username"] == "permission_test")
         self.client.post("/api/system/users", headers=headers, json={"action": "delete", "id": uid})
+
+    def test_boss_can_query_per_admin_operation_logs(self):
+        login = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": login.json["session_token"]}
+        saved = self.client.post("/api/pure_shifts", headers=headers, json={
+            "date": self.day, "girl": "娜娜子", "start": "20:00", "end": "23:00"
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        today = self.app_module._tokyo_now().date().isoformat()
+        logs = self.client.get(f"/api/operation_logs?date={today}", headers=headers)
+        self.assertEqual(logs.status_code, 200, logs.get_data(as_text=True))
+        self.assertTrue(any(row["actor_name"] == "Star" and row["target"] == "/api/pure_shifts"
+                            for row in logs.json["logs"]), logs.get_data(as_text=True))
 
     def test_pure_shift_report_photo_sends_and_syncs_daily_girls(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})

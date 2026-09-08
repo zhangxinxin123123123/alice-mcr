@@ -1502,6 +1502,52 @@ def register_telegram_booking(
                          f"✅ <b>女孩已确认出勤</b>\n女孩：{escape(girl)}\n时间：{row['start_time']}–{shown_end}\n已写入 MCR 今日出勤表。",
                          thread_id=int(cfg.get("default_review_thread_id") or 0))
 
+    def handle_customer_lookup(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        text = str(message.get("text") or "").strip()
+        points_match = re.fullmatch(r"/?积分查询(?:\s*[+＋:：]?\s*)(\d+)", text)
+        number_match = re.fullmatch(r"/?编号查询(?:\s*[+＋:：]?\s*)(.+)", text)
+        if not points_match and not number_match:
+            return False
+        cfg = settings()
+        if str(chat.get("id")) != str(cfg.get("default_review_chat_id") or ""):
+            return True
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "❌ 只有店长、客服或群管理员可以查询客户资料。")
+            return True
+        if points_match:
+            customer_no = f"{int(points_match.group(1)):04d}"
+            with conn() as c:
+                customer = c.execute("SELECT * FROM customers WHERE customer_no=?", (customer_no,)).fetchone()
+                if customer:
+                    recalc_customer_points(c, int(customer["id"]), update_types=False)
+                    customer = c.execute("SELECT * FROM customers WHERE id=?", (int(customer["id"]),)).fetchone()
+            if not customer:
+                send_message(chat.get("id"), f"没有找到客户编号 <b>{escape(customer_no)}</b>。")
+            else:
+                send_message(chat.get("id"),
+                             f"🎀 <b>客户积分查询</b>\n编号：<b>{escape(customer['customer_no'])}</b>\n"
+                             f"客户名：{escape(customer['name'] or '未填写')}\n当前积分：<b>{int(customer['points'] or 0):,}</b>\n"
+                             f"客户类型：{escape(customer['customer_type'] or '新客')}")
+            return True
+        name = number_match.group(1).strip()
+        escaped_like = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        with conn() as c:
+            matches = c.execute("""SELECT customer_no,name,points,customer_type FROM customers
+                                   WHERE name=? OR name LIKE ? ESCAPE '\\'
+                                   ORDER BY CASE WHEN name=? THEN 0 ELSE 1 END,id DESC LIMIT 10""",
+                                (name, f"%{escaped_like}%", name)).fetchall()
+        if not matches:
+            send_message(chat.get("id"), f"没有找到客户名“<b>{escape(name)}</b>”。")
+        else:
+            lines = ["🔎 <b>客户编号查询</b>"]
+            for item in matches:
+                lines.append(f"{escape(item['name'] or '未填写')}：<b>{escape(item['customer_no'])}</b>｜积分 {int(item['points'] or 0):,}")
+            if len(matches) == 10:
+                lines.append("结果较多，请输入更完整的客户名。")
+            send_message(chat.get("id"), "\n".join(lines))
+        return True
+
     def handle_message(message, edited=False):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
@@ -1511,6 +1557,8 @@ def register_telegram_booking(
         if cached_chain and import_bound_chain_immediately(message):
             return
         if handle_auto_import_control(message):
+            return
+        if handle_customer_lookup(message):
             return
         if re.fullmatch(r"/?询问出勤(?:@\w+)?", text.strip()):
             start_attendance_inquiry(message)

@@ -388,9 +388,13 @@ body:not(.role-boss) .boss-only{display:none!important}
  <section id="debug" class="panel"><div class="card"><h2>数据诊断</h2><button class="primary" onclick="loadAll()">重新读取</button><pre id="debugText" style="white-space:pre-wrap;background:#fff0f7;border-radius:16px;padding:14px"></pre></div></section>
 
  <section id="loginAudit" class="panel">
-  <div class="card"><div class="card-title-row"><h2>登录记录</h2><button class="soft" onclick="loadLoginAuditRecords()">刷新</button></div>
-   <div class="form"><input id="loginAuditDate" type="date" onchange="loadLoginAuditRecords()"><button class="soft" onclick="loginAuditDate.value=todayStr;loadLoginAuditRecords()">今天</button></div>
+  <div class="card"><div class="card-title-row"><h2>登录记录</h2><button class="soft" onclick="loadLoginAuditRecords();loadOperationLogs()">刷新</button></div>
+   <div class="form"><input id="loginAuditDate" type="date" onchange="loadLoginAuditRecords();loadOperationLogs()"><button class="soft" onclick="loginAuditDate.value=todayStr;loadLoginAuditRecords();loadOperationLogs()">今天</button></div>
    <div id="loginAuditSummary" class="note"></div><div id="loginAuditRecords"></div>
+  </div>
+  <div class="card"><div class="card-title-row"><h2>管理员操作日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
+   <p class="note">记录后台账号的新增、修改、删除、同步和状态变更。密码、图片及大段正文不会写入日志。</p>
+   <div id="operationLogRecords"></div>
   </div>
   <div class="card"><div class="card-title-row"><h2>登录检测与账号权限</h2><button class="soft" onclick="clearSystemUserForm()">＋ 新增账号</button></div>
    <p class="note">老板可以为每个登录账号勾选能够看到和操作的模块。修改权限会同步到该账号当前登录；停用或删除后会立即退出。</p>
@@ -609,7 +613,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录检测":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert(id==="loginAudit"?"只有老板可以查看登录检测":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords(),loadOperationLogs()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  beginBusy("正在读取管理系统数据…");
@@ -2330,6 +2334,12 @@ function loginDuration(seconds){seconds=Math.max(0,Number(seconds||0));const h=M
 async function loadLoginAuditRecords(){
  if(!loginAuditDate.value)loginAuditDate.value=todayStr;beginBusy('正在读取登录记录…');
  try{const r=await timedFetch(`/api/login_audit?date=${encodeURIComponent(loginAuditDate.value)}&v=${Date.now()}`,{cache:'no-store',headers:authHeaders()});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取登录记录失败');const s=j.summary||{};loginAuditSummary.innerHTML=`记录 <b>${Number(s.total||0)}</b>｜账号 <b>${Number(s.users||0)}</b>｜IP <b>${Number(s.ips||0)}</b>｜在线 <b>${Number(s.active||0)}</b>｜密码警报 <b>${Number(s.alerts||0)}</b>`;loginAuditRecords.innerHTML='<div class="table"><table><thead><tr><th>登录时间</th><th>账号</th><th>角色</th><th>IP</th><th>在线时长</th><th>设备</th><th>状态</th><th>操作</th></tr></thead><tbody>'+((j.sessions||[]).map(x=>`<tr class="${x.is_alert||x.status==='password_alert'?'settle-overdue':''}"><td>${escHtml(x.login_at||'')}</td><td><b>${escHtml(x.username||'')}</b></td><td>${escHtml(x.role_label||x.role||'')}</td><td>${escHtml(x.ip||'')}</td><td>${loginDuration(x.duration_seconds)}</td><td style="max-width:280px;white-space:normal">${escHtml(x.user_agent||'')}</td><td>${escHtml(x.status_label||x.status||'')}</td><td>${x.status==='active'&&!x.logout_at?`<button class="danger" onclick="forceLogoutSystemUser('${String(x.username||'').replaceAll("'","\\'")}')">强制下线</button>`:''}</td></tr>`).join('')||'<tr><td colspan="8">这一天还没有登录记录</td></tr>')+'</tbody></table></div>';}finally{endBusy();}
+}
+async function loadOperationLogs(){
+ if(!window.operationLogRecords||!auth||auth.role!=='boss')return;if(!loginAuditDate.value)loginAuditDate.value=todayStr;
+ const r=await timedFetch(`/api/operation_logs?date=${encodeURIComponent(loginAuditDate.value)}&limit=300&v=${Date.now()}`,{cache:'no-store',headers:authHeaders()});
+ const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取操作日志失败');
+ operationLogRecords.innerHTML='<div class="table"><table><thead><tr><th>时间</th><th>账号</th><th>角色</th><th>操作</th><th>目标</th><th>内容</th><th>结果</th><th>IP</th></tr></thead><tbody>'+((j.logs||[]).map(x=>`<tr><td>${escHtml(x.created_at||'')}</td><td><b>${escHtml(x.actor_name||'')}</b></td><td>${escHtml(x.actor_role||'')}</td><td>${escHtml(x.method||'')}</td><td>${escHtml(x.target||'')}</td><td style="max-width:320px;white-space:normal">${escHtml(x.detail||'')}</td><td>${Number(x.response_status||0)}</td><td>${escHtml(x.ip||'')}</td></tr>`).join('')||'<tr><td colspan="8">这一天还没有后台操作记录</td></tr>')+'</tbody></table></div>';
 }
 async function forceLogoutSystemUser(username){if(!confirm(`确认强制下线 ${username}？`))return;await api('/api/users/logout',{username});await Promise.all([loadLoginAuditRecords(),loadSystemUsers()]);}
 function renderPermissionChecks(selected){
