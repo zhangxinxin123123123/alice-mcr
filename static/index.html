@@ -42,7 +42,7 @@ button{touch-action:manipulation}button.primary,button.soft,button.danger{min-he
 
 .busy-overlay{position:fixed;inset:0;z-index:9998;display:grid;place-items:center;padding:24px;background:rgba(255,247,251,.72);backdrop-filter:blur(5px);opacity:0;visibility:hidden;transition:opacity .16s ease,visibility .16s ease}.busy-overlay.on{opacity:1;visibility:visible}.busy-card{min-width:min(290px,88vw);padding:22px;border:2px solid var(--line);border-radius:22px;background:rgba(255,255,255,.97);box-shadow:0 18px 50px #b65b8f35;text-align:center}.busy-spinner{display:block;width:42px;height:42px;margin:0 auto 12px;border:4px solid var(--pink2);border-top-color:#e75ca2;border-radius:50%;animation:busySpin .75s linear infinite}.busy-card strong,.busy-card small{display:block}.busy-card small{margin-top:7px;opacity:.72}.busy-slow{display:none}.busy-overlay.slow .busy-slow{display:block}@keyframes busySpin{to{transform:rotate(360deg)}}
 .permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0}.permission-check{display:flex;align-items:center;gap:8px;padding:9px 11px;border:2px solid var(--line);border-radius:14px;background:#fffafd;font-weight:800}.permission-check input{width:18px;height:18px}.account-disabled{opacity:.55}
-.manual-search{width:100%;margin:0 0 14px}.manual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}.manual-block{border:2px solid var(--line);border-radius:18px;background:#fffafd;overflow:hidden}.manual-block summary{padding:14px 16px;cursor:pointer;font-size:16px;font-weight:900;color:#d94f9f;list-style:none}.manual-block summary::-webkit-details-marker{display:none}.manual-block summary::after{content:'＋';float:right}.manual-block[open] summary::after{content:'－'}.manual-body{padding:0 16px 15px;line-height:1.75}.manual-body h4{margin:12px 0 4px;color:#7a5571}.manual-body ul,.manual-body ol{margin:5px 0;padding-left:22px}.manual-command{display:grid;grid-template-columns:minmax(125px,.7fr) 1.5fr;gap:6px 12px;padding:8px 0;border-bottom:1px dashed var(--line)}.manual-command code{font-weight:900;color:#d94f9f;overflow-wrap:anywhere}.log-filters{grid-template-columns:repeat(4,minmax(120px,1fr))}.log-ok{color:#11823b;font-weight:900}.log-fail{color:#d6003d;font-weight:900}
+.manual-search{width:100%;margin:0 0 14px}.manual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}.manual-block{border:2px solid var(--line);border-radius:18px;background:#fffafd;overflow:hidden}.manual-block summary{padding:14px 16px;cursor:pointer;font-size:16px;font-weight:900;color:#d94f9f;list-style:none}.manual-block summary::-webkit-details-marker{display:none}.manual-block summary::after{content:'＋';float:right}.manual-block[open] summary::after{content:'－'}.manual-body{padding:0 16px 15px;line-height:1.75}.manual-body h4{margin:12px 0 4px;color:#7a5571}.manual-body ul,.manual-body ol{margin:5px 0;padding-left:22px}.manual-command{display:grid;grid-template-columns:minmax(125px,.7fr) 1.5fr;gap:6px 12px;padding:8px 0;border-bottom:1px dashed var(--line)}.manual-command code{font-weight:900;color:#d94f9f;overflow-wrap:anywhere}.log-filters{grid-template-columns:repeat(6,minmax(100px,1fr))}.log-ok{color:#11823b;font-weight:900}.log-fail{color:#d6003d;font-weight:900}.log-level{display:inline-block;min-width:58px;padding:4px 7px;border-radius:999px;text-align:center;font-size:11px;font-weight:900}.log-debug{background:#e9f2ff;color:#2563eb}.log-info{background:#e9fff2;color:#11823b}.log-warn{background:#fff4d6;color:#a66a00}.log-error{background:#ffe2e8;color:#d6003d}
 @media(max-width:700px){.manual-grid{grid-template-columns:1fr}.manual-command{grid-template-columns:1fr}.log-filters{grid-template-columns:1fr}}
 .telegram-report-capture{position:fixed;left:-10000px;top:0;width:760px;padding:28px;color:#fff;background:linear-gradient(145deg,#090511,#1a0820 52%,#061720);border:3px solid #ff2f9a;font-family:"Yu Gothic UI","Microsoft YaHei",sans-serif}.telegram-report-capture h2{margin:0 0 16px;padding:12px;text-align:center;color:#fff;border:1px solid #21f7ff;background:#24102c;text-shadow:2px 0 #21f7ff,-2px 0 #ff2f9a}.telegram-report-capture table{min-width:0;background:#0b1020}.telegram-report-capture th{background:#240b28;color:#21f7ff}.telegram-report-capture td{color:#fff}.telegram-report-capture .report-total{margin-top:14px;text-align:right;color:#ffd447;font-size:20px;font-weight:900}
 
@@ -149,11 +149,11 @@ body:not(.role-boss) .boss-only{display:none!important}
   <button data-module="stats" onclick="show('stats',this)">🥧 收益图表</button>
   <button data-module="debug" onclick="show('debug',this)">🩺 数据诊断</button>
   <button id="loginAuditNav" data-module="loginAudit" onclick="show('loginAudit',this)">🔐 登录检测</button>
+  <button id="operationAuditNav" data-module="operationAudit" onclick="show('operationAudit',this)">🕵️ 管理日志</button>
   <details class="nav-more" data-module-group="lowFrequency"><summary>🧰 低频功能</summary>
    <button data-module="advanceReserve" onclick="show('advanceReserve',this)">📅 提前预约表</button>
    <button data-module="rooms" onclick="show('rooms',this)">🏨 房间安排</button>
    <button data-module="enums" onclick="show('enums',this)">⚙️ 枚举类型</button>
-   <button class="boss-only" data-module="loginAudit" onclick="show('operationAudit',this)">🕵️ 管理员操作日志</button>
    <button data-module="pureShift" onclick="window.open('/tonight','_blank')">🌙 今晚可约临时页</button>
    <button data-module="pureShift" onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
   </details>
@@ -420,15 +420,15 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="接龙预约 保存 复制 客户 联系 酒店 图片 空闲时间"><summary>🧩 接龙预约</summary><div class="manual-body"><ul><li>选择日期和女孩后读取当天接龙；时间、价格、客户及备注填写后保存。</li><li>“复制完整版”供内部使用，含客户编号和名字；“复制普通版”供女孩群使用。</li><li>空闲时间来自 MCR 订单，不从群消息反推；“刷新空闲时间”后可复制文字或表格。</li><li>接龙表中的“联系客户”可直接打开预约客户的 Telegram。</li></ul></div></details>
     <details class="manual-block" data-search="纯出勤表 全面同步 官网 今日出勤 头像 截图"><summary>📋 纯出勤表 / 全面同步</summary><div class="manual-body"><ol><li>选择当天女孩，填写 24 小时制出勤时间、价格和标签；标签会记忆。</li><li>全面同步前先尝试从 YY 更新头像，成功头像会保存到女孩表。</li><li><b>全面同步：</b>保存出勤、更新 TEL 可预约名单、生成高清出勤图、发送绑定群，并同步 Alice 官网“今日出勤”。</li><li>超过 6 位女孩时生成多张图；识别或官网同步失败会在内部群明确提示。</li></ol></div></details>
     <details class="manual-block" data-search="收益图表 日 月 支付 房间 成本"><summary>🥧 收益图表</summary><div class="manual-body"><ul><li>按日或月查看客人支付、女孩到手、店铺收益、房间成本和净收益。</li><li>修改日期后图表与下方汇总表同步刷新；仅有相应权限的账号可查看。</li></ul></div></details>
-    <details class="manual-block" data-search="数据诊断 登录检测 权限 管理员 日志"><summary>🩺 数据诊断与账号</summary><div class="manual-body"><ul><li><b>数据诊断：</b>服务器数据异常或页面内容不一致时点“重新读取”。</li><li><b>登录检测：</b>老板查看登录时间、IP、设备、在线状态，并可强制下线账号。</li><li>老板可为账号勾选模块权限，保存后立即生效。</li><li><b>管理员操作日志：</b>位于“低频功能”，记录按钮点击和数据接口调用；发生问题时按日期、账号或操作关键词检索。</li></ul></div></details>
+     <details class="manual-block" data-search="数据诊断 登录检测 权限 管理日志 查询 插入"><summary>🩺 数据诊断与账号</summary><div class="manual-body"><ul><li><b>数据诊断：</b>服务器数据异常或页面内容不一致时点“重新读取”。</li><li><b>登录检测：</b>查看登录时间、IP、设备、在线状态，并可强制下线账号。</li><li><b>管理日志：</b>是左侧独立模块，记录按钮点击、筛选查询以及后台新增、修改、删除的具体字段；可按日期、账号、动作和关键词检索。</li><li>老板可分别勾选“登录检测”和“管理日志”权限，保存后立即生效。</li></ul></div></details>
    </div>
   </div>
  </section>
 
  <section id="operationAudit" class="panel">
-  <div class="card"><div class="card-title-row"><h2>管理员操作日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
-   <p class="note">记录后台账号点击的按钮，以及新增、修改、删除、同步和状态变更接口。可以把同一时间的“点击”和“接口调用”对照排查；密码、图片及大段正文不会记录。</p>
-   <div class="form log-filters"><input id="opLogDate" type="date" onchange="loadOperationLogs()"><input id="opLogActor" placeholder="账号，例如 Star" oninput="scheduleOperationLogLoad()"><input id="opLogQuery" placeholder="操作/模块/接口关键词" oninput="scheduleOperationLogLoad()"><button class="soft" onclick="opLogDate.value=todayStr;opLogActor.value='';opLogQuery.value='';loadOperationLogs()">今天 / 清空</button></div>
+  <div class="card"><div class="card-title-row"><h2>管理日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
+   <p class="note">记录谁在几点几分点击了什么按钮、做了什么筛选查询，以及向后台新增、修改或删除了哪些数据。密码、Token、图片内容及超长正文会自动隐藏。</p>
+   <div class="form log-filters"><input id="opLogDate" type="date" onchange="loadOperationLogs()"><input id="opLogActor" placeholder="账号，例如 Star" oninput="scheduleOperationLogLoad()"><select id="opLogLevel" onchange="loadOperationLogs()"><option value="">全部级别</option><option value="DEBUG">DEBUG 查询/点击</option><option value="INFO">INFO 成功写入</option><option value="WARN">WARN 请求失败</option><option value="ERROR">ERROR 系统异常</option></select><select id="opLogMethod" onchange="loadOperationLogs()"><option value="">全部动作</option><option value="CLICK">按钮点击</option><option value="QUERY">页面查询</option><option value="GET">读取接口</option><option value="POST">新增/提交</option><option value="PUT">修改 PUT</option><option value="PATCH">修改 PATCH</option><option value="DELETE">删除</option></select><input id="opLogQuery" placeholder="按钮、字段、客户或接口关键词" oninput="scheduleOperationLogLoad()"><button class="soft" onclick="opLogDate.value=todayStr;opLogActor.value='';opLogLevel.value='';opLogMethod.value='';opLogQuery.value='';loadOperationLogs()">今天 / 清空</button></div>
    <div id="operationLogSummary" class="note"></div><div id="operationLogRecords"></div>
   </div>
  </section>
@@ -533,9 +533,9 @@ function armLoginCueFallback(){
   window.addEventListener('pointerdown',retry,{once:true});
   window.addEventListener('keydown',retry,{once:true});
 }
-const SYSTEM_MODULE_LABELS={home:'学院总览',orders:'订单/预约',customers:'客户表',girls:'女孩表',settlement:'金额结算',quickLinks:'链接跳转',importer:'接龙导入',telegramBooking:'TEL预约',chainReserve:'接龙预约',pureShift:'纯出勤表',manual:'系统使用说明',advanceReserve:'提前预约表',rooms:'房间安排',enums:'枚举类型',stats:'收益图表',debug:'数据诊断',loginAudit:'登录检测/操作日志'};
-const ROLE_PERMISSION_PRESETS={boss:Object.keys(SYSTEM_MODULE_LABELS),admin:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','loginAudit'].includes(x)),user:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','settlement','stats','loginAudit'].includes(x))};
-function canAccessModule(id){if(id==='girlPraiseFolder')id='girls';if(id==='operationAudit')id='loginAudit';return !!auth&&(auth.role==='boss'||(auth.permissions||ROLE_PERMISSION_PRESETS[auth.role]||[]).includes(id));}
+const SYSTEM_MODULE_LABELS={home:'学院总览',orders:'订单/预约',customers:'客户表',girls:'女孩表',settlement:'金额结算',quickLinks:'链接跳转',importer:'接龙导入',telegramBooking:'TEL预约',chainReserve:'接龙预约',pureShift:'纯出勤表',manual:'系统使用说明',advanceReserve:'提前预约表',rooms:'房间安排',enums:'枚举类型',stats:'收益图表',debug:'数据诊断',loginAudit:'登录检测',operationAudit:'管理日志'};
+const ROLE_PERMISSION_PRESETS={boss:Object.keys(SYSTEM_MODULE_LABELS),admin:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','loginAudit','operationAudit'].includes(x)),user:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','settlement','stats','loginAudit','operationAudit'].includes(x))};
+function canAccessModule(id){if(id==='girlPraiseFolder')id='girls';return !!auth&&(auth.role==='boss'||(auth.permissions||ROLE_PERMISSION_PRESETS[auth.role]||[]).includes(id));}
 function roleBlockedPage(id){return !canAccessModule(id);}
 function clearAuthAndShowLogin(message){
   authVerified=false;
@@ -655,7 +655,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert((id==="loginAudit"||id==="operationAudit")?"只有老板可以查看登录与操作记录":"当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>loadOperationLogs().catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>loadOperationLogs().catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  beginBusy("正在读取管理系统数据…");
@@ -2388,16 +2388,16 @@ function openAllManual(open){document.querySelectorAll('#manualGrid .manual-bloc
 let operationLogLoadTimer=null;
 function scheduleOperationLogLoad(){clearTimeout(operationLogLoadTimer);operationLogLoadTimer=setTimeout(()=>loadOperationLogs().catch(console.error),350);}
 function operationDetailHtml(raw){
- try{const d=JSON.parse(raw||'{}');const parts=[];if(d.button)parts.push(`<b>按钮：</b>${escHtml(d.button)}`);if(d.module)parts.push(`<b>页面：</b>${escHtml(SYSTEM_MODULE_LABELS[d.module]||d.module)}`);if(d.handler)parts.push(`<b>处理：</b>${escHtml(d.handler)}`);Object.entries(d).forEach(([k,v])=>{if(!['button','module','handler','client_now'].includes(k))parts.push(`<b>${escHtml(k)}：</b>${escHtml(String(v))}`)});return parts.join('<br>')||'—';}catch(e){return escHtml(raw||'—');}
+ try{const d=JSON.parse(raw||'{}');const parts=[];const pretty=v=>escHtml(typeof v==='object'&&v!==null?JSON.stringify(v,null,2):String(v));if(d.button)parts.push(`<b>按钮：</b>${escHtml(d.button)}`);if(d.module)parts.push(`<b>页面：</b>${escHtml(SYSTEM_MODULE_LABELS[d.module]||d.module)}`);if(d.handler)parts.push(`<b>处理：</b>${escHtml(d.handler)}`);Object.entries(d).forEach(([k,v])=>{if(!['button','module','handler','client_now'].includes(k)&&v!==''&&v!==null)parts.push(`<b>${escHtml(k)}：</b><span style="white-space:pre-wrap">${pretty(v)}</span>`)});return parts.join('<br>')||'—';}catch(e){return escHtml(raw||'—');}
 }
 async function loadOperationLogs(){
- if(!window.operationLogRecords||!auth||auth.role!=='boss')return;if(!opLogDate.value)opLogDate.value=todayStr;
- const url=`/api/operation_logs?date=${encodeURIComponent(opLogDate.value)}&actor=${encodeURIComponent(opLogActor.value||'')}&q=${encodeURIComponent(opLogQuery.value||'')}&limit=500&v=${Date.now()}`;
+ if(!window.operationLogRecords||!auth||!canAccessModule('operationAudit'))return;if(!opLogDate.value)opLogDate.value=todayStr;
+ const url=`/api/operation_logs?date=${encodeURIComponent(opLogDate.value)}&actor=${encodeURIComponent(opLogActor.value||'')}&level=${encodeURIComponent(opLogLevel.value||'')}&method=${encodeURIComponent(opLogMethod.value||'')}&q=${encodeURIComponent(opLogQuery.value||'')}&limit=500&v=${Date.now()}`;
  const r=await timedFetch(url,{cache:'no-store',headers:authHeaders()});
  const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取操作日志失败');
- const logs=j.logs||[];const clicks=logs.filter(x=>x.method==='CLICK').length,failures=logs.filter(x=>Number(x.response_status||0)>=400).length;
- operationLogSummary.innerHTML=`共 <b>${logs.length}</b> 条｜按钮点击 <b>${clicks}</b>｜接口调用 <b>${logs.length-clicks}</b>｜失败 <b>${failures}</b>`;
- operationLogRecords.innerHTML='<div class="table"><table><thead><tr><th>时间</th><th>账号</th><th>角色</th><th>动作</th><th>页面 / 接口</th><th>详细内容</th><th>结果</th><th>IP</th></tr></thead><tbody>'+((logs.map(x=>{const ok=Number(x.response_status||0)<400;return `<tr class="${ok?'':'settle-overdue'}"><td>${escHtml(x.created_at||'')}</td><td><b>${escHtml(x.actor_name||'')}</b></td><td>${escHtml(x.actor_role||'')}</td><td>${x.method==='CLICK'?'点击按钮':escHtml(x.method||'')}</td><td>${escHtml(SYSTEM_MODULE_LABELS[x.target]||x.target||'')}</td><td style="max-width:360px;white-space:normal">${operationDetailHtml(x.detail)}</td><td class="${ok?'log-ok':'log-fail'}">${ok?'成功':'失败'} ${Number(x.response_status||0)}</td><td>${escHtml(x.ip||'')}</td></tr>`}).join(''))||'<tr><td colspan="8">当前条件下没有操作记录</td></tr>')+'</tbody></table></div>';
+ const logs=j.logs||[];const clicks=logs.filter(x=>x.method==='CLICK').length,queries=logs.filter(x=>['QUERY','GET'].includes(x.method)).length,failures=logs.filter(x=>['WARN','ERROR'].includes(x.log_level)).length;
+ operationLogSummary.innerHTML=`共 <b>${logs.length}</b> 条｜点击 <b>${clicks}</b>｜查询 <b>${queries}</b>｜写入 <b>${logs.length-clicks-queries}</b>｜警告/异常 <b>${failures}</b>`;
+ operationLogRecords.innerHTML='<div class="table"><table><thead><tr><th>时间</th><th>级别</th><th>账号</th><th>角色</th><th>动作</th><th>页面 / 接口</th><th>详细内容</th><th>结果</th><th>IP</th></tr></thead><tbody>'+((logs.map(x=>{const ok=Number(x.response_status||0)<400,level=String(x.log_level||'INFO').toUpperCase();return `<tr class="${ok?'':'settle-overdue'}"><td>${escHtml(x.created_at||'')}</td><td><span class="log-level log-${level.toLowerCase()}">${escHtml(level)}</span></td><td><b>${escHtml(x.actor_name||'')}</b></td><td>${escHtml(x.actor_role||'')}</td><td><b>${escHtml(x.action_name||({CLICK:'点击按钮',QUERY:'筛选查询',GET:'读取数据'}[x.method]||x.method||''))}</b><br><span class="small">${escHtml(x.method||'')}</span></td><td>${escHtml(SYSTEM_MODULE_LABELS[x.target]||x.target||'')}</td><td style="max-width:420px;white-space:normal">${operationDetailHtml(x.detail)}</td><td class="${ok?'log-ok':'log-fail'}">${ok?'成功':'失败'} ${Number(x.response_status||0)}</td><td>${escHtml(x.ip||'')}</td></tr>`}).join(''))||'<tr><td colspan="9">当前条件下没有操作记录</td></tr>')+'</tbody></table></div>';
 }
 async function forceLogoutSystemUser(username){if(!confirm(`确认强制下线 ${username}？`))return;await api('/api/users/logout',{username});await Promise.all([loadLoginAuditRecords(),loadSystemUsers()]);}
 function renderPermissionChecks(selected){
@@ -2702,13 +2702,24 @@ function scrollToAttPreview(){
 }
 
 // 只记录已登录 MCR 中的实际按钮点击；记录失败不能影响原按钮功能。
+function sendAuditUiEvent(payload){
+ if(!auth||!authVerified)return;
+ timedFetch('/api/operation_logs/frontend',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(payload)},5000).catch(()=>{});
+}
 document.addEventListener('click',event=>{
  const button=event.target.closest?.('button');
  if(!button||!auth||!authVerified||button.closest('#loginMask'))return;
  const panel=button.closest('.panel');
- const module=(panel?.id==='operationAudit'?'loginAudit':panel?.id)||(button.dataset.module||'navigation');
+ const module=panel?.id||(button.dataset.module||'navigation');
  const payload={label:String(button.innerText||button.getAttribute('aria-label')||'未命名按钮').replace(/\s+/g,' ').trim(),module,handler:button.getAttribute('onclick')||''};
- timedFetch('/api/operation_logs/frontend',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(payload)},5000).catch(()=>{});
+ sendAuditUiEvent(payload);
+},true);
+document.addEventListener('change',event=>{
+ const el=event.target,panel=el.closest?.('.panel');if(!panel||!el.id||['password','file','hidden'].includes(String(el.type||'').toLowerCase())||el.tagName==='TEXTAREA')return;
+ const hint=`${el.id} ${el.placeholder||''} ${el.getAttribute('onchange')||''}`;
+ if(!/^(q)|查询|筛选|搜索|load|render/i.test(hint))return;
+ const shown=el.tagName==='SELECT'?(el.selectedOptions?.[0]?.textContent||el.value):el.value;
+ sendAuditUiEvent({event_type:'QUERY',label:'页面筛选',module:panel.id,field:el.id,value:String(shown||'').slice(0,300),handler:el.getAttribute('onchange')||''});
 },true);
 
 </script>

@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v107_fulltime_closing_skip_attendance"
+APP_VERSION = "v109_four_level_management_audit"
 
 @app.after_request
 def compress_large_json(response):
@@ -57,12 +57,12 @@ USERS = {
 }
 SYSTEM_MODULES = [
     'home','orders','customers','girls','settlement','quickLinks','importer','telegramBooking',
-    'chainReserve','pureShift','manual','advanceReserve','rooms','enums','stats','debug','loginAudit'
+    'chainReserve','pureShift','manual','advanceReserve','rooms','enums','stats','debug','loginAudit','operationAudit'
 ]
 ROLE_DEFAULT_PERMISSIONS = {
     'boss': SYSTEM_MODULES,
-    'admin': [x for x in SYSTEM_MODULES if x not in ('home','loginAudit')],
-    'user': [x for x in SYSTEM_MODULES if x not in ('home','settlement','stats','loginAudit')],
+    'admin': [x for x in SYSTEM_MODULES if x not in ('home','loginAudit','operationAudit')],
+    'user': [x for x in SYSTEM_MODULES if x not in ('home','settlement','stats','loginAudit','operationAudit')],
 }
 ACTIVE_SESSIONS = {}
 LAST_FULL_MAINTENANCE_DAY = None
@@ -146,9 +146,16 @@ def _init_db_schema():
         c.execute("""CREATE TABLE IF NOT EXISTS operation_logs(
             id INTEGER PRIMARY KEY AUTOINCREMENT, actor_name TEXT NOT NULL, actor_role TEXT DEFAULT '',
             method TEXT NOT NULL, target TEXT NOT NULL, detail TEXT DEFAULT '', response_status INTEGER DEFAULT 0,
+            log_level TEXT DEFAULT 'INFO', action_name TEXT DEFAULT '',
             ip TEXT DEFAULT '', user_agent TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        operation_cols = [r[1] for r in c.execute('PRAGMA table_info(operation_logs)').fetchall()]
+        if 'log_level' not in operation_cols:
+            c.execute("ALTER TABLE operation_logs ADD COLUMN log_level TEXT DEFAULT 'INFO'")
+        if 'action_name' not in operation_cols:
+            c.execute("ALTER TABLE operation_logs ADD COLUMN action_name TEXT DEFAULT ''")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(created_at,id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_actor ON operation_logs(actor_name,created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_level ON operation_logs(log_level,created_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_cleanup_archives(
             id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT NOT NULL UNIQUE,
             actor_name TEXT DEFAULT '', reason TEXT DEFAULT '', customer_count INTEGER DEFAULT 0,
@@ -334,7 +341,7 @@ def required_module_for_api(path):
     if path == '/api/operation_logs/frontend':
         return None
     rules = [
-        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'loginAudit'), ('/api/telegram/', 'telegramBooking'),
+        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'operationAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
         ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
@@ -463,24 +470,34 @@ def api_system_users():
 
 @app.route('/api/operation_logs', methods=['GET'])
 def api_operation_logs():
-    if current_role() != 'boss':
-        return jsonify(ok=False, error='只有老板账号可以查看操作日志'), 403
+    session = current_session_info()
+    if current_role() != 'boss' and 'operationAudit' not in set(session.get('permissions') or []):
+        return jsonify(ok=False, error='当前账号没有管理日志权限'), 403
     init_db()
     selected_date = str(request.args.get('date') or tokyo_today_date())[:10]
     limit = min(500, max(20, int(request.args.get('limit') or 200)))
     actor = str(request.args.get('actor') or '').strip()
     query = str(request.args.get('q') or '').strip()
+    method = str(request.args.get('method') or '').strip().upper()
+    level = str(request.args.get('level') or '').strip().upper()
     conditions = ["date(datetime(created_at,'+9 hours'))=?"]
     values = [selected_date]
     if actor:
         conditions.append("actor_name LIKE ?")
         values.append(f"%{actor}%")
     if query:
-        conditions.append("(method LIKE ? OR target LIKE ? OR detail LIKE ?)")
-        values.extend([f"%{query}%"] * 3)
+        conditions.append("(method LIKE ? OR target LIKE ? OR action_name LIKE ? OR detail LIKE ?)")
+        values.extend([f"%{query}%"] * 4)
+    if method:
+        conditions.append("method=?")
+        values.append(method)
+    if level in ('DEBUG', 'INFO', 'WARN', 'ERROR'):
+        conditions.append("log_level=?")
+        values.append(level)
     values.append(limit)
     with conn() as c:
-        items = rows(c.execute(f"""SELECT id,actor_name,actor_role,method,target,detail,response_status,ip,user_agent,
+        items = rows(c.execute(f"""SELECT id,actor_name,actor_role,method,target,detail,response_status,
+                                          COALESCE(log_level,'INFO') AS log_level,COALESCE(action_name,'') AS action_name,ip,user_agent,
                                           datetime(created_at,'+9 hours') AS created_at
                                    FROM operation_logs
                                    WHERE {' AND '.join(conditions)}
@@ -498,14 +515,21 @@ def api_frontend_operation_log():
     label = re.sub(r'\s+', ' ', str(d.get('label') or '')).strip()[:120]
     module = re.sub(r'[^A-Za-z0-9_-]', '', str(d.get('module') or ''))[:80]
     handler = str(d.get('handler') or '').strip()[:300]
-    detail = json.dumps({'button': label, 'module': module, 'handler': handler},
+    event_type = str(d.get('event_type') or 'CLICK').strip().upper()
+    if event_type not in ('CLICK', 'QUERY'):
+        event_type = 'CLICK'
+    field = re.sub(r'\s+', ' ', str(d.get('field') or '')).strip()[:120]
+    value = re.sub(r'\s+', ' ', str(d.get('value') or '')).strip()[:300]
+    detail = json.dumps({'button': label, 'module': module, 'handler': handler,
+                         'field': field, 'value': value},
                         ensure_ascii=False, separators=(',', ':'))
     forwarded = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
     with conn() as c:
-        c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,ip,user_agent)
-                     VALUES(?,?,?,?,?,?,?,?)""",
-                  (str(session.get('username') or ''), str(session.get('role') or ''), 'CLICK',
-                   module or 'unknown', detail, 200, forwarded or str(request.remote_addr or ''),
+        action_name = '筛选查询' if event_type == 'QUERY' else '点击按钮'
+        c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,log_level,action_name,ip,user_agent)
+                     VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                  (str(session.get('username') or ''), str(session.get('role') or ''), event_type,
+                   module or 'unknown', detail, 200, 'DEBUG', action_name, forwarded or str(request.remote_addr or ''),
                    str(request.headers.get('User-Agent') or '')[:500]))
     return jsonify(ok=True)
 
@@ -516,29 +540,74 @@ def conn():
     return c
 def rows(rs): return [dict(r) for r in rs]
 
+def safe_audit_value(value, depth=0):
+    if depth > 3:
+        return '…'
+    if isinstance(value, dict):
+        result = {}
+        for raw_key, raw_value in list(value.items())[:60]:
+            key = str(raw_key)
+            lowered = key.lower()
+            if any(secret in lowered for secret in ('password', 'passwd', 'token', 'secret', 'image_data',
+                                                      'image_blob', 'file_data', 'authorization')):
+                result[key] = '[已隐藏]'
+            else:
+                result[key] = safe_audit_value(raw_value, depth + 1)
+        return result
+    if isinstance(value, (list, tuple)):
+        items = [safe_audit_value(x, depth + 1) for x in list(value)[:30]]
+        if len(value) > 30:
+            items.append(f'…其余{len(value)-30}项')
+        return items
+    if isinstance(value, str):
+        compact = re.sub(r'\s+', ' ', value).strip()
+        return compact[:300] + ('…' if len(compact) > 300 else '')
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    return str(value)[:300]
+
+
+def audit_action_label(method, path, payload):
+    if method == 'GET':
+        return '读取全部数据' if path == '/api/all' else '查询数据'
+    if method == 'DELETE' or '/delete' in path or str(payload.get('action') or '') == 'delete' or payload.get('delete_id'):
+        return '删除数据'
+    if method in ('PUT', 'PATCH') or payload.get('id'):
+        return '修改数据'
+    return '新增或提交数据'
+
+
 @app.after_request
 def record_admin_operation(response):
-    """记录已登录后台账号的写操作；密码、图片和大段正文不会进入日志。"""
+    """记录已登录后台账号的查询和写入；密码、Token、图片及超长正文不会进入日志。"""
     try:
-        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
+        if request.method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
             return response
-        if request.path in ('/api/login', '/api/health', '/api/operation_logs/frontend'):
+        if request.path in ('/api/login', '/api/login/logout', '/api/health', '/api/db_info',
+                            '/api/operation_logs', '/api/operation_logs/frontend'):
             return response
         session = current_session_info()
         actor = str(session.get('username') or '')
         if not actor:
             return response
         payload = request.get_json(silent=True) or {}
-        safe_keys = ('id','action','date','order_date','shift_date','girl','girl_name','customer_no',
-                     'status','order_status','settlement_status','kind','username','role','delete_id')
-        safe = {key: payload.get(key) for key in safe_keys if key in payload and payload.get(key) not in (None, '')}
-        detail = json.dumps(safe, ensure_ascii=False, separators=(',', ':'))[:1200]
+        query = {k: v for k, v in request.args.items() if k not in ('v', 'session_token')}
+        safe = safe_audit_value(payload)
+        detail_obj = {'action': audit_action_label(request.method, request.path, payload)}
+        if query:
+            detail_obj['query'] = safe_audit_value(query)
+        if safe:
+            detail_obj['data'] = safe
+        detail = json.dumps(detail_obj, ensure_ascii=False, separators=(',', ':'))[:5000]
+        status = int(response.status_code or 0)
+        level = 'ERROR' if status >= 500 else ('WARN' if status >= 400 else ('DEBUG' if request.method == 'GET' else 'INFO'))
+        action_name = str(detail_obj.get('action') or '')
         forwarded = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
         with conn() as c:
-            c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,ip,user_agent)
-                         VALUES(?,?,?,?,?,?,?,?)""",
+            c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,log_level,action_name,ip,user_agent)
+                         VALUES(?,?,?,?,?,?,?,?,?,?)""",
                       (actor, str(session.get('role') or ''), request.method, request.path, detail,
-                       int(response.status_code or 0), forwarded or str(request.remote_addr or ''),
+                       status, level, action_name, forwarded or str(request.remote_addr or ''),
                        str(request.headers.get('User-Agent') or '')[:500]))
     except Exception:
         pass

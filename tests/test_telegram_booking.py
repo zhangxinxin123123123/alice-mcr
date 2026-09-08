@@ -850,8 +850,12 @@ class TelegramBookingFlowTest(unittest.TestCase):
         today = self.app_module._tokyo_now().date().isoformat()
         logs = self.client.get(f"/api/operation_logs?date={today}", headers=headers)
         self.assertEqual(logs.status_code, 200, logs.get_data(as_text=True))
-        self.assertTrue(any(row["actor_name"] == "Star" and row["target"] == "/api/pure_shifts"
-                            for row in logs.json["logs"]), logs.get_data(as_text=True))
+        saved_log = next(row for row in logs.json["logs"]
+                         if row["actor_name"] == "Star" and row["target"] == "/api/pure_shifts")
+        self.assertEqual(saved_log['log_level'], 'INFO')
+        self.assertIn(saved_log['action_name'], ('新增或提交数据', '修改数据'))
+        self.assertIn('娜娜子', saved_log['detail'])
+        self.assertIn('20:00', saved_log['detail'])
 
     def test_frontend_button_click_is_logged_and_searchable(self):
         admin = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
@@ -867,6 +871,39 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(logs.status_code, 200, logs.get_data(as_text=True))
         self.assertTrue(any(row["method"] == "CLICK" and row["target"] == "pureShift"
                             for row in logs.json["logs"]), logs.get_data(as_text=True))
+        click_log = next(row for row in logs.json['logs'] if row['method'] == 'CLICK')
+        self.assertEqual(click_log['log_level'], 'DEBUG')
+        self.assertEqual(click_log['action_name'], '点击按钮')
+
+    def test_management_log_permission_is_separate_from_login_audit(self):
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        boss_headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"]}
+        created = self.client.post('/api/system/users', headers=boss_headers, json={
+            'username': 'audit_viewer', 'password': 'audit1234', 'label': '日志查看',
+            'role': 'user', 'enabled': True, 'permissions': ['operationAudit']
+        })
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        login = self.client.post('/api/login', json={'username': 'audit_viewer', 'password': 'audit1234'})
+        headers = {"X-Alice-Role": "user", "X-Alice-Session": login.json["session_token"]}
+        today = self.app_module._tokyo_now().date().isoformat()
+        self.assertEqual(self.client.get(f'/api/operation_logs?date={today}', headers=headers).status_code, 200)
+        self.assertEqual(self.client.get(f'/api/login_audit?date={today}', headers=headers).status_code, 403)
+
+    def test_management_log_records_get_query_and_warn_level(self):
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"]}
+        queried = self.client.get(f'/api/pure_shifts?date={self.day}', headers=headers)
+        self.assertEqual(queried.status_code, 200)
+        today = self.app_module._tokyo_now().date().isoformat()
+        logs = self.client.get(f'/api/operation_logs?date={today}&level=DEBUG&method=GET&q=pure_shifts', headers=headers)
+        self.assertTrue(any(x['target'] == '/api/pure_shifts' and self.day in x['detail']
+                            for x in logs.json['logs']), logs.get_data(as_text=True))
+        user = self.client.post('/api/login', json={'username': 'user', 'password': 'user123'})
+        user_headers = {"X-Alice-Role": "user", "X-Alice-Session": user.json["session_token"]}
+        self.assertEqual(self.client.get('/api/system/users', headers=user_headers).status_code, 403)
+        warnings = self.client.get(f'/api/operation_logs?date={today}&level=WARN&q=system/users', headers=headers)
+        self.assertTrue(any(x['actor_name'] == 'user' and x['response_status'] == 403
+                            for x in warnings.json['logs']), warnings.get_data(as_text=True))
 
     def test_zero_order_customer_cleanup_is_batched_and_archived(self):
         boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
