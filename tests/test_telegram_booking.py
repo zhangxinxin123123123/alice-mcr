@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 class FakeTelegramResponse:
@@ -80,6 +80,12 @@ class TelegramBookingFlowTest(unittest.TestCase):
         response = self.client.post("/telegram/webhook", json=payload)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response
+
+    def test_closing_business_date_uses_previous_day_until_four(self):
+        closing_day = self.telegram_module.closing_business_date
+        self.assertEqual(closing_day(datetime(2026, 9, 9, 0, 0)), '2026-09-08')
+        self.assertEqual(closing_day(datetime(2026, 9, 9, 3, 59)), '2026-09-08')
+        self.assertEqual(closing_day(datetime(2026, 9, 9, 4, 0)), '2026-09-09')
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {
@@ -950,7 +956,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                             for method, body in self.telegram_calls))
 
     def test_girl_closing_keyword_confirms_payment_and_next_attendance(self):
-        today = self.app_module._tokyo_now().date().isoformat()
+        today = self.telegram_module.closing_business_date(self.app_module._tokyo_now())
         tomorrow = (self.app_module._tokyo_now().date() + timedelta(days=1)).isoformat()
         girl_chat = {"id": -51001, "type": "supergroup", "title": "娜娜子专属群"}
         girl = {"id": 510, "first_name": "娜娜子"}
@@ -986,7 +992,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual((shift['start_time'], shift['end_time']), ('18:00', '23:00'))
 
     def test_full_time_girl_closing_skips_next_attendance_question(self):
-        today = self.app_module._tokyo_now().date().isoformat()
+        today = self.telegram_module.closing_business_date(self.app_module._tokyo_now())
         girl_chat = {"id": -51002, "type": "supergroup", "title": "全职女孩专属群"}
         girl = {"id": 511, "first_name": "娜娜子"}
         with self.app_module.conn() as c:

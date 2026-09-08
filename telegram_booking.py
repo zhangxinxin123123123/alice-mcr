@@ -52,6 +52,12 @@ DEFAULT_SETTINGS = {
 }
 
 
+def closing_business_date(now):
+    """深夜营业跨日：00:00–03:59 的下班结算仍属于前一个营业日。"""
+    current = now or datetime.now()
+    return (current.date() - timedelta(days=1) if current.hour < 4 else current.date()).isoformat()
+
+
 def register_telegram_booking(
     app,
     conn,
@@ -1590,7 +1596,7 @@ def register_telegram_booking(
                 f"{settlement}\n\n请女孩核对金额，并选择本次与店里的结算方式：")
 
     def send_closing_prompt(girl, binding, trigger_source='keyword', user=None, notify_if_empty=True, day=None):
-        day = day or tokyo_now().date().isoformat()
+        day = day or closing_business_date(tokyo_now())
         with conn() as c:
             totals = closing_money(day, girl, c)
             existing = c.execute("SELECT * FROM telegram_closing_confirmations WHERE close_date=? AND girl_name=?",
@@ -1633,7 +1639,7 @@ def register_telegram_booking(
         return {'sent': True, 'id': closing_id}
 
     def send_unclosed_prompts(day=None):
-        day = day or tokyo_now().date().isoformat()
+        day = day or closing_business_date(tokyo_now())
         with conn() as c:
             girls = [str(r['girl_name']) for r in c.execute("""SELECT DISTINCT girl_name FROM orders
                          WHERE order_date=? AND COALESCE(order_status,'')<>'取消' AND COALESCE(girl_name,'')<>''
