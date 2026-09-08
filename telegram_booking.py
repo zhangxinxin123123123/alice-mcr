@@ -117,6 +117,20 @@ def register_telegram_booking(
                 responded_at TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(inquiry_date,girl_name))""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_tg_attendance_expiry ON telegram_attendance_inquiries(status,expires_at)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_closing_confirmations(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, close_date TEXT NOT NULL, girl_name TEXT NOT NULL,
+                chat_id TEXT NOT NULL, chat_title TEXT DEFAULT '', message_thread_id INTEGER DEFAULT 0,
+                trigger_source TEXT DEFAULT 'keyword', order_count INTEGER DEFAULT 0,
+                girl_earnings INTEGER DEFAULT 0, store_profit INTEGER DEFAULT 0,
+                non_cash_received INTEGER DEFAULT 0, amount_due INTEGER DEFAULT 0,
+                settlement_method TEXT DEFAULT '', status TEXT DEFAULT 'await_payment',
+                summary_message_id INTEGER DEFAULT 0, attendance_prompt_message_id INTEGER DEFAULT 0,
+                confirmed_user_id TEXT DEFAULT '', confirmed_name TEXT DEFAULT '',
+                next_attendance_text TEXT DEFAULT '', next_attendance_date TEXT DEFAULT '',
+                next_start_time TEXT DEFAULT '', next_end_time TEXT DEFAULT '',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP, confirmed_at TEXT, completed_at TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(close_date,girl_name))""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_tg_closing_status ON telegram_closing_confirmations(close_date,status)")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_chain_sync_state(
                 id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
                 last_result TEXT DEFAULT '')""")
@@ -1548,10 +1562,229 @@ def register_telegram_booking(
             send_message(chat.get("id"), "\n".join(lines))
         return True
 
+    def closing_money(day, girl, c):
+        row = c.execute("""SELECT COUNT(*) AS order_count,
+                                  COALESCE(SUM(girl_take_home),0) AS girl_earnings,
+                                  COALESCE(SUM(store_profit),0) AS store_profit,
+                                  COALESCE(SUM(CASE WHEN COALESCE(payment_method,'现金')<>'现金'
+                                                    THEN received_amount ELSE 0 END),0) AS non_cash_received
+                           FROM orders WHERE order_date=? AND girl_name=?
+                             AND COALESCE(order_status,'')<>'取消'""", (day, girl)).fetchone()
+        result = dict(row) if row else {'order_count': 0, 'girl_earnings': 0, 'store_profit': 0, 'non_cash_received': 0}
+        result['amount_due'] = int(result.get('store_profit') or 0) - int(result.get('non_cash_received') or 0)
+        return result
+
+    def closing_summary_text(day, girl, totals):
+        due = int(totals.get('amount_due') or 0)
+        settlement = (f"女孩需交店里：<b>¥{due:,}</b>" if due >= 0
+                      else f"店里需转给女孩：<b>¥{abs(due):,}</b>")
+        return (f"🌙 <b>{escape(day)} 下班结算确认</b>\n\n"
+                f"女孩：<b>{escape(girl)}</b>\n"
+                f"今天预约：<b>{int(totals.get('order_count') or 0)} 单</b>\n"
+                f"女孩今天到手：<b>¥{int(totals.get('girl_earnings') or 0):,}</b>\n"
+                f"店铺收益：<b>¥{int(totals.get('store_profit') or 0):,}</b>\n"
+                f"客人线上支付：<b>¥{int(totals.get('non_cash_received') or 0):,}</b>\n"
+                f"{settlement}\n\n请女孩核对金额，并选择本次与店里的结算方式：")
+
+    def send_closing_prompt(girl, binding, trigger_source='keyword', user=None, notify_if_empty=True, day=None):
+        day = day or tokyo_now().date().isoformat()
+        with conn() as c:
+            totals = closing_money(day, girl, c)
+            existing = c.execute("SELECT * FROM telegram_closing_confirmations WHERE close_date=? AND girl_name=?",
+                                 (day, girl)).fetchone()
+        if int(totals.get('order_count') or 0) <= 0:
+            if notify_if_empty:
+                send_message(binding['chat_id'], f"🌙 {escape(girl)} 今天没有需要结算的预约。",
+                             thread_id=int(binding.get('message_thread_id') or 0))
+            return {'sent': False, 'empty': True}
+        if existing:
+            status_label = {'await_payment': '等待确认结算方式', 'await_attendance': '等待回复下次出勤',
+                            'completed': '已完成', 'amount_issue': '金额有误，等待客服处理'}.get(existing['status'], existing['status'])
+            if trigger_source == 'keyword':
+                send_message(binding['chat_id'], f"🌙 今天的下班确认已经发过了，当前状态：<b>{escape(status_label)}</b>。",
+                             thread_id=int(binding.get('message_thread_id') or 0))
+            return {'sent': False, 'existing': True, 'status': existing['status']}
+        user = user or {}
+        with conn() as c:
+            cur = c.execute("""INSERT INTO telegram_closing_confirmations(
+                close_date,girl_name,chat_id,chat_title,message_thread_id,trigger_source,
+                order_count,girl_earnings,store_profit,non_cash_received,amount_due,
+                confirmed_user_id,confirmed_name)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (day, girl, str(binding['chat_id']), str(binding.get('chat_title') or ''),
+                 int(binding.get('message_thread_id') or 0), trigger_source,
+                 int(totals['order_count'] or 0), int(totals['girl_earnings'] or 0),
+                 int(totals['store_profit'] or 0), int(totals['non_cash_received'] or 0),
+                 int(totals['amount_due'] or 0), str(user.get('id') or ''), display_name(user) if user else ''))
+            closing_id = int(cur.lastrowid)
+        sent = send_message(
+            binding['chat_id'], closing_summary_text(day, girl, totals),
+            inline_keyboard([
+                [callback_button("✅ 线上转账", f"closing:pay:{closing_id}:transfer"),
+                 callback_button("✅ 线下现金", f"closing:pay:{closing_id}:cash")],
+                [callback_button("⚠️ 金额有误", f"closing:pay:{closing_id}:issue")],
+            ]), thread_id=int(binding.get('message_thread_id') or 0))
+        with conn() as c:
+            c.execute("UPDATE telegram_closing_confirmations SET summary_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                      (int((sent or {}).get('message_id') or 0), closing_id))
+        return {'sent': True, 'id': closing_id}
+
+    def send_unclosed_prompts(day=None):
+        day = day or tokyo_now().date().isoformat()
+        with conn() as c:
+            girls = [str(r['girl_name']) for r in c.execute("""SELECT DISTINCT girl_name FROM orders
+                         WHERE order_date=? AND COALESCE(order_status,'')<>'取消' AND COALESCE(girl_name,'')<>''
+                         ORDER BY girl_name""", (day,)).fetchall()]
+            bindings = {str(r['girl_name']): dict(r) for r in c.execute(
+                "SELECT * FROM telegram_group_bindings WHERE enabled=1").fetchall()}
+        sent, existing, unbound, failed = 0, 0, 0, []
+        for girl in girls:
+            binding = bindings.get(girl)
+            if not binding or not valid_group_chat_id(binding.get('chat_id')):
+                unbound += 1
+                continue
+            try:
+                result = send_closing_prompt(girl, binding, 'settlement_report', notify_if_empty=False, day=day)
+                sent += 1 if result.get('sent') else 0
+                existing += 1 if result.get('existing') else 0
+            except Exception as exc:
+                failed.append(f"{girl}：{str(exc)[:100]}")
+        if failed:
+            cfg = settings()
+            internal = str(cfg.get('default_review_chat_id') or '')
+            if internal:
+                send_message(internal, "⚠️ <b>闭店确认发送失败</b>\n" + "\n".join(escape(x) for x in failed[:20]),
+                             thread_id=int(cfg.get('default_review_thread_id') or 0))
+        return {'sent': sent, 'already_sent': existing, 'unbound': unbound, 'failed': failed}
+
+    def start_closing_from_keyword(message):
+        chat, user = message.get('chat') or {}, message.get('from') or {}
+        with conn() as c:
+            binding = c.execute("""SELECT * FROM telegram_group_bindings WHERE chat_id=? AND enabled=1
+                                   ORDER BY updated_at DESC LIMIT 1""", (str(chat.get('id')),)).fetchone()
+        if binding:
+            send_closing_prompt(binding['girl_name'], dict(binding), 'keyword', user=user)
+            return True
+        cfg = settings()
+        if str(chat.get('id')) == str(cfg.get('default_review_chat_id') or ''):
+            if not (is_manager(user.get('id'), chat.get('id')) or is_chat_admin(chat.get('id'), user.get('id'))):
+                send_message(chat.get('id'), "❌ 只有店长、客服或群管理员可以执行闭店。")
+                return True
+            result = send_unclosed_prompts()
+            send_message(chat.get('id'), f"🌙 闭店确认已发送 {result['sent']} 个女孩群；"
+                         f"已发过 {result['already_sent']} 个；未绑定跳过 {result['unbound']} 个。",
+                         thread_id=int(cfg.get('default_review_thread_id') or 0))
+            return True
+        return False
+
+    def parse_next_attendance(text):
+        raw = str(text or '').strip()
+        now = tokyo_now()
+        day = None
+        if re.search(r"明天", raw):
+            day = (now.date() + timedelta(days=1)).isoformat()
+        elif re.search(r"后天", raw):
+            day = (now.date() + timedelta(days=2)).isoformat()
+        else:
+            match = re.search(r"(?:(20\d{2})[-/.年])?(\d{1,2})[-/.月](\d{1,2})日?", raw)
+            explicit_year = False
+            if match:
+                year, month, day_num = int(match.group(1) or now.year), int(match.group(2)), int(match.group(3))
+                explicit_year = bool(match.group(1))
+            else:
+                compact = re.search(r"(?<!\d)(\d{2})(\d{2})(?!\d)", raw)
+                if compact:
+                    year, month, day_num = now.year, int(compact.group(1)), int(compact.group(2))
+                    match = compact
+            if match:
+                try:
+                    parsed = datetime(year, month, day_num).date()
+                    if not explicit_year and parsed < now.date():
+                        parsed = parsed.replace(year=parsed.year + 1)
+                    day = parsed.isoformat()
+                except (ValueError, TypeError):
+                    day = None
+        time_match = re.search(r"(?<!\d)(\d{1,2})(?:[:.](\d{1,2}))?\s*(?:[-~ー～]|到|至)\s*(\d{1,2})(?:[:.](\d{1,2}))?(?!\d)", raw)
+        if not day or not time_match:
+            return None
+        sh, sm, eh, em = int(time_match.group(1)), int(time_match.group(2) or 0), int(time_match.group(3)), int(time_match.group(4) or 0)
+        if sh > 23 or eh > 24 or sm > 59 or em > 59 or (eh == 24 and em):
+            return None
+        return day, f"{sh:02d}:{sm:02d}", ("00:00" if eh == 24 else f"{eh:02d}:{em:02d}")
+
+    def complete_closing_attendance(row, user, text, parsed=None):
+        next_date = start_time = end_time = ''
+        if parsed:
+            next_date, start_time, end_time = parsed
+        with conn() as c:
+            if parsed:
+                existing = c.execute("SELECT id FROM pure_shifts WHERE shift_date=? AND girl_name=? ORDER BY id LIMIT 1",
+                                     (next_date, row['girl_name'])).fetchone()
+                memory = c.execute("SELECT tags,gold_tags FROM girl_tag_memory WHERE girl_name=?", (row['girl_name'],)).fetchone()
+                if existing:
+                    c.execute("""UPDATE pure_shifts SET start_time=?,end_time=?,source='telegram_closing',
+                                 note='下班确认填写',updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                              (start_time, end_time, int(existing['id'])))
+                else:
+                    sort_order = int(c.execute("SELECT COALESCE(MAX(sort_order),0)+1 FROM pure_shifts WHERE shift_date=?",
+                                               (next_date,)).fetchone()[0] or 1)
+                    c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source,note)
+                                 VALUES(?,?,?,?,?,?,?,'telegram_closing','下班确认填写')""",
+                              (next_date, row['girl_name'], start_time, end_time,
+                               str(memory['tags'] or '') if memory else '', str(memory['gold_tags'] or '') if memory else '', sort_order))
+                c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source,updated_at)
+                             VALUES(?,?,9999,'closing_attendance',CURRENT_TIMESTAMP)
+                             ON CONFLICT(booking_date,girl_name) DO UPDATE SET source='closing_attendance',updated_at=CURRENT_TIMESTAMP""",
+                          (next_date, row['girl_name']))
+            c.execute("""UPDATE telegram_closing_confirmations SET status='completed',next_attendance_text=?,
+                         next_attendance_date=?,next_start_time=?,next_end_time=?,confirmed_user_id=?,confirmed_name=?,
+                         completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                      (text, next_date, start_time, end_time, str(user.get('id') or ''), display_name(user), int(row['id'])))
+        shown = f"{next_date} {start_time}–{'24:00' if end_time == '00:00' else end_time}" if parsed else "暂未确定"
+        send_message(row['chat_id'], f"✅ 下班确认完成。\n结算方式：<b>{escape(row['settlement_method'])}</b>\n下次出勤：<b>{escape(shown)}</b>",
+                     thread_id=int(row.get('message_thread_id') or 0))
+        cfg = settings()
+        internal = str(cfg.get('default_review_chat_id') or '')
+        if internal:
+            send_message(internal, f"🌙 <b>女孩下班确认完成</b>\n女孩：{escape(row['girl_name'])}\n"
+                         f"日期：{escape(row['close_date'])}\n单数：{int(row['order_count'] or 0)}\n"
+                         f"女孩到手：¥{int(row['girl_earnings'] or 0):,}\n店铺收益：¥{int(row['store_profit'] or 0):,}\n"
+                         f"结算方式：{escape(row['settlement_method'])}\n下次出勤：{escape(shown)}",
+                         thread_id=int(cfg.get('default_review_thread_id') or 0))
+
+    def handle_closing_attendance_reply(message):
+        chat, user = message.get('chat') or {}, message.get('from') or {}
+        text = str(message.get('text') or '').strip()
+        reply_id = int(((message.get('reply_to_message') or {}).get('message_id') or 0))
+        with conn() as c:
+            found = c.execute("""SELECT * FROM telegram_closing_confirmations
+                                 WHERE chat_id=? AND status='await_attendance'
+                                 ORDER BY id DESC LIMIT 1""", (str(chat.get('id')),)).fetchone()
+        row = dict(found) if found else None
+        if not row or not (reply_id == int(row.get('attendance_prompt_message_id') or 0) or re.match(r"^下次出勤", text)):
+            return False
+        answer = re.sub(r"^下次出勤\s*[:：+＋]?\s*", "", text).strip()
+        if answer in ('未定', '不确定', '暂未确定', '不知道'):
+            complete_closing_attendance(row, user, '暂未确定', None)
+            return True
+        parsed = parse_next_attendance(answer)
+        if not parsed:
+            send_message(chat.get('id'), "时间格式没有看懂，请回复本消息，例如：<code>0910 18-23</code>、<code>明天 19:30-24</code>；还没确定可点“暂未确定”。",
+                         inline_keyboard([[callback_button("暂未确定", f"closing:attendance:{row['id']}:unknown")]]),
+                         thread_id=int(row.get('message_thread_id') or 0))
+            return True
+        complete_closing_attendance(row, user, answer, parsed)
+        return True
+
     def handle_message(message, edited=False):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
         expire_attendance_inquiries()
+        if not edited and handle_closing_attendance_reply(message):
+            return
+        if not edited and re.fullmatch(r"/?(?:下班|闭店)(?:@\w+)?", text.strip()):
+            if start_closing_from_keyword(message):
+                return
         # 编辑旧消息不触发导入；必须重新发送一张带当天 MMDD 标题的完整接龙。
         cached_chain = False if edited else cache_chain_message(message)
         if cached_chain and import_bound_chain_immediately(message):
@@ -1626,6 +1859,55 @@ def register_telegram_booking(
         user = callback.get("from") or {}
         msg = callback.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
+        if data.startswith("closing:"):
+            parts = data.split(':')
+            action, closing_id = (parts[1], int(parts[2])) if len(parts) >= 3 else ('', 0)
+            with conn() as c:
+                found = c.execute("SELECT * FROM telegram_closing_confirmations WHERE id=?", (closing_id,)).fetchone()
+            row = dict(found) if found else None
+            if not row or str(chat_id) != str(row.get('chat_id')):
+                answer_callback(callback.get('id'), "这个下班确认已失效", True)
+                return
+            if action == 'pay' and len(parts) == 4:
+                choice = parts[3]
+                if row['status'] != 'await_payment':
+                    answer_callback(callback.get('id'), "结算方式已经确认过了", True)
+                    return
+                if choice == 'issue':
+                    with conn() as c:
+                        c.execute("""UPDATE telegram_closing_confirmations SET status='amount_issue',confirmed_user_id=?,
+                                     confirmed_name=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                                  (str(user.get('id') or ''), display_name(user), closing_id))
+                    answer_callback(callback.get('id'), "已通知内部客服")
+                    edit_message_text(chat_id, row['summary_message_id'], "⚠️ <b>金额有误</b>，已经通知内部客服核对，请暂时不要交款。")
+                    cfg = settings(); internal = str(cfg.get('default_review_chat_id') or '')
+                    if internal:
+                        send_message(internal, f"⚠️ <b>女孩下班结算金额有误</b>\n女孩：{escape(row['girl_name'])}\n日期：{escape(row['close_date'])}\n请客服核对。",
+                                     thread_id=int(cfg.get('default_review_thread_id') or 0))
+                    return
+                method = '线上转账' if choice == 'transfer' else '线下现金'
+                with conn() as c:
+                    c.execute("""UPDATE telegram_closing_confirmations SET settlement_method=?,status='await_attendance',
+                                 confirmed_user_id=?,confirmed_name=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                              (method, str(user.get('id') or ''), display_name(user), closing_id))
+                answer_callback(callback.get('id'), f"已确认{method}")
+                edit_message_text(chat_id, row['summary_message_id'], closing_summary_text(row['close_date'], row['girl_name'], row) + f"\n\n✅ 已确认：<b>{method}</b>")
+                prompt = send_message(chat_id, "📅 <b>请告诉我们下次出勤时间</b>\n请直接回复本消息，例如：<code>0910 18-23</code>、<code>明天 19:30-24</code>。",
+                                      inline_keyboard([[callback_button("暂未确定", f"closing:attendance:{closing_id}:unknown")]]),
+                                      thread_id=int(row.get('message_thread_id') or 0))
+                with conn() as c:
+                    c.execute("UPDATE telegram_closing_confirmations SET attendance_prompt_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                              (int((prompt or {}).get('message_id') or 0), closing_id))
+                return
+            if action == 'attendance' and len(parts) == 4 and parts[3] == 'unknown':
+                if row['status'] != 'await_attendance':
+                    answer_callback(callback.get('id'), "这次下班确认已经完成", True)
+                    return
+                answer_callback(callback.get('id'), "已记录为暂未确定")
+                complete_closing_attendance(row, user, '暂未确定', None)
+                return
+            answer_callback(callback.get('id'), "按钮已失效", True)
+            return
         if data.startswith("attendance:"):
             handle_attendance_callback(callback)
             return
@@ -1951,9 +2233,11 @@ def register_telegram_booking(
                 for index, name in enumerate(names):
                     c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
                                  VALUES(?,?,?,'attendance_send')""", (day, name, index))
+        closing_result = send_unclosed_prompts(day) if kind == "settlement" else {}
         return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), message_ids=message_ids, synced=synced,
                        wordpress=wordpress_result,
                        sync_warnings=sync_warnings,
+                       closing=closing_result,
                        chat_title=cfg.get("default_review_chat_title") or "Alice内部群")
 
     @app.route("/api/telegram/chain-import/run", methods=["POST"])

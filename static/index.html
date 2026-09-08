@@ -410,6 +410,7 @@ body:not(.role-boss) .boss-only{display:none!important}
      <div class="manual-command"><code>最新接龙</code><span>在群里重新发送该女孩当天最新接龙。</span></div>
      <div class="manual-command"><code>自动导入开启 / 关闭 / 状态</code><span>内部群控制每 30 分钟扫描；“状态”同时显示下次检查时间。专属群重发当天接龙时，即使关闭也会即时检查。</span></div>
      <div class="manual-command"><code>询问出勤</code><span>内部群触发；询问所有已绑定女孩，30 分钟未点击默认不出勤。女孩选择 12:00–24:00 后自动写出勤表。</span></div>
+     <div class="manual-command"><code>下班 / 闭店</code><span>女孩专属群触发当天结算确认：显示单数、女孩到手、店铺收益和应交金额；女孩确认线上转账或线下现金，再回复下次出勤。内部群发送“闭店”可补发所有未确认女孩。</span></div>
      <div class="manual-command"><code>积分查询+0016</code><span>内部群按客户编号查询当前积分。</span></div>
      <div class="manual-command"><code>编号查询+客户名</code><span>内部群按客户名查询客户编号，支持部分名字。</span></div>
      <div class="manual-command"><code>/绑定审核群</code><span>把当前群设为内部审核群，仅店长、客服或群管理员操作。</span></div>
@@ -2337,7 +2338,7 @@ async function sendSettlementReport(){
  const list=Object.values(groups).sort((a,b)=>b.total-a.total);const box=document.createElement('div');box.className='telegram-report-capture';
  box.innerHTML=`<h2>💴 ${todayStr} 今日金额结算</h2><table><thead><tr><th>女孩</th><th>单数</th><th>今日收益</th><th>非现金</th><th>应收金额</th></tr></thead><tbody>${list.map(g=>`<tr><td>${escHtml(g.name)}</td><td>${g.count}</td><td>${yen(g.total)}</td><td>${yen(g.nonCash)}</td><td><b>${yen(g.total-g.nonCash)}</b></td></tr>`).join('')}</tbody></table><div class="report-total">应收合计：${yen(list.reduce((s,g)=>s+g.total-g.nonCash,0))}</div>`;
  document.body.appendChild(box);beginBusy('正在生成并发送结算截图…');
- try{const canvas=await html2canvas(box,{backgroundColor:null,scale:2,useCORS:true});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});alert(`已发送到 ${result.chat_title||'Alice内部群'}`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
+ try{const canvas=await html2canvas(box,{backgroundColor:null,scale:2,useCORS:true});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});const closing=result.closing||{};alert(`已发送到 ${result.chat_title||'Alice内部群'}\n闭店确认新发送：${Number(closing.sent||0)} 人\n已发送过：${Number(closing.already_sent||0)} 人\n未绑定群跳过：${Number(closing.unbound||0)} 人`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
 }
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}

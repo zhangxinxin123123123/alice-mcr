@@ -60,7 +60,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_group_bindings", "telegram_managers", "telegram_booking_sessions",
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
-                          "telegram_chain_inbox", "telegram_attendance_inquiries", "operation_logs"):
+                          "telegram_chain_inbox", "telegram_attendance_inquiries",
+                          "telegram_closing_confirmations", "operation_logs"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -910,6 +911,63 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(sum(method == "sendPhoto" for method, _body in self.telegram_calls), 2)
         self.assertTrue(any(method == "sendMessage" and "chat_id=-90000" in body
                             for method, body in self.telegram_calls))
+
+    def test_girl_closing_keyword_confirms_payment_and_next_attendance(self):
+        today = self.app_module._tokyo_now().date().isoformat()
+        tomorrow = (self.app_module._tokyo_now().date() + timedelta(days=1)).isoformat()
+        girl_chat = {"id": -51001, "type": "supergroup", "title": "娜娜子专属群"}
+        girl = {"id": 510, "first_name": "娜娜子"}
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled)
+                         VALUES('娜娜子','-51001','娜娜子专属群',1)""")
+            c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_id','-90000')
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
+            c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
+                         VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
+            c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
+                         VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '转账', '已结束'))
+        self.webhook({"message": {"message_id": 301, "chat": girl_chat, "from": girl, "text": "下班"}})
+        with self.app_module.conn() as c:
+            closing = dict(c.execute("SELECT * FROM telegram_closing_confirmations").fetchone())
+        self.assertEqual(closing['order_count'], 2)
+        self.assertEqual(closing['girl_earnings'], 20000)
+        self.assertEqual(closing['store_profit'], 10000)
+        self.assertEqual(closing['non_cash_received'], 15000)
+        self.webhook({"callback_query": {"id": "close-pay", "from": girl,
+                      "data": f"closing:pay:{closing['id']}:transfer", "message": {"chat": girl_chat}}})
+        with self.app_module.conn() as c:
+            closing = dict(c.execute("SELECT * FROM telegram_closing_confirmations WHERE id=?", (closing['id'],)).fetchone())
+        self.assertEqual(closing['status'], 'await_attendance')
+        self.webhook({"message": {"message_id": 302, "chat": girl_chat, "from": girl,
+                      "reply_to_message": {"message_id": closing['attendance_prompt_message_id']},
+                      "text": "明天 18-23"}})
+        with self.app_module.conn() as c:
+            closing = c.execute("SELECT * FROM telegram_closing_confirmations WHERE id=?", (closing['id'],)).fetchone()
+            shift = c.execute("SELECT * FROM pure_shifts WHERE shift_date=? AND girl_name='娜娜子'", (tomorrow,)).fetchone()
+        self.assertEqual(closing['status'], 'completed')
+        self.assertEqual(closing['settlement_method'], '线上转账')
+        self.assertEqual((shift['start_time'], shift['end_time']), ('18:00', '23:00'))
+
+    def test_settlement_screenshot_sends_unclosed_prompt_only_to_bound_girls(self):
+        today = self.app_module._tokyo_now().date().isoformat()
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled)
+                         VALUES('娜娜子','-52001','娜娜子专属群',1)""")
+            c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_id','-90000')
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
+            c.execute("INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,order_status) VALUES(?,?,?,?,?)",
+                      (today, '娜娜子', 10000, 5000, '已结束'))
+            c.execute("INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,order_status) VALUES(?,?,?,?,?)",
+                      (today, '有房女孩', 10000, 5000, '已结束'))
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        response = self.client.post('/api/telegram/report-photo', headers=headers, json={
+            'kind': 'settlement', 'date': today, 'image_data': 'data:image/png;base64,ZmFrZS1wbmc='
+        })
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json['closing']['sent'], 1)
+        self.assertEqual(response.json['closing']['unbound'], 1)
+        self.assertTrue(any(method == 'sendMessage' and 'chat_id=-52001' in body for method, body in self.telegram_calls))
 
     def test_pure_shift_remembers_normal_and_gold_tags(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})

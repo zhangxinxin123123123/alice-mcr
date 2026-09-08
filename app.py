@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v105_zero_order_customer_cleanup"
+APP_VERSION = "v106_telegram_closing_confirmation"
 
 @app.after_request
 def compress_large_json(response):
