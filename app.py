@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v104_manual_action_audit"
+APP_VERSION = "v105_zero_order_customer_cleanup"
 
 @app.after_request
 def compress_large_json(response):
@@ -149,6 +149,10 @@ def _init_db_schema():
             ip TEXT DEFAULT '', user_agent TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(created_at,id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_actor ON operation_logs(actor_name,created_at)")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_cleanup_archives(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT NOT NULL UNIQUE,
+            actor_name TEXT DEFAULT '', reason TEXT DEFAULT '', customer_count INTEGER DEFAULT 0,
+            payload_json TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         if not c.execute("SELECT 1 FROM system_users LIMIT 1").fetchone():
             seed_users = []
             if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_users'").fetchone():
@@ -2521,6 +2525,52 @@ def customers():
             c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2,customer_type_locked) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         update_customer_type_by_history(c, None)
     return jsonify(ok=True)
+
+
+@app.route('/api/customers/cleanup_zero_orders', methods=['POST'])
+def cleanup_zero_order_customers():
+    """批量清除没有任何订单的客户，并在同一数据库中保存可恢复快照。"""
+    if current_role() != 'boss':
+        return jsonify(ok=False, error='只有老板账号可以批量清理客户'), 403
+    d = request.get_json(silent=True) or {}
+    execute = bool(d.get('execute'))
+    init_db()
+    with conn() as c:
+        candidates = rows(c.execute("""SELECT c.* FROM customers c
+                                       WHERE NOT EXISTS(SELECT 1 FROM orders o WHERE o.customer_id=c.id)
+                                       ORDER BY c.id""").fetchall())
+        summary = {
+            'count': len(candidates),
+            'with_points': sum(1 for x in candidates if int(x.get('points') or 0) > 0),
+            'with_balance': sum(1 for x in candidates if int(x.get('recharge_balance') or 0) > 0),
+        }
+        if not execute or not candidates:
+            return jsonify(ok=True, preview=True, **summary)
+        ids = [int(x['id']) for x in candidates]
+        placeholders = ','.join('?' for _ in ids)
+        snapshot = {'customers': candidates}
+        related_tables = {
+            'recharge_records': 'customer_id', 'points_records': 'customer_id',
+            'customer_accounts': 'customer_id', 'customer_reservations': 'customer_id',
+            'telegram_customer_cancellations': 'customer_id', 'telegram_customers': 'customer_id',
+        }
+        existing_tables = {str(x[0]) for x in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        for table, column in related_tables.items():
+            if table in existing_tables:
+                snapshot[table] = rows(c.execute(
+                    f"SELECT * FROM {table} WHERE {column} IN ({placeholders})", ids).fetchall())
+        batch_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ_') + secrets.token_hex(4)
+        c.execute("""INSERT INTO customer_cleanup_archives(batch_id,actor_name,reason,customer_count,payload_json)
+                     VALUES(?,?,?,?,?)""", (batch_id, str(current_session_info().get('username') or ''),
+                     '清理预约单数为0的客户', len(candidates), json.dumps(snapshot, ensure_ascii=False)))
+        for table in ('recharge_records', 'points_records', 'telegram_customer_cancellations', 'telegram_customers'):
+            if table in existing_tables:
+                c.execute(f"DELETE FROM {table} WHERE customer_id IN ({placeholders})", ids)
+        for table in ('customer_accounts', 'customer_reservations'):
+            if table in existing_tables:
+                c.execute(f"UPDATE {table} SET customer_id=0 WHERE customer_id IN ({placeholders})", ids)
+        deleted = int(c.execute(f"DELETE FROM customers WHERE id IN ({placeholders})", ids).rowcount or 0)
+    return jsonify(ok=True, deleted=deleted, backup_batch_id=batch_id, **summary)
 @app.route('/api/girls',methods=['POST'])
 def girls():
     d=request.json or {}

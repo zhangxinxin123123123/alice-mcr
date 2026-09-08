@@ -867,6 +867,30 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any(row["method"] == "CLICK" and row["target"] == "pureShift"
                             for row in logs.json["logs"]), logs.get_data(as_text=True))
 
+    def test_zero_order_customer_cleanup_is_batched_and_archived(self):
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"]}
+        with self.app_module.conn() as c:
+            cur = c.execute("""INSERT INTO customers(customer_no,name,recharge_balance,points)
+                               VALUES('8888','零单清理测试',3000,200)""")
+            zero_id = int(cur.lastrowid)
+            c.execute("INSERT INTO recharge_records(customer_id,customer_no,amount) VALUES(?,?,?)",
+                      (zero_id, '8888', 3000))
+            c.execute("""INSERT INTO customers(customer_no,name) VALUES('8889','有单保留测试')""")
+            keep_id = int(c.execute("SELECT id FROM customers WHERE customer_no='8889'").fetchone()[0])
+            c.execute("INSERT INTO orders(order_date,customer_id,customer_no,customer_name) VALUES(?,?,?,?)",
+                      (self.day, keep_id, '8889', '有单保留测试'))
+        preview = self.client.post('/api/customers/cleanup_zero_orders', headers=headers, json={"execute": False})
+        self.assertGreaterEqual(preview.json['count'], 1)
+        cleaned = self.client.post('/api/customers/cleanup_zero_orders', headers=headers, json={"execute": True})
+        self.assertEqual(cleaned.status_code, 200, cleaned.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            self.assertIsNone(c.execute("SELECT 1 FROM customers WHERE id=?", (zero_id,)).fetchone())
+            self.assertIsNotNone(c.execute("SELECT 1 FROM customers WHERE id=?", (keep_id,)).fetchone())
+            archive = c.execute("SELECT payload_json FROM customer_cleanup_archives WHERE batch_id=?",
+                                (cleaned.json['backup_batch_id'],)).fetchone()
+            self.assertIn('零单清理测试', archive['payload_json'])
+
     def test_pure_shift_report_photo_sends_and_syncs_daily_girls(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
