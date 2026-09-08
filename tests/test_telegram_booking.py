@@ -948,6 +948,29 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(closing['settlement_method'], '线上转账')
         self.assertEqual((shift['start_time'], shift['end_time']), ('18:00', '23:00'))
 
+    def test_full_time_girl_closing_skips_next_attendance_question(self):
+        today = self.app_module._tokyo_now().date().isoformat()
+        girl_chat = {"id": -51002, "type": "supergroup", "title": "全职女孩专属群"}
+        girl = {"id": 511, "first_name": "娜娜子"}
+        with self.app_module.conn() as c:
+            c.execute("UPDATE girls SET girl_type='全职' WHERE name='娜娜子'")
+            c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled)
+                         VALUES('娜娜子','-51002','全职女孩专属群',1)""")
+            c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_id','-90000')
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
+            c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
+                         VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
+        self.webhook({"message": {"message_id": 311, "chat": girl_chat, "from": girl, "text": "下班"}})
+        with self.app_module.conn() as c:
+            closing_id = int(c.execute("SELECT id FROM telegram_closing_confirmations").fetchone()[0])
+        self.webhook({"callback_query": {"id": "fulltime-pay", "from": girl,
+                      "data": f"closing:pay:{closing_id}:cash", "message": {"chat": girl_chat}}})
+        with self.app_module.conn() as c:
+            closing = c.execute("SELECT * FROM telegram_closing_confirmations WHERE id=?", (closing_id,)).fetchone()
+        self.assertEqual(closing['status'], 'completed')
+        self.assertEqual(closing['attendance_prompt_message_id'], 0)
+        self.assertEqual(closing['next_attendance_text'], '全职，无需填写下次出勤')
+
     def test_settlement_screenshot_sends_unclosed_prompt_only_to_bound_girls(self):
         today = self.app_module._tokyo_now().date().isoformat()
         with self.app_module.conn() as c:

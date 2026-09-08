@@ -1740,7 +1740,8 @@ def register_telegram_booking(
                          next_attendance_date=?,next_start_time=?,next_end_time=?,confirmed_user_id=?,confirmed_name=?,
                          completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                       (text, next_date, start_time, end_time, str(user.get('id') or ''), display_name(user), int(row['id'])))
-        shown = f"{next_date} {start_time}–{'24:00' if end_time == '00:00' else end_time}" if parsed else "暂未确定"
+        shown = (f"{next_date} {start_time}–{'24:00' if end_time == '00:00' else end_time}"
+                 if parsed else (str(text or '').strip() or "暂未确定"))
         send_message(row['chat_id'], f"✅ 下班确认完成。\n结算方式：<b>{escape(row['settlement_method'])}</b>\n下次出勤：<b>{escape(shown)}</b>",
                      thread_id=int(row.get('message_thread_id') or 0))
         cfg = settings()
@@ -1887,11 +1888,17 @@ def register_telegram_booking(
                     return
                 method = '线上转账' if choice == 'transfer' else '线下现金'
                 with conn() as c:
+                    girl_row = c.execute("SELECT girl_type FROM girls WHERE name=?", (row['girl_name'],)).fetchone()
+                    is_full_time = bool(girl_row and '全职' in str(girl_row['girl_type'] or ''))
                     c.execute("""UPDATE telegram_closing_confirmations SET settlement_method=?,status='await_attendance',
                                  confirmed_user_id=?,confirmed_name=?,confirmed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                               (method, str(user.get('id') or ''), display_name(user), closing_id))
                 answer_callback(callback.get('id'), f"已确认{method}")
                 edit_message_text(chat_id, row['summary_message_id'], closing_summary_text(row['close_date'], row['girl_name'], row) + f"\n\n✅ 已确认：<b>{method}</b>")
+                row['settlement_method'] = method
+                if is_full_time:
+                    complete_closing_attendance(row, user, '全职，无需填写下次出勤', None)
+                    return
                 prompt = send_message(chat_id, "📅 <b>请告诉我们下次出勤时间</b>\n请直接回复本消息，例如：<code>0910 18-23</code>、<code>明天 19:30-24</code>。",
                                       inline_keyboard([[callback_button("暂未确定", f"closing:attendance:{closing_id}:unknown")]]),
                                       thread_id=int(row.get('message_thread_id') or 0))
