@@ -1051,6 +1051,9 @@ th{
     const r = await fetch('/api/pure_shifts', {method:'POST', headers:apiHeaders(), body:JSON.stringify(payload)});
     const data = await r.json();
     if(!data.ok) throw new Error(data.error || "保存失败");
+    if(data.tel_auto_synced && window.avatarStatus){
+      avatarStatus.textContent = `${shift.girl} 已自动补充同步到今日 TEL 预约名单`;
+    }
     return data.id;
   }
 

@@ -131,6 +131,9 @@ def register_telegram_booking(
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP, confirmed_at TEXT, completed_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(close_date,girl_name))""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_tg_closing_status ON telegram_closing_confirmations(close_date,status)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
+                sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_chain_sync_state(
                 id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
                 last_result TEXT DEFAULT '')""")
@@ -2240,6 +2243,12 @@ def register_telegram_booking(
                 for index, name in enumerate(names):
                     c.execute("""INSERT INTO telegram_daily_girls(booking_date,girl_name,sort_order,source)
                                  VALUES(?,?,?,'attendance_send')""", (day, name, index))
+                late_enabled = 1 if day == tokyo_now().date().isoformat() and tokyo_now().hour >= 22 else 0
+                c.execute("""INSERT INTO telegram_full_sync_days(sync_date,full_synced_at,late_auto_enabled,updated_at)
+                             VALUES(?,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP)
+                             ON CONFLICT(sync_date) DO UPDATE SET full_synced_at=CURRENT_TIMESTAMP,
+                             late_auto_enabled=excluded.late_auto_enabled,updated_at=CURRENT_TIMESTAMP""",
+                          (day, late_enabled))
         closing_result = send_unclosed_prompts(day) if kind == "settlement" else {}
         return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), message_ids=message_ids, synced=synced,
                        wordpress=wordpress_result,

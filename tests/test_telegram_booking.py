@@ -61,7 +61,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
-                          "telegram_closing_confirmations", "operation_logs"):
+                          "telegram_closing_confirmations", "telegram_full_sync_days", "operation_logs"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -1042,6 +1042,35 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(loaded.status_code, 200, loaded.get_data(as_text=True))
         self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
         self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
+
+    def test_after_22_full_sync_new_attendance_auto_adds_tel_once(self):
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        original_now = self.app_module._tokyo_now
+        late_now = original_now().replace(hour=22, minute=30, second=0, microsecond=0)
+        day = late_now.date().isoformat()
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO girls(name,girl_status,list_price) VALUES('夜间新增女孩','在职',15000)")
+            c.execute("INSERT INTO telegram_full_sync_days(sync_date,late_auto_enabled) VALUES(?,1)", (day,))
+        self.app_module._tokyo_now = lambda: late_now
+        try:
+            first = self.client.post('/api/pure_shifts', headers=headers, json={
+                'date': day, 'girl': '夜间新增女孩', 'start': '23:00', 'end': '02:00'
+            })
+            self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+            self.assertTrue(first.json['tel_auto_synced'])
+            second = self.client.post('/api/pure_shifts', headers=headers, json={
+                'id': first.json['id'], 'date': day, 'girl': '夜间新增女孩',
+                'start': '23:30', 'end': '02:00'
+            })
+            self.assertFalse(second.json['tel_auto_synced'])
+        finally:
+            self.app_module._tokyo_now = original_now
+        with self.app_module.conn() as c:
+            rows = c.execute("""SELECT * FROM telegram_daily_girls
+                                WHERE booking_date=? AND girl_name='夜间新增女孩'""", (day,)).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['source'], 'late_attendance_auto')
 
     def test_tonight_page_is_public_and_uses_mcr_price(self):
         page = self.client.get("/tonight")

@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v109_four_level_management_audit"
+APP_VERSION = "v110_late_attendance_tel_autosync"
 
 @app.after_request
 def compress_large_json(response):
@@ -249,6 +249,9 @@ def _init_db_schema():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_customer ON telegram_customer_cancellations(customer_id, created_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_user ON telegram_customer_cancellations(telegram_user_id, created_at)")
+        c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
+            sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         for qg, qt, qc, so in [('网址','网址','',1),('常用短语','常用短语','',2)]:
             c.execute('INSERT OR IGNORE INTO quick_links(group_name,title,content,sort_order) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM quick_links WHERE group_name=? AND title=?)', (qg, qt, qc, so, qg, qt))
         defaults=[('customer_type','新客',1),('customer_type','回头客',2),('customer_type','老客',3),('customer_type','VIP',4),('customer_type','SVIP',5),('customer_type','常客',6),('girl_type','普通',1),('girl_status','在职',1),('order_status','预约中',0),('order_status','已结束',1),('order_status','取消',2),('settlement_status','未结算',1),('settlement_status','已结算',2),('schedule_status','出勤',1),('schedule_status','休息',2),('customer_preference_tag','酒量好',1),('customer_preference_tag','喜欢聊天',2),('customer_preference_tag','喜欢新人',3),('customer_preference_tag','安静型',4)]
@@ -4205,6 +4208,24 @@ def normalize_tag_text(text):
 def normalize_gold_tag_text(text):
     return " ".join(re.sub(r"[;；]+", " ", str(text or "")).split())
 
+def auto_sync_late_attendance_to_tel(c, shift_date, girl):
+    """22:00 后已全面同步的当天，新出现的出勤女孩只补入 TEL 一次。"""
+    now = _tokyo_now()
+    day = str(shift_date or '')[:10]
+    name = str(girl or '').strip()
+    if not name or day != now.date().isoformat() or now.hour < 22:
+        return False
+    state = c.execute("SELECT late_auto_enabled FROM telegram_full_sync_days WHERE sync_date=?", (day,)).fetchone()
+    if not state or int(state['late_auto_enabled'] or 0) != 1:
+        return False
+    if c.execute("SELECT 1 FROM telegram_daily_girls WHERE booking_date=? AND girl_name=?", (day, name)).fetchone():
+        return False
+    sort_order = int(c.execute("SELECT COALESCE(MAX(sort_order),-1)+1 FROM telegram_daily_girls WHERE booking_date=?",
+                               (day,)).fetchone()[0] or 0)
+    c.execute("""INSERT OR IGNORE INTO telegram_daily_girls(booking_date,girl_name,sort_order,source,updated_at)
+                 VALUES(?,?,?,'late_attendance_auto',CURRENT_TIMESTAMP)""", (day, name, sort_order))
+    return bool(c.execute("SELECT changes()").fetchone()[0])
+
 def pure_shift_rows_for_date(c, date_str):
     pure = []
     for r in c.execute("SELECT * FROM pure_shifts WHERE shift_date=? ORDER BY sort_order ASC,id ASC", (date_str,)).fetchall():
@@ -4303,16 +4324,19 @@ def api_pure_shifts_save():
         if raw_id.startswith('pure_'):
             sid = int(raw_id.split('_',1)[1])
             c.execute("""UPDATE pure_shifts SET shift_date=?,girl_name=?,start_time=?,end_time=?,tags=?,gold_tags=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, girl, start, end, tags, gold_tags, sid))
-            return jsonify(ok=True, id=f'pure_{sid}')
+            tel_auto_synced = auto_sync_late_attendance_to_tel(c, shift_date, girl)
+            return jsonify(ok=True, id=f'pure_{sid}', tel_auto_synced=tel_auto_synced)
         if raw_id.startswith('schedule_'):
             sid = int(raw_id.split('_',1)[1])
             g = c.execute('SELECT id FROM girls WHERE name=?', (girl,)).fetchone()
             c.execute("""UPDATE girl_schedules SET schedule_date=?, girl_id=?, girl_name=?, start_time=?, end_time=?, price=?, status='出勤', updated_at=CURRENT_TIMESTAMP WHERE id=?""", (shift_date, int(g['id']) if g else 0, girl, start, end, 0, sid))
-            return jsonify(ok=True, id=f'schedule_{sid}')
+            tel_auto_synced = auto_sync_late_attendance_to_tel(c, shift_date, girl)
+            return jsonify(ok=True, id=f'schedule_{sid}', tel_auto_synced=tel_auto_synced)
         max_sort = c.execute('SELECT COALESCE(MAX(sort_order),0) AS m FROM pure_shifts WHERE shift_date=?', (shift_date,)).fetchone()['m']
         cur = c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time,tags,gold_tags,sort_order,source)
                            VALUES(?,?,?,?,?,?,?,?)""", (shift_date, girl, start, end, tags, gold_tags, int(max_sort or 0)+1, 'manual'))
-        return jsonify(ok=True, id=f"pure_{cur.lastrowid}")
+        tel_auto_synced = auto_sync_late_attendance_to_tel(c, shift_date, girl)
+        return jsonify(ok=True, id=f"pure_{cur.lastrowid}", tel_auto_synced=tel_auto_synced)
 
 @app.route('/api/pure_shifts/delete', methods=['POST'])
 def api_pure_shifts_delete():
