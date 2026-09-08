@@ -28,7 +28,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v103_points_lookup_audit"
+APP_VERSION = "v104_manual_action_audit"
 
 @app.after_request
 def compress_large_json(response):
@@ -57,7 +57,7 @@ USERS = {
 }
 SYSTEM_MODULES = [
     'home','orders','customers','girls','settlement','quickLinks','importer','telegramBooking',
-    'chainReserve','pureShift','advanceReserve','rooms','enums','stats','debug','loginAudit'
+    'chainReserve','pureShift','manual','advanceReserve','rooms','enums','stats','debug','loginAudit'
 ]
 ROLE_DEFAULT_PERMISSIONS = {
     'boss': SYSTEM_MODULES,
@@ -327,6 +327,8 @@ def required_module_for_api(path):
     if path == '/api/telegram/report-photo':
         kind = str((request.get_json(silent=True) or {}).get('kind') or '')
         return 'settlement' if kind == 'settlement' else 'pureShift'
+    if path == '/api/operation_logs/frontend':
+        return None
     rules = [
         ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'loginAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
@@ -462,13 +464,46 @@ def api_operation_logs():
     init_db()
     selected_date = str(request.args.get('date') or tokyo_today_date())[:10]
     limit = min(500, max(20, int(request.args.get('limit') or 200)))
+    actor = str(request.args.get('actor') or '').strip()
+    query = str(request.args.get('q') or '').strip()
+    conditions = ["date(datetime(created_at,'+9 hours'))=?"]
+    values = [selected_date]
+    if actor:
+        conditions.append("actor_name LIKE ?")
+        values.append(f"%{actor}%")
+    if query:
+        conditions.append("(method LIKE ? OR target LIKE ? OR detail LIKE ?)")
+        values.extend([f"%{query}%"] * 3)
+    values.append(limit)
     with conn() as c:
-        items = rows(c.execute("""SELECT id,actor_name,actor_role,method,target,detail,response_status,ip,user_agent,
-                                         datetime(created_at,'+9 hours') AS created_at
-                                  FROM operation_logs
-                                  WHERE date(datetime(created_at,'+9 hours'))=?
-                                  ORDER BY id DESC LIMIT ?""", (selected_date, limit)).fetchall())
+        items = rows(c.execute(f"""SELECT id,actor_name,actor_role,method,target,detail,response_status,ip,user_agent,
+                                          datetime(created_at,'+9 hours') AS created_at
+                                   FROM operation_logs
+                                   WHERE {' AND '.join(conditions)}
+                                   ORDER BY id DESC LIMIT ?""", values).fetchall())
     return jsonify(ok=True, date=selected_date, logs=items)
+
+
+@app.route('/api/operation_logs/frontend', methods=['POST'])
+def api_frontend_operation_log():
+    """记录后台页面按钮点击，便于把用户动作和随后调用的接口对照排查。"""
+    if current_role() not in ('boss', 'admin', 'user'):
+        return jsonify(ok=False, error='请先登录'), 401
+    d = request.get_json(silent=True) or {}
+    session = current_session_info()
+    label = re.sub(r'\s+', ' ', str(d.get('label') or '')).strip()[:120]
+    module = re.sub(r'[^A-Za-z0-9_-]', '', str(d.get('module') or ''))[:80]
+    handler = str(d.get('handler') or '').strip()[:300]
+    detail = json.dumps({'button': label, 'module': module, 'handler': handler},
+                        ensure_ascii=False, separators=(',', ':'))
+    forwarded = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+    with conn() as c:
+        c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,ip,user_agent)
+                     VALUES(?,?,?,?,?,?,?,?)""",
+                  (str(session.get('username') or ''), str(session.get('role') or ''), 'CLICK',
+                   module or 'unknown', detail, 200, forwarded or str(request.remote_addr or ''),
+                   str(request.headers.get('User-Agent') or '')[:500]))
+    return jsonify(ok=True)
 
 
 def conn():
@@ -483,7 +518,7 @@ def record_admin_operation(response):
     try:
         if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
             return response
-        if request.path in ('/api/login', '/api/health'):
+        if request.path in ('/api/login', '/api/health', '/api/operation_logs/frontend'):
             return response
         session = current_session_info()
         actor = str(session.get('username') or '')

@@ -852,6 +852,21 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any(row["actor_name"] == "Star" and row["target"] == "/api/pure_shifts"
                             for row in logs.json["logs"]), logs.get_data(as_text=True))
 
+    def test_frontend_button_click_is_logged_and_searchable(self):
+        admin = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        admin_headers = {"X-Alice-Role": "admin", "X-Alice-Session": admin.json["session_token"]}
+        clicked = self.client.post("/api/operation_logs/frontend", headers=admin_headers, json={
+            "label": "全面同步", "module": "pureShift", "handler": "sendPureShiftReport()"
+        })
+        self.assertEqual(clicked.status_code, 200, clicked.get_data(as_text=True))
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        boss_headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"]}
+        today = self.app_module._tokyo_now().date().isoformat()
+        logs = self.client.get(f"/api/operation_logs?date={today}&actor=admin&q=全面同步", headers=boss_headers)
+        self.assertEqual(logs.status_code, 200, logs.get_data(as_text=True))
+        self.assertTrue(any(row["method"] == "CLICK" and row["target"] == "pureShift"
+                            for row in logs.json["logs"]), logs.get_data(as_text=True))
+
     def test_pure_shift_report_photo_sends_and_syncs_daily_girls(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
         headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
