@@ -5,12 +5,15 @@ import re
 import secrets
 import threading
 import time
+from io import BytesIO
+from pathlib import Path
 from html import escape
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from flask import jsonify, request
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 
 DEFAULT_SETTINGS = {
@@ -56,6 +59,15 @@ def closing_business_date(now):
     """深夜营业跨日：00:00–03:59 的下班结算仍属于前一个营业日。"""
     current = now or datetime.now()
     return (current.date() - timedelta(days=1) if current.hour < 4 else current.date()).isoformat()
+
+
+def auto_import_candidate_dates(now):
+    """00:00–03:59 同时接收当天和前一天接龙；其余时间只接收当天。"""
+    current = now or datetime.now()
+    days = [current.date()]
+    if current.hour < 4:
+        days.append(current.date() - timedelta(days=1))
+    return days
 
 
 def register_telegram_booking(
@@ -1121,14 +1133,17 @@ def register_telegram_booking(
         return str(day or ""), str(girl or "").strip()
 
     def automatic_chain_header(chain_text):
-        """自动扫描只认首个非空行中的东京当日 MMDD，例如独立一行 0906。"""
+        """自动扫描认首行 MMDD；凌晨四点前同时接受当天与前一天。"""
         lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
         if not lines:
             return "", ""
         now = tokyo_now()
-        if not re.fullmatch(r"\d{4}", lines[0]) or lines[0] != now.strftime("%m%d"):
+        if not re.fullmatch(r"\d{4}", lines[0]):
             return "", ""
-        return now.date().isoformat(), ""
+        for candidate in auto_import_candidate_dates(now):
+            if lines[0] == candidate.strftime("%m%d"):
+                return candidate.isoformat(), ""
+        return "", ""
 
     def chain_is_empty(chain_text):
         lines = [line.strip() for line in str(chain_text or "").splitlines() if line.strip()]
@@ -1292,9 +1307,16 @@ def register_telegram_booking(
                 c.executemany("UPDATE telegram_chain_inbox SET status='superseded',processed_at=CURRENT_TIMESTAMP WHERE chat_id=? AND message_id=?",
                               [(row["chat_id"], row["message_id"]) for row in superseded])
         result = {"skipped": False, "checked": len(latest), "imported": 0, "failed": 0,
-                  "empty": 0, "inserted": 0, "updated": 0, "unchanged": 0}
+                  "empty": 0, "expired": 0, "inserted": 0, "updated": 0, "unchanged": 0}
+        allowed_days = {day.isoformat() for day in auto_import_candidate_dates(tokyo_now())}
         for row in latest:
             try:
+                if str(row.get("order_date") or "") not in allowed_days:
+                    with conn() as c:
+                        c.execute("""UPDATE telegram_chain_inbox SET status='expired',last_error='',processed_at=CURRENT_TIMESTAMP
+                                     WHERE chat_id=? AND message_id=?""", (row["chat_id"], row["message_id"]))
+                    result["expired"] += 1
+                    continue
                 if chain_is_empty(row["chain_text"]):
                     with conn() as c:
                         c.execute("""UPDATE telegram_chain_inbox SET status='empty',last_error='',processed_at=CURRENT_TIMESTAMP
@@ -1362,12 +1384,209 @@ def register_telegram_booking(
                         next_text = (due_utc + timedelta(hours=9)).strftime("%m月%d日 %H:%M（东京时间）")
                 except ValueError:
                     pass
-            suffix = f"每 {interval} 分钟检查一次。\n下次自动导入：<b>{next_text}</b>。"
+            suffix = (f"每 {interval} 分钟检查一次。\n下次自动导入：<b>{next_text}</b>。"
+                      "\n日期窗口：00:00–03:59 同时接受前一天和当天；04:00 后只接受当天。")
         elif enabled == "1":
-            suffix = f"每 {interval} 分钟检查一次。"
+            suffix = f"每 {interval} 分钟检查一次；凌晨 4 点前同时接受前一天和当天。"
         else:
             suffix = "定时扫描已停止；绑定女孩群重发当天接龙仍会即时导入，也可回复接龙发送“导入”。"
         send_message(chat.get("id"), f"✅ 接龙自动导入{label}。{suffix}")
+        return True
+
+    def parse_shift_copy_text(raw_text):
+        lines = [line.strip() for line in str(raw_text or "").splitlines() if line.strip()]
+        if not lines:
+            raise ValueError("没有收到出勤文案。请回复出勤文案发送“文案生成”，或把文案写在关键字下一行。")
+        header = lines.pop(0)
+        now = tokyo_now()
+        day = ""
+        full = re.search(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})", header)
+        short = re.search(r"(?<!\d)(\d{2})(\d{2})(?!\d)", header)
+        try:
+            if full:
+                day = datetime(int(full.group(1)), int(full.group(2)), int(full.group(3))).date().isoformat()
+            elif short:
+                month, date_no = int(short.group(1)), int(short.group(2))
+                candidates = [datetime(now.year + offset, month, date_no).date() for offset in (-1, 0, 1)]
+                day = min(candidates, key=lambda d: abs((d - now.date()).days)).isoformat()
+        except ValueError:
+            day = ""
+        if not day:
+            raise ValueError("文案第一行缺少有效日期，例如“0909周三出勤”。")
+        entries = []
+        index = 0
+        time_line = re.compile(r"(\d{1,2}(?::\d{2})?)\s*(?:到|至|[-~～—])\s*(\d{1,2}(?::\d{2})?).*?(?:¥|￥)?\s*([\d,]+)\s*(?:円|/h|/H|每小时)?")
+        while index < len(lines):
+            name_line = lines[index]
+            if re.match(r"https?://", name_line, re.I):
+                break
+            if index + 1 >= len(lines):
+                raise ValueError(f"“{name_line}”后面缺少时间和价格。")
+            match = time_line.search(lines[index + 1])
+            if not match:
+                raise ValueError(f"无法识别“{name_line}”的时间/价格行：{lines[index + 1]}")
+            gold_tags = re.findall(r"【([^】]+)】", name_line)
+            tags = re.findall(r"[（(]([^）)]+)[）)]", name_line)
+            name = re.sub(r"【[^】]+】|[（(][^）)]+[）)]", "", name_line).strip()
+            if not name:
+                raise ValueError(f"无法识别女孩名：{name_line}")
+            start, end = match.group(1), match.group(2)
+            start = start if ":" in start else start + ":00"
+            end = end if ":" in end else end + ":00"
+            entries.append({"girl": name, "start": start.zfill(5), "end": end.zfill(5),
+                            "price": int(match.group(3).replace(",", "")),
+                            "tags": tags, "gold_tags": gold_tags})
+            index += 2
+        if not entries:
+            raise ValueError("没有识别到女孩资料。每位女孩需使用两行：名字与TAG一行，时间和价格一行。")
+        return day, entries
+
+    _report_font_cache = {}
+
+    def report_font(size):
+        size = int(size)
+        if size in _report_font_cache:
+            return _report_font_cache[size]
+        candidates = [
+            os.environ.get("ALICE_REPORT_FONT", ""),
+            "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/meiryo.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+            "/tmp/NotoSansCJKsc-Regular.otf",
+        ]
+        download_path = Path("/tmp/NotoSansCJKsc-Regular.otf")
+        if os.name == "nt":
+            download_path = Path(os.environ.get("TEMP") or ".") / "NotoSansCJKsc-Regular.otf"
+        if not any(Path(path).is_file() for path in candidates if path):
+            try:
+                font_url = "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+                with urlopen(Request(font_url, headers={"User-Agent": "Alice-MCR/1.0"}), timeout=45) as response:
+                    font_bytes = response.read()
+                if 5_000_000 < len(font_bytes) < 30_000_000:
+                    download_path.write_bytes(font_bytes)
+            except Exception:
+                pass
+        candidates.append(str(download_path))
+        for path in candidates:
+            try:
+                if path and Path(path).is_file():
+                    font = ImageFont.truetype(path, size=size)
+                    _report_font_cache[size] = font
+                    return font
+            except Exception:
+                continue
+        font = ImageFont.load_default(size=max(10, size))
+        _report_font_cache[size] = font
+        return font
+
+    def load_shift_avatar(avatar_url, size=132):
+        if not avatar_url:
+            return None
+        try:
+            url = str(avatar_url)
+            payload = b""
+            if url.startswith("/girl_avatars/"):
+                filename = Path(url).name
+                db_path = Path(os.environ.get("ALICE_DB_PATH") or "")
+                local_dirs = [Path(os.environ.get("ALICE_AVATAR_DIR") or ""),
+                              db_path.parent / "girl_avatars" if str(db_path) else Path(),
+                              Path(__file__).resolve().parent / "static" / "girl_avatars"]
+                for directory in local_dirs:
+                    candidate = directory / filename
+                    if str(directory) not in ("", ".") and candidate.is_file():
+                        payload = candidate.read_bytes()
+                        break
+            if url.startswith("/"):
+                base = str(os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+                if not base and not payload:
+                    return None
+                url = base + url if base else url
+            if not payload:
+                with urlopen(Request(url, headers={"User-Agent": "Alice-MCR/1.0"}), timeout=12) as response:
+                    payload = response.read(5 * 1024 * 1024)
+            image = Image.open(BytesIO(payload)).convert("RGB")
+            return ImageOps.fit(image, (size, size), method=Image.Resampling.LANCZOS)
+        except Exception:
+            return None
+
+    def render_shift_copy_images(day, entries):
+        with conn() as c:
+            placeholders = ",".join("?" for _ in entries)
+            avatars = {str(row["name"]): str(row["avatar_url"] or "") for row in c.execute(
+                f"SELECT name,avatar_url FROM girls WHERE name IN ({placeholders})", [entry["girl"] for entry in entries]).fetchall()}
+        pages = []
+        weekday = "周" + "一二三四五六日"[datetime.fromisoformat(day).weekday()]
+        for page_index in range(0, len(entries), 6):
+            chunk = entries[page_index:page_index + 6]
+            width, row_height = 1280, 196
+            height = 245 + row_height * len(chunk) + 90
+            base = Image.new("RGB", (width, height), "#08050e")
+            glow = Image.new("RGBA", base.size, (0, 0, 0, 0))
+            glow_draw = ImageDraw.Draw(glow)
+            glow_draw.rounded_rectangle((18, 18, width - 18, height - 18), 32, outline="#ff38a4", width=12)
+            glow = glow.filter(ImageFilter.GaussianBlur(16))
+            base = Image.alpha_composite(base.convert("RGBA"), glow)
+            draw = ImageDraw.Draw(base)
+            draw.rounded_rectangle((20, 20, width - 20, height - 20), 30, fill="#0b0712", outline="#ff55b4", width=4)
+            title = f"{datetime.fromisoformat(day).strftime('%m%d')} {weekday} 出勤"
+            draw.text((width // 2, 74), title, font=report_font(64), fill="#ffffff", anchor="mm",
+                      stroke_width=3, stroke_fill="#ff2f9a")
+            draw.text((width // 2, 150), f"出勤人数：{len(entries)}", font=report_font(30), fill="#ffd447", anchor="mm")
+            y = 205
+            for entry in chunk:
+                draw.rounded_rectangle((45, y, width - 45, y + row_height - 18), 26,
+                                       fill="#100b1c", outline="#ff3f9f", width=3)
+                avatar = load_shift_avatar(avatars.get(entry["girl"], ""))
+                if avatar:
+                    mask = Image.new("L", avatar.size, 0)
+                    ImageDraw.Draw(mask).ellipse((0, 0, avatar.width - 1, avatar.height - 1), fill=255)
+                    base.paste(avatar, (74, y + 23), mask)
+                    draw.ellipse((72, y + 21, 208, y + 157), outline="#ff80c6", width=5)
+                else:
+                    draw.ellipse((72, y + 21, 208, y + 157), fill="#321337", outline="#ff80c6", width=5)
+                    draw.text((140, y + 89), entry["girl"][:1], font=report_font(54), fill="#ffffff", anchor="mm")
+                combined = " ".join(entry["tags"] + entry["gold_tags"])
+                name_color = "#49bfff" if re.search(r"大美女|绝色|颜值", combined) else ("#ff9a4d" if "服务" in combined else ("#ff63b7" if re.search(r"年纪小|少女|新人", combined) else "#d999ff"))
+                draw.text((238, y + 31), entry["girl"], font=report_font(42), fill=name_color,
+                          stroke_width=1, stroke_fill="#36142f")
+                tag_text = "  ".join([f"【{tag}】" for tag in entry["gold_tags"]] + entry["tags"]) or "ALICE"
+                draw.text((238, y + 91), tag_text[:34], font=report_font(27), fill="#f5c8e4")
+                draw.text((width - 55, y + 35), f"{entry['start']} 到 {entry['end']}", font=report_font(34), fill="#dfffff", anchor="ra")
+                draw.text((width - 55, y + 100), f"¥{entry['price']:,}/h", font=report_font(38), fill="#ffd447", anchor="ra")
+                y += row_height
+            footer = f"ALICE ACADEMY  {page_index // 6 + 1}/{(len(entries) + 5) // 6}"
+            draw.text((width // 2, height - 50), footer, font=report_font(24), fill="#ff8fc7", anchor="mm")
+            output = BytesIO()
+            base.convert("RGB").save(output, format="PNG", optimize=True)
+            pages.append(output.getvalue())
+        return pages
+
+    def handle_shift_copy_generation(message):
+        chat, user = message.get("chat") or {}, message.get("from") or {}
+        text = str(message.get("text") or "").strip()
+        if not re.match(r"^/?文案生成(?:@\w+)?(?:\s|$)", text):
+            return False
+        cfg = settings()
+        if str(chat.get("id")) != str(cfg.get("default_review_chat_id") or ""):
+            return True
+        if not (is_manager(user.get("id"), chat.get("id")) or is_chat_admin(chat.get("id"), user.get("id"))):
+            send_message(chat.get("id"), "❌ 只有店长、客服或群管理员可以生成出勤图。")
+            return True
+        reply = message.get("reply_to_message") or {}
+        inline_text = re.sub(r"^/?文案生成(?:@\w+)?", "", text, count=1).strip()
+        source_text = inline_text or str(reply.get("text") or reply.get("caption") or "").strip()
+        try:
+            day, entries = parse_shift_copy_text(source_text)
+            images = render_shift_copy_images(day, entries)
+            for index, image_bytes in enumerate(images):
+                caption = f"📋 <b>{escape(day)} 文案生成出勤表</b>\n识别女孩：{len(entries)} 人"
+                if len(images) > 1:
+                    caption += f"\n图片 {index + 1}/{len(images)}"
+                send_photo_bytes(chat.get("id"), image_bytes, caption,
+                                 int(cfg.get("default_review_thread_id") or 0))
+            send_message(chat.get("id"), f"✅ 文案生成完成：{len(entries)} 位女孩，共 {len(images)} 张图。")
+        except Exception as exc:
+            send_message(chat.get("id"), f"❌ 文案生成失败：{escape(str(exc))}")
         return True
 
     def attendance_time_label(minutes, storage=False):
@@ -1824,6 +2043,8 @@ def register_telegram_booking(
         if cached_chain and import_bound_chain_immediately(message):
             return
         if handle_auto_import_control(message):
+            return
+        if handle_shift_copy_generation(message):
             return
         if handle_customer_lookup(message):
             return

@@ -2,3 +2,4 @@ flask
 gunicorn
 pandas
 openpyxl
+pillow>=10.0

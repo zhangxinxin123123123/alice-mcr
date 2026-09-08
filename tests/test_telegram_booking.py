@@ -34,7 +34,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
 
         def fake_urlopen(req, timeout=20):
             method = req.full_url.rsplit("/", 1)[-1]
-            body = (req.data or b"").decode("utf-8")
+            body = (req.data or b"").decode("utf-8", errors="replace")
             cls.telegram_calls.append((method, body))
             if method == "getChatMember":
                 result = {"status": "administrator"}
@@ -86,6 +86,30 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(closing_day(datetime(2026, 9, 9, 0, 0)), '2026-09-08')
         self.assertEqual(closing_day(datetime(2026, 9, 9, 3, 59)), '2026-09-08')
         self.assertEqual(closing_day(datetime(2026, 9, 9, 4, 0)), '2026-09-09')
+
+    def test_auto_import_accepts_previous_and_current_date_until_four(self):
+        candidate_days = self.telegram_module.auto_import_candidate_dates
+        self.assertEqual([str(day) for day in candidate_days(datetime(2026, 9, 9, 0, 0))],
+                         ['2026-09-09', '2026-09-08'])
+        self.assertEqual([str(day) for day in candidate_days(datetime(2026, 9, 9, 3, 59))],
+                         ['2026-09-09', '2026-09-08'])
+        self.assertEqual([str(day) for day in candidate_days(datetime(2026, 9, 9, 4, 0))],
+                         ['2026-09-09'])
+
+    def test_internal_group_can_generate_shift_image_from_copy(self):
+        internal = {"id": -90000, "type": "supergroup", "title": "Alice内部群"}
+        manager = {"id": 9001, "first_name": "店长"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                   "text": "/绑定审核群"}})
+        day = self.day.replace('-', '')[4:]
+        copy_text = (f"{day}周三出勤\n\n【推荐】娜娜子（新人）\n"
+                     "20:30到00:00             15000/h\n\nhttps://ailisi99.com/")
+        self.webhook({"message": {"message_id": 2, "chat": internal, "from": manager,
+                                   "text": "文案生成", "reply_to_message": {"message_id": 1, "text": copy_text}}})
+        self.assertTrue(any(method == 'sendPhoto' and '文案生成出勤表' in body
+                            for method, body in self.telegram_calls))
+        self.assertTrue(any(method == 'sendMessage' and '%E6%96%87%E6%A1%88%E7%94%9F%E6%88%90%E5%AE%8C%E6%88%90' in body
+                            for method, body in self.telegram_calls))
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {
@@ -667,7 +691,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?)""", (auto_day, "娜娜子", "19:00", "23:00"))
         self.webhook({"message": {"message_id": 80, "chat": internal, "from": manager, "text": "/绑定审核群"}})
         self.webhook({"message": {"message_id": 81, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
-        old_keyword = (self.app_module._tokyo_now() - timedelta(days=1)).strftime("%m%d")
+        old_keyword = (self.app_module._tokyo_now() - timedelta(days=2)).strftime("%m%d")
         self.webhook({"message": {"message_id": 810, "chat": girl_chat, "from": manager,
                                   "text": f"{old_keyword}\n1.19-20/15000/旧日期不导入"}})
         self.webhook({"message": {"message_id": 811, "chat": girl_chat, "from": manager,
