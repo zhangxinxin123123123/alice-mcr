@@ -24,6 +24,7 @@ NEKO_BASE_URL=os.environ.get('ALICE_NEKO_BASE_URL','https://neko-miaomiao.com').
 ALICE_BASE_URL=os.environ.get('ALICE_PUBLIC_BASE_URL','https://ailisi99.com').rstrip('/')
 TOKYO_YY_BASE_URL=os.environ.get('TOKYO_YY_BASE_URL','https://tokyo-yy.com').rstrip('/')
 TOKYO_ALICE_SHOP_ID=os.environ.get('TOKYO_ALICE_SHOP_ID','\u7231\u4e3d\u4e1d\u5b66\u56ed')
+OPENAI_REVIEW_MODEL=os.environ.get('OPENAI_REVIEW_MODEL','gpt-5.6-luna').strip()
 LEGACY_AVATAR_DIR=APP_DIR/'static'/'girl_avatars'
 # Render 的程序目录会随部署重建；头像必须与 SQLite 一样放在持久磁盘。
 AVATAR_DIR=Path(os.environ.get('ALICE_AVATAR_DIR') or
@@ -33,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v121_review_completeness_and_assisted_copy"
+APP_VERSION = "v122_openai_review_writer"
 
 @app.after_request
 def compress_large_json(response):
@@ -2043,6 +2044,87 @@ def assist_real_customer_review(girl_name, original_text, confirmed_details=''):
             'polished_text':expanded,'style_profile':style_profile,
             'label':'真实客户协助润色（依据客户原话与确认感受，未添加他人经历）',
             'character_count':len(expanded)}
+
+def _openai_response_text(payload):
+    direct = str(payload.get('output_text') or '').strip() if isinstance(payload, dict) else ''
+    if direct:
+        return direct
+    chunks = []
+    for item in (payload.get('output') or []) if isinstance(payload, dict) else []:
+        for content in item.get('content') or []:
+            if content.get('type') in ('output_text','text') and content.get('text'):
+                chunks.append(str(content['text']))
+    return '\n'.join(chunks).strip()
+
+def ai_assist_real_customer_review(girl_name, original_text, confirmed_details='', author_name='',
+                                   style_strength='medium', target_length=180):
+    api_key = str(os.environ.get('OPENAI_API_KEY') or '').strip()
+    if not api_key:
+        raise RuntimeError('尚未配置 OPENAI_API_KEY，请先在 Render 环境变量中添加后再生成')
+    girl_name = str(girl_name or '').strip()
+    original = re.sub(r'\s+', ' ', str(original_text or '')).strip()[:1500]
+    details = re.sub(r'\s+', ' ', str(confirmed_details or '')).strip()[:2500]
+    author_name = str(author_name or '').strip()[:80]
+    strength = str(style_strength or 'medium').lower()
+    if strength not in ('light','medium','high'):
+        strength = 'medium'
+    target_length = min(1000, max(80, int(target_length or 180)))
+    if not girl_name or len(original) < 4:
+        raise ValueError('请选择女孩，并填写至少 4 个字的客户原话')
+    with conn() as c:
+        if not c.execute('SELECT 1 FROM girls WHERE name=?', (girl_name,)).fetchone():
+            raise ValueError('女孩表中没有这个女孩')
+        samples = []
+        if author_name:
+            samples = [r['review_text'] for r in c.execute("""SELECT review_text FROM scraped_reviews
+                       WHERE author_name=? AND material_type IN ('公开短评','登录后长评','公开长评预览')
+                       ORDER BY updated_at DESC,id DESC LIMIT 12""", (author_name,)).fetchall()]
+    if author_name and not samples:
+        raise ValueError('这个作者还没有可用的归档样本')
+    strength_note = {
+        'light':'只参考句长、分段和标点习惯，不参考个人惯用表达。',
+        'medium':'参考句长、分段、叙述顺序和一般口语习惯，不复制独特句子。',
+        'high':'较强参考可观察的节奏、口语程度和组织方式，但不得冒充作者或复用其独特句子。'
+    }[strength]
+    sample_text = '\n\n---样本分隔---\n\n'.join(str(x or '')[:1800] for x in samples[:8])
+    instructions = (
+        '你是中文评价编辑。任务是协助真实客户把自己的短评扩写得自然、具体、紧凑。'
+        '事实只能来自“客户原话”和“客户确认的真实感受”；作者样本只用于分析抽象语言特征，绝不能把样本中的人物、服务、地点、动作、评分或经历写入新稿。'
+        '不得声称是样本作者本人，不得复制样本中的独特句子。避免空话、重复总结和营销口号。'
+        '若真实信息不足以达到目标字数，应宁可短一些，并在 warning 说明“真实素材不足”，绝不编造。'
+        '返回严格 JSON：{"text":"润色正文","style_summary":"不超过30字","warning":""}，不要 Markdown。')
+    user_input = (f'女孩：{girl_name}\n目标字数：约{target_length}个汉字\n参考强度：{strength_note}\n'
+                  f'客户原话：{original}\n客户确认的真实感受：{details or "未补充"}\n'
+                  f'参考作者：{author_name or "不指定，使用通用自然口语"}\n作者样本：\n{sample_text or "无"}')
+    body = json.dumps({'model':OPENAI_REVIEW_MODEL,'instructions':instructions,'input':user_input,
+                       'reasoning':{'effort':'low'},'store':False,'max_output_tokens':1600},
+                      ensure_ascii=False).encode('utf-8')
+    req = Request('https://api.openai.com/v1/responses', data=body, method='POST', headers={
+        'Authorization':'Bearer '+api_key, 'Content-Type':'application/json',
+        'User-Agent':'AliceMCR/1.0'})
+    try:
+        with urlopen(req, timeout=75) as response:
+            response_payload = json.loads(response.read(2_000_000).decode('utf-8'))
+    except HTTPError as exc:
+        message = exc.read(2000).decode('utf-8', errors='replace')
+        raise RuntimeError(f'大语言模型调用失败（HTTP {exc.code}）：{message[:300]}')
+    output = _openai_response_text(response_payload)
+    if not output:
+        raise RuntimeError('大语言模型没有返回文字')
+    cleaned = re.sub(r'^```(?:json)?\s*|\s*```$', '', output.strip(), flags=re.I)
+    try:
+        result = json.loads(cleaned)
+    except json.JSONDecodeError:
+        result = {'text':output.strip(),'style_summary':'作者语气参考','warning':''}
+    text_value = str(result.get('text') or '').strip()
+    if not text_value:
+        raise RuntimeError('大语言模型返回的正文为空')
+    return {'girl_name':girl_name,'author_name':author_name,'style_strength':strength,
+            'target_length':target_length,'character_count':len(text_value),'polished_text':text_value,
+            'style_profile':str(result.get('style_summary') or '作者语气参考')[:80],
+            'warning':str(result.get('warning') or '')[:200],
+            'model':OPENAI_REVIEW_MODEL,
+            'label':'AI真实客户协助润色（事实仅来自客户本人提供内容）'}
 
 def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
                                     girl_prices=None):
@@ -4600,6 +4682,10 @@ def api_review_crawler():
                                       FROM scraped_reviews ORDER BY updated_at DESC,id DESC LIMIT 100""").fetchall())
             total = int(c.execute('SELECT COUNT(*) FROM scraped_reviews').fetchone()[0])
             girl_names = [r[0] for r in c.execute("SELECT name FROM girls WHERE girl_status!='离职' ORDER BY name").fetchall()]
+            author_rows = c.execute("""SELECT author_name,COUNT(*) sample_count,CAST(AVG(LENGTH(review_text)) AS INTEGER) avg_length
+                                       FROM scraped_reviews WHERE COALESCE(author_name,'')!=''
+                                       AND material_type IN ('公开短评','登录后长评','公开长评预览')
+                                       GROUP BY author_name ORDER BY sample_count DESC,author_name LIMIT 200""").fetchall()
             unlocked_rows = c.execute("SELECT source_page,source_url,review_text FROM scraped_reviews WHERE material_type='登录后长评'").fetchall()
         unlocked_lengths = {}
         for row in unlocked_rows:
@@ -4619,7 +4705,9 @@ def api_review_crawler():
                     item['unlock_status'], item['status_color'], item['needs_unlock'] = '只有预览・待解锁', 'red', True
             else:
                 item['unlock_status'], item['status_color'], item['needs_unlock'] = '公开内容', 'blue', False
-        return jsonify(ok=True,total=total,reviews=recent,girls=girl_names)
+        return jsonify(ok=True,total=total,reviews=recent,girls=girl_names,authors=rows(author_rows),
+                       ai_configured=bool(str(os.environ.get('OPENAI_API_KEY') or '').strip()),
+                       ai_model=OPENAI_REVIEW_MODEL)
     d = request.json or {}
     action = str(d.get('action') or 'crawl')
     if action == 'drafts':
@@ -4635,6 +4723,10 @@ def api_review_crawler():
     if action == 'assist_real':
         return jsonify(ok=True,polished=assist_real_customer_review(
             d.get('girl_name'), d.get('original_text'), d.get('confirmed_details')))
+    if action == 'assist_real_ai':
+        return jsonify(ok=True,polished=ai_assist_real_customer_review(
+            d.get('girl_name'), d.get('original_text'), d.get('confirmed_details'),
+            d.get('author_name'), d.get('style_strength'), d.get('target_length')))
     if action == 'archive':
         review_text = re.sub(r'\s+\n', '\n', str(d.get('review_text') or '').strip())
         if len(review_text) < 20:

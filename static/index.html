@@ -444,7 +444,7 @@ body:not(.role-boss) .boss-only{display:none!important}
    <div class="actions"><button class="primary" onclick="saveReviewArchive()">保存到评论素材库</button></div>
   </div>
   <div class="card"><h2>版本一：真实客户评价润色</h2><p class="note">客户提供自己的短评和真实感受后，系统参考素材库的通用表达节奏扩写成约百字；只使用客户明确写下的事实和感受，不套用其他人的具体经历。也可以在下方素材库直接润色某条已归档原文。</p>
-   <div class="form"><select id="reviewAssistGirl"><option value="">选择女孩</option></select><button class="primary" onclick="assistRealCustomerReview()">生成真实客户润色版</button></div>
+   <div class="form"><select id="reviewAssistGirl"><option value="">选择女孩</option></select><select id="reviewAssistAuthor"><option value="">不指定作者</option></select><select id="reviewStyleStrength"><option value="light">轻度参考</option><option value="medium" selected>中度参考</option><option value="high">高度参考</option></select><input id="reviewTargetLength" type="number" min="80" max="1000" step="20" value="180" placeholder="目标字数"><button class="primary" onclick="assistAIRealCustomerReview()">AI作者语气扩写</button><button class="soft" onclick="assistRealCustomerReview()">基础润色（不用AI）</button></div>
    <textarea id="reviewAssistOriginal" rows="3" placeholder="客户原话／短评（必填），例如：本人比照片好看，聊天很自然"></textarea>
    <textarea id="reviewAssistDetails" rows="4" placeholder="客户确认过的真实感受（可选），想到什么写什么；没有写的经历系统不会自行补充"></textarea>
    <div id="reviewPolishResult"></div>
@@ -2143,14 +2143,16 @@ async function loadReviewCrawler(){
  if(window.reviewArchiveDate&&!reviewArchiveDate.value)reviewArchiveDate.value=todayStr;
  const r=await timedFetch('/api/review_crawler?v='+Date.now(),{cache:'no-store',headers:authHeaders()});
  const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取评论素材失败');
- reviewCrawlerSummary.innerHTML=`已归档评论素材 <b>${Number(j.total||0)}</b> 条。公开预览和手动长评会分开标记。`;
+ reviewCrawlerSummary.innerHTML=`已归档评论素材 <b>${Number(j.total||0)}</b> 条。大语言模型：<b>${j.ai_configured?'已连接 '+escHtml(j.ai_model||''):'未配置 OPENAI_API_KEY'}</b>。`;
  const selected=window.reviewArchiveGirl?reviewArchiveGirl.value:'';
  const generateSelected=window.reviewGenerateGirl?reviewGenerateGirl.value:'';
  const assistSelected=window.reviewAssistGirl?reviewAssistGirl.value:'';
+ const authorSelected=window.reviewAssistAuthor?reviewAssistAuthor.value:'';
  const girlOptions=(j.girls||[]).map(name=>`<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');
  if(window.reviewArchiveGirl){reviewArchiveGirl.innerHTML='<option value="">选择女孩</option>'+girlOptions;reviewArchiveGirl.value=selected;}
  if(window.reviewGenerateGirl){reviewGenerateGirl.innerHTML='<option value="">当天全部出勤女孩</option>'+girlOptions;reviewGenerateGirl.value=generateSelected;}
  if(window.reviewAssistGirl){reviewAssistGirl.innerHTML='<option value="">选择女孩</option>'+girlOptions;reviewAssistGirl.value=assistSelected;}
+ if(window.reviewAssistAuthor){reviewAssistAuthor.innerHTML='<option value="">不指定作者（通用自然口语）</option>'+(j.authors||[]).map(x=>`<option value="${escHtml(x.author_name)}">${escHtml(x.author_name)}（${Number(x.sample_count||0)}篇／均${Number(x.avg_length||0)}字）</option>`).join('');reviewAssistAuthor.value=authorSelected;}
  const items=j.reviews||[];
  reviewSourceResults.innerHTML='<div class="table"><table><thead><tr><th>状态 / 操作</th><th>类型</th><th>女孩</th><th>作者 / 日期</th><th>特征</th><th>素材摘录</th><th>来源页</th></tr></thead><tbody>'+((items.map(x=>{const src=x.source_page||x.source_url||'',color=['green','orange','red','blue'].includes(x.status_color)?x.status_color:'blue';const status=`<span class="review-status ${color}">${escHtml(x.unlock_status||'公开内容')} · ${Number(x.content_length||0)}字</span>`;const unlock=x.needs_unlock?`${status}<br><button class="soft" data-url="${encodeURIComponent(src)}" data-title="${encodeURIComponent(x.source_title||'')}" data-author="${encodeURIComponent(x.author_name||'')}" data-date="${encodeURIComponent(String(x.review_date||'').slice(0,10))}" data-girl="${encodeURIComponent(x.girl_name||'')}" onclick="openReviewForArchive(this)">${color==='orange'?'继续复制全文':'打开并解锁'}</button>`:status;const polishable=['公开短评','登录后长评','公开长评预览'].includes(x.material_type)?`<br><button class="soft" data-review-id="${Number(x.id||0)}" onclick="polishCustomerReview(this)">润色真实评价</button>`:'';return `<tr><td>${unlock}${polishable}</td><td>${escHtml(x.material_type||'公开素材')}</td><td>${x.girl_name?`<button class="soft" data-girl="${encodeURIComponent(x.girl_name)}" onclick="generateOneReviewGirl(this)">${escHtml(x.girl_name)}</button>`:'待匹配'}</td><td>${escHtml(x.author_name||'—')}<br><span class="note">${escHtml(String(x.review_date||'').slice(0,10)||'—')}</span></td><td>${escHtml(x.tags||'—')}</td><td style="white-space:normal;max-width:520px"><b>${escHtml(x.source_title||'')}</b>${x.source_title?'<br>':''}${escHtml(String(x.review_text||'').slice(0,300))}</td><td><a href="${escHtml(src)}" target="_blank" rel="noopener">打开</a></td></tr>`}).join(''))||'<tr><td colspan="7">还没有归档素材</td></tr>')+'</tbody></table></div>';
 }
@@ -2181,6 +2183,13 @@ async function assistRealCustomerReview(){
  if(!girl){alert('请先选择对应女孩');return;}if(original.length<4){alert('请填写客户本人至少 4 个字的原话');return;}
  const j=await api('/api/review_crawler',{action:'assist_real',girl_name:girl,original_text:original,confirmed_details:details}),x=j.polished||{};
  reviewPolishResult.innerHTML=`<div class="praise-tile"><h3>${escHtml(x.girl_name||'真实客户评价')}</h3><p class="note">${escHtml(x.label||'')}｜表达节奏：${escHtml(x.style_profile||'')}｜${Number(x.character_count||0)}字</p><h4>润色扩写版</h4><p style="white-space:pre-wrap">${escHtml(x.polished_text||'')}</p><button class="primary" data-text="${encodeURIComponent(x.polished_text||'')}" onclick="copyReviewDraft(this)">复制润色版</button></div>`;
+ reviewPolishResult.scrollIntoView({behavior:'smooth',block:'center'});
+}
+async function assistAIRealCustomerReview(){
+ const girl=String(reviewAssistGirl.value||''),original=String(reviewAssistOriginal.value||'').trim(),details=String(reviewAssistDetails.value||'').trim();
+ if(!girl){alert('请先选择对应女孩');return;}if(original.length<4){alert('请填写客户本人至少 4 个字的原话');return;}
+ const j=await api('/api/review_crawler',{action:'assist_real_ai',girl_name:girl,original_text:original,confirmed_details:details,author_name:reviewAssistAuthor.value||'',style_strength:reviewStyleStrength.value||'medium',target_length:Number(reviewTargetLength.value||180)}),x=j.polished||{};
+ reviewPolishResult.innerHTML=`<div class="praise-tile"><h3>${escHtml(x.girl_name||'AI客户评价润色')}</h3><p class="note">${escHtml(x.label||'')}｜参考作者：${escHtml(x.author_name||'通用')}｜${escHtml(x.style_profile||'')}｜目标 ${Number(x.target_length||0)} 字／实际 ${Number(x.character_count||0)} 字｜模型 ${escHtml(x.model||'')}</p>${x.warning?`<p class="review-status orange">${escHtml(x.warning)}</p>`:''}<p style="white-space:pre-wrap">${escHtml(x.polished_text||'')}</p><button class="primary" data-text="${encodeURIComponent(x.polished_text||'')}" onclick="copyReviewDraft(this)">复制 AI 润色版</button></div>`;
  reviewPolishResult.scrollIntoView({behavior:'smooth',block:'center'});
 }
 async function copyReviewDraft(button){

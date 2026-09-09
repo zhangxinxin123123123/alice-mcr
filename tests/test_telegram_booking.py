@@ -18,7 +18,7 @@ class FakeTelegramResponse:
     def __exit__(self, *_args):
         return False
 
-    def read(self):
+    def read(self, *_args):
         return json.dumps(self.payload).encode("utf-8")
 
 
@@ -1303,6 +1303,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn('见面不会尴尬',assisted_text)
         self.assertNotIn('按摩',assisted_text)
         self.assertGreaterEqual(assisted.json['polished']['character_count'],70)
+        old_urlopen = self.app_module.urlopen
+        captured = {}
+        def fake_openai(req, timeout=75):
+            captured['url'] = req.full_url
+            captured['body'] = json.loads(req.data.decode('utf-8'))
+            return FakeTelegramResponse({'output':[{'content':[{'type':'output_text','text':json.dumps({
+                'text':'本人提供的真实内容经过自然扩写后的测试正文。','style_summary':'短句分段、口语总结','warning':''},ensure_ascii=False)}]}]})
+        os.environ['OPENAI_API_KEY'] = 'test-openai-key'
+        self.app_module.urlopen = fake_openai
+        try:
+            ai_result = self.client.post('/api/review_crawler',headers=headers,json={
+                'action':'assist_real_ai','girl_name':'娜娜子','original_text':'本人比照片好看',
+                'confirmed_details':'聊天自然','author_name':'测试作者','style_strength':'high','target_length':220})
+        finally:
+            self.app_module.urlopen = old_urlopen
+            os.environ.pop('OPENAI_API_KEY',None)
+        self.assertEqual(ai_result.status_code,200,ai_result.get_data(as_text=True))
+        self.assertEqual(ai_result.json['polished']['author_name'],'测试作者')
+        self.assertEqual(ai_result.json['polished']['target_length'],220)
+        self.assertEqual(captured['url'],'https://api.openai.com/v1/responses')
+        self.assertIn('JSON',captured['body']['instructions'])
+        self.assertIn('warning',captured['body']['instructions'])
 
     def test_new_customer_midnight_digest_is_idempotent(self):
         report_day = (self.app_module._tokyo_now().date()-timedelta(days=1)).isoformat()
