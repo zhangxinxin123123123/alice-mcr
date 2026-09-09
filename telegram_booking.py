@@ -2582,8 +2582,7 @@ def register_telegram_booking(
             item = dict(row)
             # 充值客户的赠送积分永久有效，不参与任何到期警报。
             permanent = (int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
-                         or int(item.get('recharge_balance') or 0)>0
-                         or str(item.get('customer_type') or '').upper() == 'SVIP')
+                         or int(item.get('recharge_balance') or 0)>0)
             if permanent or not item.get('last_point_date'):
                 continue
             try:

@@ -403,7 +403,7 @@ body:not(.role-boss) .boss-only{display:none!important}
    <div class="manual-grid" id="manualGrid">
     <details class="manual-block" open data-search="学院总览 收益 客户数 订单数 刷新"><summary>🏫 学院总览</summary><div class="manual-body"><ul><li>显示今日及本月收益、客户数、订单数、支付构成和女孩收益。</li><li><b>强制读取全部数据：</b>立即从服务器重新读取全部 MCR 数据；页面数据不一致时使用。</li><li>图表随订单、结算和筛选日期自动更新。</li></ul></div></details>
     <details class="manual-block" data-search="订单 预约 编辑 删除 筛选 批量结算 积分折扣"><summary>🧾 订单 / 预约</summary><div class="manual-body"><ul><li>日期、女孩、客户、备注和结算状态均可组合筛选；“清空筛选”恢复全部。</li><li>点击一行的编辑按钮修改预约；删除后会同步影响客户消费、积分和接龙。</li><li><b>批量结算 / 批量未结算 / 批量删除：</b>先勾选左侧预约，再执行对应操作。</li><li>普通预约按客人实付金额每 ¥20 累计 1 积分；取消单不累计。</li><li>备注含“积分折扣”时自动使用此前可用积分，备注写入抵扣金额；客人实付仍由客服手工填写，本单赠送 500 积分，重复保存不会重复扣。</li></ul></div></details>
-    <details class="manual-block" data-search="客户 编号 积分 充值 流水 回滚 到期 提醒 联系"><summary>🐰 客户表 / 积分充值</summary><div class="manual-body"><ol><li>找到客户，点击最左侧<b>“积分 / 充值”</b>。</li><li>选择“积分”或“充值余额”，再选增加/扣除，填写正数金额与原因。</li><li>点击保存后立即更新余额，并留下时间、原因和操作人流水；不需要改客户资料页。</li></ol><ul><li>旧客户第一次打开时只建立“期初余额”快照，不修改任何旧订单或旧余额。</li><li>积分只在新增订单时按老板设定比例增量计算；历史订单不批量重算。</li><li>充值客户的赠送积分永久有效，不进入到期警报。</li><li>非充值客户积分超过 1,000 且距离到期不超过 10 天时进入红色警报，每天在内部群汇总提醒一次。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发积分使用，使用后本单赠送500积分。</li><li>老板可在流水窗口底部修改新订单积分比例，或关闭新账本回滚到原 5% 逻辑。</li></ul></div></details>
+    <details class="manual-block" data-search="客户 编号 类型 VIP SVIP 排名 积分 充值 流水 回滚 到期 提醒 联系"><summary>🐰 客户表 / 类型 / 积分充值</summary><div class="manual-body"><h4>客户类型自动规则</h4><ul><li><b>新客：</b>历史有效预约 0–1 单。</li><li><b>回头客：</b>历史有效预约 2 单。</li><li><b>老客：</b>历史有效预约达到 3 单，但当月未进入 VIP/SVIP 排名。</li><li><b>VIP：</b>当月有效订单实付总额排名前 3。</li><li><b>SVIP：</b>当月有效预约总时长排名前 5。</li><li>VIP 与 SVIP 分开计算，同一客户可以同时显示两个身份；取消订单不计入排名。每月自动按当月数据重新计算。</li><li>人工把客户设为 VIP/SVIP 时会锁定，并显示“人工设定”原因。</li></ul><h4>积分与充值操作</h4><ol><li>找到客户，点击最左侧<b>“积分 / 充值”</b>，顶部可查看当前身份、当月名次和成为原因。</li><li>选择“积分”或“充值余额”，再选增加/扣除，填写正数金额与原因。</li><li>点击保存后立即更新余额，并留下时间、原因和操作人流水；不需要改客户资料页。</li></ol><ul><li>旧客户第一次打开时只建立“期初余额”快照，不修改任何旧订单或旧余额。</li><li>积分只在新增订单时按老板设定比例增量计算；历史订单不批量重算。</li><li>充值客户的赠送积分永久有效，不进入到期警报。</li><li>非充值客户积分超过 1,000 且距离到期不超过 10 天时进入红色警报，每天在内部群汇总提醒一次。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发积分使用，使用后本单赠送500积分。</li><li>老板可在流水窗口底部修改新订单积分比例，或关闭新账本回滚到原 5% 逻辑。</li></ul></div></details>
     <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 群绑定 好评"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
     <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群，图中会标明每位女孩已签收、部分签收或未签收。</li></ul></div></details>
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
@@ -754,11 +754,12 @@ function escapeHtml(v){
 }
 function customerTypeBadge(v){
   v=v||'新客';
+  if(v.includes('VIP')&&v.includes('SVIP'))return `<span class="type-badge type-vip">VIP</span> <span class="type-badge type-vip">SVIP</span>`;
   const cls=(v==='VIP'||v==='SVIP')?'type-vip':(v==='老客'?'type-old':(v==='回头客'?'type-return':'type-new'));
   return `<span class="type-badge ${cls}">${v}</span>`;
 }
 function filteredOrders(){return data.orders.filter(o=>(!qOrderDate.value||o.order_date===qOrderDate.value)&&match(o.girl_name,qOrderGirl.value)&&(match(o.customer_no,qOrderCustomer.value)||match(o.customer_name,qOrderCustomer.value))&&match((o.remark||"")+" "+(o.remark2||""),qOrderRemark.value)&&(!qOrderSettle.value||o.settlement_status===qOrderSettle.value))}
-function filteredCustomers(){return data.customers.filter(c=>match(c.customer_no,qCustomerNo.value)&&match(c.name,qCustomerName.value)&&(!qCustomerType.value||c.customer_type===qCustomerType.value)&&match((c.source||"")+" "+(c.contact||"")+" "+(c.remark||"")+" "+(c.remark2||""),qCustomerRemark.value))}
+function filteredCustomers(){return data.customers.filter(c=>match(c.customer_no,qCustomerNo.value)&&match(c.name,qCustomerName.value)&&(!qCustomerType.value||String(c.customer_type||'').includes(qCustomerType.value))&&match((c.source||"")+" "+(c.contact||"")+" "+(c.remark||"")+" "+(c.remark2||""),qCustomerRemark.value))}
 function filteredGirls(){return data.girls.filter(g=>match(g.name,qGirlName.value)&&(!qGirlType.value||g.girl_type===qGirlType.value)&&match((g.enrollment||"")+" "+(g.contact||"")+" "+(g.tags||"")+" "+(g.remark||"")+" "+(g.remark2||""),qGirlRemark.value))}
 function clearOrderQuery(){qOrderDate.value="";qOrderGirl.value="";qOrderCustomer.value="";qOrderRemark.value="";qOrderSettle.value="";render()}function clearCustomerQuery(){qCustomerNo.value="";qCustomerName.value="";qCustomerType.value="";qCustomerRemark.value="";render()}function clearGirlQuery(){qGirlName.value="";qGirlType.value="";qGirlRemark.value="";render()}
 
@@ -992,7 +993,8 @@ async function openCustomerLedger(customerId){
   editTitle.textContent=`客户 ${c.customer_no||c.id}｜积分 / 充值`;
   const history=entries.length?entries.map(e=>`<tr><td>${escHtml(e.created_at||"")}</td><td>${e.account_type==="points"?"积分":"充值余额"}</td><td>${escHtml(e.transaction_type||"")}</td><td class="${Number(e.amount)>=0?'ledger-plus':'ledger-minus'}">${Number(e.amount)>=0?'+':''}${Number(e.amount||0).toLocaleString()}</td><td>${Number(e.balance_after||0).toLocaleString()}</td><td>${escHtml(e.reason||"")}</td><td>${escHtml(e.actor_name||"")}</td></tr>`).join(""):`<tr><td colspan="7">暂无流水</td></tr>`;
   const bossSettings=auth?.role==="boss"?`<div class="ledger-settings"><b>老板设置（不影响旧订单）</b><div class="form"><label class="small">新订单返积分比例<br><input id="m_point_rate_percent" type="number" min="0" max="20" step="0.1" value="${Number(settings.point_rate_percent||0)}"></label><label class="permission-check"><input id="m_ledger_enabled" type="checkbox" ${settings.enabled?'checked':''}>启用新账本</label><button class="soft" type="button" onclick="saveLoyaltySettings()">保存积分规则</button></div><div class="note">关闭即回滚到原来的新订单 5% 计算，停止写入新账本；旧数据始终不变。</div></div>`:"";
-  editFields.innerHTML=`<div class="ledger-summary"><div>当前积分<br>${pointsValue(c.points)}</div><div>当前充值余额<br>${balanceValue(c.recharge_balance)}</div></div>`+
+  const reasons=[c.vip_reason?`<b>VIP：</b>${escHtml(c.vip_reason)}`:'',c.svip_reason?`<b>SVIP：</b>${escHtml(c.svip_reason)}`:''].filter(Boolean).join('<br>')||'当前未达到本月 VIP / SVIP 排名；基础类型按历史预约单数判断。';
+  editFields.innerHTML=`<div class="ledger-summary"><div>当前积分<br>${pointsValue(c.points)}</div><div>当前充值余额<br>${balanceValue(c.recharge_balance)}</div></div><div class="ledger-help"><b>当前客户类型：</b>${customerTypeBadge(c.customer_type)}<br>${reasons}</div>`+
    field("调整项目",`<select id="m_ledger_account"><option value="points">积分</option><option value="recharge">充值余额</option></select>`)+
    field("操作",`<select id="m_ledger_action"><option value="add">增加</option><option value="deduct">扣除</option></select>`)+
    field("类型",`<select id="m_ledger_type"><option>人工调整</option><option>充值</option><option>余额消费</option><option>退款</option><option>积分补发</option><option>积分扣除</option></select>`)+
@@ -2310,7 +2312,7 @@ function customerRetention(c){
   return {days, status:'正常', cls:''};
 }
 function customerPointExpire(c){
-  if(Number(c.total_recharge||0)>0 || Number(c.recharge_balance||0)>0 || String(c.customer_type||'').toUpperCase()==='SVIP') return {txt:'永久有效（充值客户）',cls:'log-ok'};
+  if(Number(c.total_recharge||0)>0 || Number(c.recharge_balance||0)>0) return {txt:'永久有效（充值客户）',cls:'log-ok'};
   const os=ordersForCustomer(c).filter(o=>Number(o.points||0)>0).sort((a,b)=>String(b.order_date).localeCompare(a.order_date));
   if(!os.length || Number(c.points||0)<=0) return {txt:'—',cls:''};
   const last=os[0].order_date; const expire=new Date(last); expire.setDate(expire.getDate()+30);

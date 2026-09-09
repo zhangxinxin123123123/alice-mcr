@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v129_permanent_recharge_points_alerts"
+APP_VERSION = "v130_explainable_customer_memberships"
 
 @app.after_request
 def compress_large_json(response):
@@ -292,6 +292,13 @@ def _init_db_schema():
         customer_cols = [r[1] for r in c.execute('PRAGMA table_info(customers)').fetchall()]
         if 'customer_type_locked' not in customer_cols:
             c.execute("ALTER TABLE customers ADD COLUMN customer_type_locked INTEGER DEFAULT 0")
+        for column, definition in (
+            ('vip_active', 'INTEGER DEFAULT 0'), ('svip_active', 'INTEGER DEFAULT 0'),
+            ('vip_reason', "TEXT DEFAULT ''"), ('svip_reason', "TEXT DEFAULT ''"),
+            ('membership_period', "TEXT DEFAULT ''"),
+        ):
+            if column not in customer_cols:
+                c.execute(f"ALTER TABLE customers ADD COLUMN {column} {definition}")
         report_cols = [r[1] for r in c.execute('PRAGMA table_info(settlement_reports)').fetchall()]
         if 'signed_order_ids' not in report_cols:
             c.execute("ALTER TABLE settlement_reports ADD COLUMN signed_order_ids TEXT DEFAULT ''")
@@ -3152,61 +3159,26 @@ def audit_customer_points(c):
 
 
 def update_customer_type_by_history(c, customer_id=None):
-    """自动维护客户类型：充值为 SVIP；月消费前5/30天高定价复购为 VIP。"""
+    """Monthly, explainable memberships: spending top 3 = VIP; booked-hours top 5 = SVIP."""
     month = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m')
-    top_vip_ids = {
-        int(r['customer_id'])
-        for r in c.execute("""
-            SELECT customer_id
-            FROM orders
-            WHERE customer_id IS NOT NULL
-              AND COALESCE(order_status,'') NOT IN ('取消','鍙栨秷')
-              AND COALESCE(received_amount,0) > 0
-              AND substr(COALESCE(order_date,''),1,7)=?
-            GROUP BY customer_id
-            ORDER BY SUM(COALESCE(received_amount,0)) DESC, COUNT(*) DESC, MAX(id) DESC
-            LIMIT 5
-        """, (month,)).fetchall()
-        if r['customer_id']
-    }
-    cutoff = (datetime.utcnow() + timedelta(hours=9) - timedelta(days=30)).strftime('%Y-%m-%d')
-    high_price_stats = {}
-    for r in c.execute("""
-        SELECT o.customer_id, o.girl_id, o.girl_name, o.hours, o.service_time, COALESCE(g.list_price,0) AS list_price
-        FROM orders o
-        LEFT JOIN girls g ON g.id=o.girl_id OR (COALESCE(o.girl_id,0)=0 AND g.name=o.girl_name)
-        WHERE o.customer_id IS NOT NULL
-          AND COALESCE(o.order_status,'') NOT IN ('取消','鍙栨秷')
-          AND COALESCE(o.order_date,'') >= ?
-          AND COALESCE(g.list_price,0) >= 25000
-    """, (cutoff,)).fetchall():
-        cid = int(r['customer_id'])
-        girl_key = str(r['girl_id'] or '').strip() or str(r['girl_name'] or '').strip()
-        if not girl_key:
-            continue
-        info = high_price_stats.setdefault(cid, {'girls': set(), 'has_long': False})
-        info['girls'].add(girl_key)
-        try:
-            hours = float(r['hours'] or calc_hours(r['service_time']))
-        except Exception:
-            hours = 1.0
-        if hours > 1.0:
-            info['has_long'] = True
-    high_price_vip_ids = {
-        cid for cid, info in high_price_stats.items()
-        if len(info['girls']) >= 2 and info['has_long']
-    }
-    recharged_ids = {
-        int(r['customer_id'])
-        for r in c.execute("""
-            SELECT DISTINCT customer_id
-            FROM recharge_records
-            WHERE customer_id IS NOT NULL AND COALESCE(amount,0) > 0
-        """).fetchall()
-        if r['customer_id']
-    }
-    for r in c.execute("SELECT id FROM customers WHERE COALESCE(total_recharge,0)>0 OR COALESCE(recharge_balance,0)>0").fetchall():
-        recharged_ids.add(int(r['id']))
+    spend_rows = c.execute("""SELECT customer_id,SUM(COALESCE(received_amount,0)) AS amount,COUNT(*) AS orders
+                              FROM orders WHERE customer_id IS NOT NULL
+                                AND COALESCE(order_status,'') NOT LIKE '%取消%'
+                                AND COALESCE(received_amount,0)>0
+                                AND substr(COALESCE(order_date,''),1,7)=?
+                              GROUP BY customer_id
+                              ORDER BY amount DESC,orders DESC,MAX(id) DESC LIMIT 3""", (month,)).fetchall()
+    hour_rows = c.execute("""SELECT customer_id,SUM(CASE WHEN COALESCE(hours,0)>0 THEN hours ELSE 1 END) AS hours,
+                                     COUNT(*) AS orders
+                             FROM orders WHERE customer_id IS NOT NULL
+                               AND COALESCE(order_status,'') NOT LIKE '%取消%'
+                               AND substr(COALESCE(order_date,''),1,7)=?
+                             GROUP BY customer_id
+                             ORDER BY hours DESC,orders DESC,MAX(id) DESC LIMIT 5""", (month,)).fetchall()
+    vip_rank = {int(row['customer_id']):(index, int(row['amount'] or 0))
+                for index,row in enumerate(spend_rows, start=1)}
+    svip_rank = {int(row['customer_id']):(index, float(row['hours'] or 0))
+                 for index,row in enumerate(hour_rows, start=1)}
 
     params = []
     where = ""
@@ -3214,34 +3186,64 @@ def update_customer_type_by_history(c, customer_id=None):
         where = "WHERE c.id=?"
         params.append(int(customer_id))
     customer_rows = c.execute(f"""
-        SELECT c.id, c.customer_type, COALESCE(c.customer_type_locked,0) AS customer_type_locked, COALESCE(o.total_orders,0) AS total_orders
+        SELECT c.id,c.customer_type,COALESCE(c.customer_type_locked,0) AS customer_type_locked,
+               COALESCE(c.vip_active,0) AS vip_active,COALESCE(c.svip_active,0) AS svip_active,
+               COALESCE(c.vip_reason,'') AS vip_reason,COALESCE(c.svip_reason,'') AS svip_reason,
+               COALESCE(c.membership_period,'') AS membership_period,COALESCE(o.total_orders,0) AS total_orders
         FROM customers c
         LEFT JOIN (
             SELECT customer_id, COUNT(*) AS total_orders
             FROM orders
-            WHERE customer_id IS NOT NULL
+            WHERE customer_id IS NOT NULL AND COALESCE(order_status,'') NOT LIKE '%取消%'
             GROUP BY customer_id
         ) o ON o.customer_id=c.id
         {where}
     """, params).fetchall()
 
     for row in customer_rows:
-        if int(row['customer_type_locked'] or 0):
-            continue
         cid = int(row['id'])
         total_orders = int(row['total_orders'] or 0)
-        if cid in recharged_ids:
-            new_type = 'SVIP'
-        elif cid in top_vip_ids or cid in high_price_vip_ids:
-            new_type = 'VIP'
+        locked = int(row['customer_type_locked'] or 0)
+        if locked:
+            manual_type = str(row['customer_type'] or '')
+            manual_upper = manual_type.upper().replace('+', '/').replace(' ', '')
+            vip = manual_upper in ('VIP', 'VIP/SVIP')
+            svip = manual_upper in ('SVIP', 'VIP/SVIP')
+            vip_reason = '人工设定 VIP' if vip else ''
+            svip_reason = '人工设定 SVIP' if svip else ''
+            new_type = manual_type or '新客'
         elif total_orders >= 3:
-            new_type = '老客'
-        elif total_orders >= 2:
-            new_type = '回头客'
+            vip = cid in vip_rank
+            svip = cid in svip_rank
+            vip_reason = (f'{month} 消费金额第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）'
+                          if vip else '')
+            svip_reason = (f'{month} 预约时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）'
+                           if svip else '')
+            new_type = 'VIP / SVIP' if vip and svip else ('SVIP' if svip else ('VIP' if vip else '老客'))
         else:
-            new_type = '新客'
-        if (row['customer_type'] or '') != new_type:
-            c.execute("UPDATE customers SET customer_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_type, cid))
+            vip = cid in vip_rank
+            svip = cid in svip_rank
+            vip_reason = (f'{month} 消费金额第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）'
+                          if vip else '')
+            svip_reason = (f'{month} 预约时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）'
+                           if svip else '')
+            if vip and svip:
+                new_type = 'VIP / SVIP'
+            elif svip:
+                new_type = 'SVIP'
+            elif vip:
+                new_type = 'VIP'
+            elif total_orders >= 2:
+                new_type = '回头客'
+            else:
+                new_type = '新客'
+        membership_values = (new_type,1 if vip else 0,1 if svip else 0,vip_reason,svip_reason,month)
+        current_values = (str(row['customer_type'] or ''),int(row['vip_active'] or 0),int(row['svip_active'] or 0),
+                          str(row['vip_reason'] or ''),str(row['svip_reason'] or ''),str(row['membership_period'] or ''))
+        if membership_values != current_values:
+            c.execute("""UPDATE customers SET customer_type=?,vip_active=?,svip_active=?,vip_reason=?,svip_reason=?,
+                         membership_period=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                      membership_values + (cid,))
 
 
 
@@ -3527,12 +3529,17 @@ def customers():
         no=d.get('customer_no') or next_customer_no(c)
         if str(no).isdigit(): no=f'{int(no):04d}'
         manual_type = str(d.get('customer_type','新客') or '新客').strip()
-        type_locked = 1 if manual_type.upper() in ('VIP','SVIP') else 0
+        type_locked = 1 if manual_type.upper().replace('+','/').replace(' ','') in ('VIP','SVIP','VIP/SVIP') else 0
         vals=(no,d.get('name') or f'客户{no}',manual_type,d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''),type_locked)
         if d.get('id'):
             old_customer = c.execute('SELECT * FROM customers WHERE id=?', (int(d['id']),)).fetchone()
             if not old_customer:
                 return jsonify(ok=False, error='客户不存在'), 404
+            if manual_type != str(old_customer['customer_type'] or ''):
+                type_locked = 1 if manual_type.upper().replace('+','/').replace(' ','') in ('VIP','SVIP','VIP/SVIP') else 0
+            else:
+                type_locked = int(old_customer['customer_type_locked'] or 0)
+            vals = vals[:-1] + (type_locked,)
             c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,customer_type_locked=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
             # 兼容旧编辑入口：只有客服明确改动余额时才追加流水，不回算旧订单。
             actor = str(current_session_info().get('username') or '')
@@ -3563,6 +3570,7 @@ def api_customer_ledger():
         if not customer_id:
             return jsonify(ok=False, error='缺少客户ID'), 400
         with conn() as c:
+            update_customer_type_by_history(c, customer_id)
             customer = c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
             if not customer:
                 return jsonify(ok=False, error='客户不存在'), 404

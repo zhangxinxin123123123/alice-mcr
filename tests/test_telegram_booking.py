@@ -1404,6 +1404,33 @@ class TelegramBookingFlowTest(unittest.TestCase):
         bodies = [body for method, body in self.telegram_calls if method == 'sendMessage']
         self.assertTrue(any('%E6%99%AE%E9%80%9A%E9%AB%98%E7%A7%AF%E5%88%86' in body for body in bodies))
         self.assertFalse(any('%E5%85%85%E5%80%BC%E9%AB%98%E7%A7%AF%E5%88%86' in body for body in bodies))
+
+    def test_monthly_vip_and_svip_rankings_can_overlap_and_explain_reason(self):
+        month_day = self.app_module._tokyo_now().date().replace(day=1).isoformat()
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            customer_ids = []
+            amounts = [70000,60000,50000,40000,30000,20000,10000]
+            hours = [0.5,7,6,5,4,3,2]
+            for index in range(7):
+                no = f'14{index:02d}'
+                c.execute('INSERT INTO customers(customer_no,name) VALUES(?,?)', (no,f'排名客人{index+1}'))
+                cid = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+                customer_ids.append(cid)
+                c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,
+                             customer_no,customer_name,received_amount,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                          (month_day,'18:00-19:00',hours[index],girl_id,'娜娜子',cid,no,
+                           f'排名客人{index+1}',amounts[index],'已结束'))
+            self.app_module.update_customer_type_by_history(c)
+            first = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[0],)).fetchone())
+            second = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[1],)).fetchone())
+            seventh = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[6],)).fetchone())
+        self.assertEqual((first['vip_active'],first['svip_active']),(1,0))
+        self.assertIn('消费金额第1名',first['vip_reason'])
+        self.assertEqual((second['vip_active'],second['svip_active']),(1,1))
+        self.assertEqual(second['customer_type'],'VIP / SVIP')
+        self.assertIn('预约时长第1名',second['svip_reason'])
+        self.assertEqual((seventh['vip_active'],seventh['svip_active']),(0,0))
     def test_review_drafts_are_labeled_non_customer_quotes(self):
         with self.app_module.conn() as c:
             c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)
