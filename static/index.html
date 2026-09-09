@@ -410,7 +410,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="接龙导入 微信 LINE 日期 女孩 客户编号 新客户"><summary>📥 接龙导入</summary><div class="manual-body"><ol><li>首行写日期和女孩，例如 <code>0908娜娜子</code>。</li><li>预约行写 <code>序号.时间/价格/客户</code>；首次预约写客户名，以后写四位客户编号。</li><li>纯数字客户名使用双斜线，例如 <code>8-9/10000//123</code>。</li><li>导入前会与旧接龙核对：不变的不重复新增，新增的写入，修改的同步修改。</li></ol></div></details>
     <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li></ol></div></details>
     <details class="manual-block" data-search="TEL 关键词 Alice AI 助手 经营建议 导入 最新接龙 自动导入 出勤 积分查询 编号查询 绑定"><summary>⌨️ TEL 群关键词</summary><div class="manual-body">
-     <div class="manual-command"><code>艾莉兔 + 问题</code><span>在内部群询问实时业绩、出勤、指定客户编号或经营建议，例如 <code>艾莉兔 今天经营怎么样？</code>。只读分析，不会修改 MCR 数据；发送 <code>艾莉兔 清空</code> 可清除自己的最近对话。旧叫法 Alice、爱丽丝也兼容。</span></div>
+     <div class="manual-command"><code>艾莉兔 + 问题</code><span>内部群可询问实时经营数据并称呼老板为“主人”；客户私聊仅回答 TEL 预约信息；女孩专属群仅回答本人的出勤、接龙与结算。三个场景严格隔离，不会互相透露数据。发送 <code>艾莉兔 清空</code> 可清除自己的最近对话，旧叫法 Alice、爱丽丝也兼容。</span></div>
      <div class="manual-command"><code>AI助手开启 / 关闭 / 状态</code><span>店长、客服或群管理员控制内部 AI 助手；状态会同时显示 OpenAI API 是否配置。</span></div>
      <div class="manual-command"><code>导入</code><span>回复一张接龙消息发送；也可把“导入”写在当天四位日期前。与旧数据核对后仅新增或修改。</span></div>
      <div class="manual-command"><code>最新接龙</code><span>在群里重新发送该女孩当天最新接龙。</span></div>
@@ -423,7 +423,7 @@ body:not(.role-boss) .boss-only{display:none!important}
      <div class="manual-command"><code>新客名称检查 / 回复 OK</code><span>每天 00:00 汇总上一日新客时，识别 QQ、飞机/TEL、电话、微信、LINE、尾号等来源前缀，并在内部群提出拆分建议。客服回复检查消息 <b>OK</b> 或点击确认后才会修改；疑似时间、酒店或地址的名称只提醒客服手动核对，系统不会猜测。</span></div>
      <div class="manual-command"><code>/绑定审核群</code><span>把当前群设为内部审核群，仅店长、客服或群管理员操作。</span></div>
      <div class="manual-command"><code>/绑定女孩 女孩名</code><span>把当前群绑定为该女孩专属群。</span></div>
-     <p><b>自动识别规则：</b>接龙首个非空行必须独立为四位日期（如 <code>0908</code>），且女孩在对应日期出勤表。每天 00:00 开始接受当天接龙；00:00–03:59 同时接受前一天和当天，04:00 后停止前一天自动导入。编辑旧消息不导入，必须重发；没有预约不导入也不提醒；新增、修改或失败才在内部群播报。</p>
+     <p><b>自动识别规则：</b>接龙首个非空行必须独立为四位日期（如 <code>0908</code>），且女孩在对应日期出勤表。接受今天及任意未来日期，00:00–03:59 仍兼容前一天。人工表导入后会转换为 Bot 可维护的唯一总表并删除原消息；Bot 新预约永远追加在人工预约之后。编辑旧消息不导入，必须重发；没有预约不导入也不提醒；新增、修改或失败才在内部群播报。</p>
     </div></details>
     <details class="manual-block" data-search="接龙预约 保存 复制 客户 联系 酒店 图片 空闲时间"><summary>🧩 接龙预约</summary><div class="manual-body"><ul><li>选择日期和女孩后读取当天接龙；时间、价格、客户及备注填写后保存。</li><li>“复制完整版”供内部使用，含客户编号和名字；“复制普通版”供女孩群使用。</li><li>空闲时间来自 MCR 订单，不从群消息反推；“刷新空闲时间”后可复制文字或表格。</li><li>接龙表中的“联系客户”可直接打开预约客户的 Telegram。</li></ul></div></details>
     <details class="manual-block" data-search="纯出勤表 全面同步 官网 今日出勤 头像 截图 TEL 自动同步"><summary>📋 纯出勤表 / 全面同步</summary><div class="manual-body"><ol><li>选择当天女孩，填写 24 小时制出勤时间、价格和标签；标签会记忆。</li><li>全面同步前先尝试从 YY 更新头像，成功头像会保存到女孩表。</li><li><b>全面同步：</b>保存出勤、更新 TEL 可预约名单、生成高清出勤图、发送绑定群，并同步 Alice 官网“今日出勤”。</li><li>晚上 22:00 后执行全面同步后，当天再新增出勤女孩，保存时会自动补充同步到 TEL；同一女孩只同步一次。</li><li>超过 6 位女孩时生成多张图；识别或官网同步失败会在内部群明确提示。</li></ol></div></details>
@@ -459,10 +459,13 @@ body:not(.role-boss) .boss-only{display:none!important}
 
  <section id="operationAudit" class="panel">
   <div class="card"><h2>艾莉兔 AI 助手设置</h2>
-   <p class="note">仅在 Alice 内部群回答，不会出现在客户私聊或女孩专属群。AI 只读取经营汇总并给建议，不能通过聊天修改订单、积分或客户资料。</p>
+   <p class="note">内部群、客户私聊与女孩专属群使用三套严格隔离的资料权限。内部群可看经营摘要；客户只能获得 TEL 预约协助；女孩只能询问本人出勤、接龙和结算。</p>
    <div class="form">
     <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
     <input id="tgAiName" placeholder="助手名字，例如 艾莉兔">
+    <input id="tgAiOwnerTitle" placeholder="内部群称呼，例如 主人">
+    <select id="tgAiCustomerEnabled"><option value="1">客户私聊开启</option><option value="0">客户私聊关闭</option></select>
+    <select id="tgAiGirlEnabled"><option value="1">女孩专属群开启</option><option value="0">女孩专属群关闭</option></select>
    </div>
    <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
    <div id="tgAiStatus" class="note"></div>
@@ -2724,6 +2727,9 @@ async function loadTelegramSettings(){
   tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
   tgAiEnabled.value=String(s.ai_assistant_enabled||'1');
   tgAiName.value=s.ai_assistant_name||'艾莉兔';
+  tgAiOwnerTitle.value=s.ai_owner_title||'主人';
+  tgAiCustomerEnabled.value=String(s.ai_customer_enabled||'1');
+  tgAiGirlEnabled.value=String(s.ai_girl_group_enabled||'1');
   tgAiPersona.value=s.ai_assistant_persona||'';
   tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜内部群提问：<code>${escHtml(s.ai_assistant_name||'艾莉兔')} 今天经营怎么样？</code>`;
   telegramFlowDraft={...s};
@@ -2805,6 +2811,9 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     points_yen_per_point:Math.max(1,Number(tgPointRate.value||1)),
     ai_assistant_enabled:tgAiEnabled.value==='1'?'1':'0',
     ai_assistant_name:tgAiName.value.trim()||'艾莉兔',
+    ai_owner_title:tgAiOwnerTitle.value.trim()||'主人',
+    ai_customer_enabled:tgAiCustomerEnabled.value==='1'?'1':'0',
+    ai_girl_group_enabled:tgAiGirlEnabled.value==='1'?'1':'0',
     ai_assistant_persona:tgAiPersona.value.trim(),
     booking_enabled:tgEnabled.value==='1'
   });

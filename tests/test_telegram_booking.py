@@ -145,13 +145,54 @@ class TelegramBookingFlowTest(unittest.TestCase):
             os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
         self.assertFalse(captured["body"]["store"])
         self.assertIn("只有只读权限", captured["body"]["instructions"])
-        self.assertIn("MCR实时摘要", captured["body"]["input"][-1]["content"])
+        self.assertIn("当前internal权限摘要", captured["body"]["input"][-1]["content"])
+        self.assertIn("称呼提问者为“主人”", captured["body"]["instructions"])
         self.assertTrue(any(method == "editMessageText" and "%E5%BB%BA%E8%AE%AE" in body
                             for method, body in self.telegram_calls))
         with self.app_module.conn() as c:
             history = c.execute("SELECT history_json FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
                                 (str(internal["id"]), str(manager["id"]))).fetchone()
         self.assertIsNotNone(history)
+
+    def test_alice_ai_customer_and_girl_modes_are_scoped(self):
+        internal = {"id": -90124, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -90125, "type": "supergroup", "title": "娜娜子群"}
+        manager = {"id": 9124, "first_name": "店长"}
+        customer = {"id": 9125, "first_name": "客人"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                  "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 2, "chat": girl_chat, "from": manager,
+                                  "text": "/绑定女孩 娜娜子"}})
+        captured = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_ai_urlopen(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                captured.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"output_text": "好的，我来帮你看看～"})
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai_urlopen
+        try:
+            self.webhook({"message": {"message_id": 3, "chat": {"id": 9125, "type": "private"},
+                                      "from": customer, "text": "明天怎么预约？"}})
+            self.webhook({"message": {"message_id": 4, "chat": girl_chat, "from": manager,
+                                      "text": "艾莉兔 我明天几点出勤？"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        self.assertEqual(len(captured), 2)
+        customer_body, girl_body = captured
+        self.assertIn("客人哥哥", customer_body["instructions"])
+        self.assertIn("只能协助TEL预约", customer_body["instructions"])
+        self.assertNotIn("店铺收益", customer_body["input"][-1]["content"])
+        self.assertIn("称呼对方为“姐姐”", girl_body["instructions"])
+        self.assertIn("本群绑定女孩", girl_body["input"][-1]["content"])
+        self.assertNotIn("客户身份", girl_body["input"][-1]["content"])
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {
@@ -732,7 +773,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?)""", (auto_day, "娜娜子", "19:00", "23:00"))
         self.webhook({"message": {"message_id": 80, "chat": internal, "from": manager, "text": "/绑定审核群"}})
         self.webhook({"message": {"message_id": 81, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
-        old_keyword = (self.app_module._tokyo_now() - timedelta(days=2)).strftime("%m%d")
+        old_keyword = "1332"
         self.webhook({"message": {"message_id": 810, "chat": girl_chat, "from": manager,
                                   "text": f"{old_keyword}\n1.19-20/15000/旧日期不导入"}})
         self.webhook({"message": {"message_id": 811, "chat": girl_chat, "from": manager,
@@ -778,6 +819,48 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.webhook({"message": {"message_id": 86, "chat": internal, "from": manager, "text": "自动导入状态"}})
         self.assertTrue(any(method == "sendMessage" and "%E4%B8%8B%E6%AC%A1%E8%87%AA%E5%8A%A8%E5%AF%BC%E5%85%A5" in body
                             for method, body in self.telegram_calls))
+
+    def test_bound_group_accepts_far_future_chain_and_keeps_one_bot_table(self):
+        future = self.app_module._tokyo_now().date() + timedelta(days=45)
+        future_day = future.isoformat()
+        keyword = future.strftime("%m%d")
+        manager = {"id": 9610, "first_name": "店长"}
+        internal = {"id": -30103, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -39103, "type": "supergroup", "title": "娜娜子群"}
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO pure_shifts(shift_date,girl_name,start_time,end_time)
+                         VALUES(?,?,?,?)""", (future_day, "娜娜子", "18:00", "23:30"))
+        self.webhook({"message": {"message_id": 900, "chat": internal, "from": manager,
+                                  "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 901, "chat": girl_chat, "from": manager,
+                                  "text": "/绑定女孩 娜娜子"}})
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 902, "chat": girl_chat, "from": manager,
+                                  "text": f"{keyword}\n1.18-19/15000/人工未来客人"}})
+        with self.app_module.conn() as c:
+            self.assertIsNotNone(c.execute(
+                "SELECT 1 FROM orders WHERE order_date=? AND girl_name='娜娜子' AND customer_name='人工未来客人'",
+                (future_day,)).fetchone())
+            self.assertEqual(c.execute(
+                "SELECT COUNT(*) FROM telegram_daily_chain_messages WHERE booking_date=? AND girl_name='娜娜子'",
+                (future_day,)).fetchone()[0], 1)
+        self.assertTrue(any(method == "sendMessage" and "chat_id=-39103" in body
+                            for method, body in self.telegram_calls))
+        self.assertTrue(any(method == "deleteMessage" and "message_id=902" in body
+                            for method, body in self.telegram_calls))
+
+        self.telegram_calls.clear()
+        self.webhook({"message": {"message_id": 903, "chat": girl_chat, "from": manager,
+                                  "text": f"{keyword}\n1.18-19/15000/人工未来客人\n2.20-21/15000/新增未来客人"}})
+        self.assertTrue(any(method == "editMessageText" and "chat_id=-39103" in body
+                            for method, body in self.telegram_calls))
+        self.assertTrue(any(method == "deleteMessage" and "message_id=903" in body
+                            for method, body in self.telegram_calls))
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute(
+                "SELECT COUNT(*) FROM telegram_daily_chain_messages WHERE booking_date=? AND girl_name='娜娜子'",
+                (future_day,)).fetchone()[0], 1)
 
     def test_attendance_inquiry_writes_mcr_shift_and_unanswered_expires(self):
         manager = {"id": 9700, "first_name": "店长"}
