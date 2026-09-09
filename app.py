@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v119_review_unlock_and_girl_drafts"
+APP_VERSION = "v120_two_review_outputs"
 
 @app.after_request
 def compress_large_json(response):
@@ -1966,6 +1966,38 @@ def review_marketing_drafts(day, selected_name=''):
                        'evidence_summary':evidence,'style_profile':style_profile,
                        'short_source_count':len(short_sources),'long_source_count':len(long_sources)})
     return result
+
+def polish_archived_customer_review(review_id):
+    """Lightly clean one real archived review without adding any new claim or experience."""
+    with conn() as c:
+        row = c.execute("""SELECT id,girl_name,review_text,material_type,author_name,review_date,
+                            source_title,source_page,source_url FROM scraped_reviews WHERE id=?""",
+                        (int(review_id or 0),)).fetchone()
+    if not row:
+        raise ValueError('找不到这条评价素材')
+    item = dict(row)
+    if item.get('material_type') not in ('公开短评','登录后长评','公开长评预览'):
+        raise ValueError('这条素材不是可润色的真实客户评价')
+    original = unicodedata.normalize('NFKC', str(item.get('review_text') or '')).strip()
+    if not original:
+        raise ValueError('评价正文为空')
+    lines = []
+    for line in re.split(r'[\r\n]+', original):
+        line = re.sub(r'[ \t\u3000]+', ' ', line).strip()
+        line = re.sub(r'([，。！？!?])\1{2,}', r'\1\1', line)
+        if line:
+            lines.append(line)
+    if len(lines) <= 1 and len(original) > 120:
+        sentences = [x.strip() for x in re.split(r'(?<=[。！？!?])\s*', lines[0] if lines else original) if x.strip()]
+        if len(sentences) > 3:
+            lines = [''.join(sentences[index:index+3]) for index in range(0, len(sentences), 3)]
+    polished = '\n\n'.join(lines)
+    return {'review_id':item['id'],'girl_name':item.get('girl_name') or '',
+            'material_type':item.get('material_type') or '', 'author_name':item.get('author_name') or '',
+            'review_date':item.get('review_date') or '', 'source_title':item.get('source_title') or '',
+            'source_url':item.get('source_page') or item.get('source_url') or '',
+            'original_text':original, 'polished_text':polished,
+            'label':'真实客户评价润色（仅整理标点与段落，未新增事实）'}
 
 def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
                                     girl_prices=None):
@@ -4536,6 +4568,8 @@ def api_review_crawler():
         day = str(d.get('date') or tokyo_today_date().isoformat())[:10]
         girl_name = str(d.get('girl_name') or '').strip()
         return jsonify(ok=True,date=day,girl_name=girl_name,drafts=review_marketing_drafts(day, girl_name))
+    if action == 'polish':
+        return jsonify(ok=True,polished=polish_archived_customer_review(d.get('review_id')))
     if action == 'archive':
         review_text = re.sub(r'\s+\n', '\n', str(d.get('review_text') or '').strip())
         if len(review_text) < 20:

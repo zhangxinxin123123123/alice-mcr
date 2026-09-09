@@ -1271,6 +1271,11 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(saved['material_type'],'登录后长评')
         self.assertEqual(saved['author_name'],'测试作者')
         self.assertIn('温柔',saved['tags'])
+        polished = self.client.post('/api/review_crawler',headers=headers,json={
+            'action':'polish','review_id':saved['id']})
+        self.assertEqual(polished.status_code,200,polished.get_data(as_text=True))
+        self.assertIn('未新增事实',polished.json['polished']['label'])
+        self.assertNotIn('预约',polished.json['polished']['polished_text'])
         preview = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-12345')
         self.assertEqual(preview['unlock_status'],'已归档全文')
         generated = self.client.post('/api/review_crawler',headers=headers,json={
