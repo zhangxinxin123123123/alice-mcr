@@ -63,8 +63,11 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
-                          "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger"):
+                          "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
+                          "points_records", "recharge_records", "girl_tag_memory"):
                 c.execute(f"DELETE FROM {table}")
+            c.execute("DELETE FROM customer_membership_history")
+            c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
             c.execute("UPDATE financial_settings SET setting_value='1' WHERE setting_key='ledger_enabled'")
             c.execute("UPDATE financial_settings SET setting_value='500' WHERE setting_key='point_rate_bps'")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
@@ -584,12 +587,11 @@ class TelegramBookingFlowTest(unittest.TestCase):
                       (self.day, "18:00-19:00", girl_id, "娜娜子", customer_id, "0420", "积分测试客人",
                        30000, 1500, 0, "已结束"))
             c.execute("UPDATE customers SET points=1500 WHERE id=?", (customer_id,))
-            self.app_module.create_or_update_order(c, {
+            discount_id = self.app_module.create_or_update_order(c, {
                 "order_date": self.day, "service_time": "19:00-20:00", "girl_id": girl_id,
                 "received_amount": 12345, "customer_raw": "0420", "remark": "积分折扣",
                 "order_status": "预约中", "settlement_status": "未结算",
             })
-            discount_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
             discount = c.execute("SELECT * FROM orders WHERE id=?", (discount_id,)).fetchone()
             customer = c.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         self.assertEqual(discount["received_amount"], 12345)
@@ -1111,7 +1113,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         later_day = (self.app_module._tokyo_now().date() + timedelta(days=2)).isoformat()
         loaded = self.client.get(f"/api/pure_shifts?date={later_day}&autocopy=0", headers=headers)
         self.assertEqual(loaded.status_code, 200, loaded.get_data(as_text=True))
-        self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人")
+        self.assertEqual(loaded.json["girl_tags"]["娜娜子"], "年纪小 新人 普通")
         self.assertEqual(loaded.json["girl_gold_tags"]["娜娜子"], "房间 推荐")
 
     def test_after_22_full_sync_new_attendance_auto_adds_tel_once(self):
@@ -1351,6 +1353,11 @@ class TelegramBookingFlowTest(unittest.TestCase):
                                    json={'enabled':True,'point_rate_percent':3})
         self.assertEqual(changed.status_code, 200, changed.get_data(as_text=True))
         with self.app_module.conn() as c:
+            rule_log = c.execute("SELECT * FROM operation_logs WHERE action_name='修改全局积分规则' ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertIsNotNone(rule_log)
+        self.assertIn('旧积分比例', rule_log['detail'])
+        self.assertIn('新积分比例', rule_log['detail'])
+        with self.app_module.conn() as c:
             self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'18:00-19:00',
                 'girl_id':girl_id,'customer_raw':'1227','received_amount':20000,'order_status':'已结束'})
             customer = c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()
@@ -1405,6 +1412,29 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any('%E6%99%AE%E9%80%9A%E9%AB%98%E7%A7%AF%E5%88%86' in body for body in bodies))
         self.assertFalse(any('%E5%85%85%E5%80%BC%E9%AB%98%E7%A7%AF%E5%88%86' in body for body in bodies))
 
+    def test_point_expiry_alert_only_final_five_days_and_every_other_day(self):
+        alert_day = datetime.strptime(self.day, '%Y-%m-%d').date()
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_settings SET setting_value='-90000' WHERE setting_key='default_review_chat_id'")
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            for no, name, days_left in (('1311','五天客户',5),('1312','六天客户',6),('1313','过期客户',-1)):
+                c.execute("INSERT INTO customers(customer_no,name,points) VALUES(?,?,1800)",(no,name))
+                cid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+                last_day=(alert_day + timedelta(days=days_left-30)).isoformat()
+                c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,
+                             customer_name,received_amount,points,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                          (last_day,'18:00-19:00',girl_id,'娜娜子',cid,no,name,20000,1000,'已结束'))
+        login=self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        headers={'X-Alice-Session':login.json['session_token']}
+        first=self.client.post('/api/telegram/point-expiry-alert/run',headers=headers,json={'date':self.day}).json
+        self.assertTrue(first['sent']);self.assertEqual(first['count'],1)
+        next_day=(alert_day+timedelta(days=1)).isoformat()
+        skipped=self.client.post('/api/telegram/point-expiry-alert/run',headers=headers,json={'date':next_day}).json
+        self.assertFalse(skipped['sent']);self.assertEqual(skipped['reason'],'隔日提醒间隔未到')
+        third_day=(alert_day+timedelta(days=2)).isoformat()
+        sent_again=self.client.post('/api/telegram/point-expiry-alert/run',headers=headers,json={'date':third_day}).json
+        self.assertTrue(sent_again['sent']);self.assertEqual(sent_again['count'],2)
+
     def test_monthly_vip_and_svip_rankings_can_overlap_and_explain_reason(self):
         month_day = self.app_module._tokyo_now().date().replace(day=1).isoformat()
         with self.app_module.conn() as c:
@@ -1425,12 +1455,55 @@ class TelegramBookingFlowTest(unittest.TestCase):
             first = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[0],)).fetchone())
             second = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[1],)).fetchone())
             seventh = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_ids[6],)).fetchone())
-        self.assertEqual((first['vip_active'],first['svip_active']),(1,0))
-        self.assertIn('消费金额第1名',first['vip_reason'])
-        self.assertEqual((second['vip_active'],second['svip_active']),(1,1))
+        self.assertEqual((first['vip_active'],first['svip_active']),(0,0))
+        self.assertEqual((first['vip_current'],first['svip_current']),(1,0))
+        self.assertIn('动态消费第1名',first['vip_current_reason'])
+        self.assertEqual((second['vip_current'],second['svip_current']),(1,1))
         self.assertEqual(second['customer_type'],'VIP / SVIP')
-        self.assertIn('预约时长第1名',second['svip_reason'])
-        self.assertEqual((seventh['vip_active'],seventh['svip_active']),(0,0))
+        self.assertIn('动态时长第1名',second['svip_current_reason'])
+        self.assertEqual((seventh['vip_current'],seventh['svip_current']),(0,0))
+
+    def test_previous_month_winners_are_retained_until_manual_cancel(self):
+        today=self.app_module._tokyo_now().date()
+        previous=(today.replace(day=1)-timedelta(days=1)).replace(day=15).isoformat()
+        with self.app_module.conn() as c:
+            girl_id=c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('1499','月底冠军')")
+            cid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,
+                         customer_no,customer_name,received_amount,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                      (previous,'18:00-22:00',4,girl_id,'娜娜子',cid,'1499','月底冠军',88000,'已结束'))
+            self.app_module.update_customer_type_by_history(c)
+            customer=dict(c.execute('SELECT * FROM customers WHERE id=?',(cid,)).fetchone())
+            history=c.execute("SELECT COUNT(*) FROM customer_membership_history WHERE customer_id=? AND action='获得'",(cid,)).fetchone()[0]
+        self.assertEqual((customer['vip_active'],customer['svip_active']),(1,1))
+        self.assertEqual(history,2)
+        login=self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        result=self.client.post('/api/customer_membership',headers={'X-Alice-Session':login.json['session_token']},
+                                json={'customer_id':cid,'membership_type':'VIP','action':'cancel','reason':'长期未消费人工取消'})
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        self.assertEqual(result.json['customer']['vip_active'],0)
+        self.assertEqual(result.json['customer']['svip_active'],1)
+
+    def test_customer_auto_tags_order_and_girl_type_tag_memory(self):
+        with self.app_module.conn() as c:
+            girl_id=c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("UPDATE girls SET girl_type='萝莉系',tags='清纯 温柔' WHERE id=?",(girl_id,))
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('1488','标签客户')")
+            cid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            for index in range(3):
+                c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,
+                             customer_no,customer_name,received_amount,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                          (self.day,f'{18+index}:00-{19+index}:00',1,girl_id,'娜娜子',cid,'1488','标签客户',30000,'已结束'))
+            self.app_module.update_customer_type_by_history(c,cid)
+            customer=dict(c.execute('SELECT * FROM customers WHERE id=?',(cid,)).fetchone())
+        tags=json.loads(customer['auto_tags'])
+        self.assertEqual(tags[:4],['萝莉控','高端消费','积分普通','稳定复购'])
+        login=self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        result=self.client.get('/api/pure_shifts?date='+self.day,headers={'X-Alice-Session':login.json['session_token']})
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        self.assertIn('萝莉系',result.json['girl_tags']['娜娜子'])
+        self.assertIn('清纯',result.json['girl_tags']['娜娜子'])
     def test_review_drafts_are_labeled_non_customer_quotes(self):
         with self.app_module.conn() as c:
             c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)

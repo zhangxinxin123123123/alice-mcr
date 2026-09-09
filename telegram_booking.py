@@ -2565,7 +2565,7 @@ def register_telegram_booking(
         return jsonify(ok=True, **send_new_customer_digest(payload.get('date'), bool(payload.get('force'))))
 
     def point_expiry_alert_rows(alert_day):
-        """Points above 1,000 whose 30-day validity has entered the final red 10-day window."""
+        """Non-recharge points above 1,000 in the final 1-5 valid days."""
         day = datetime.strptime(str(alert_day)[:10], '%Y-%m-%d').date()
         with conn() as c:
             candidates = c.execute("""SELECT c.id,c.customer_no,c.name,c.points,c.customer_type,
@@ -2590,7 +2590,7 @@ def register_telegram_booking(
             except Exception:
                 continue
             days_left = (expiry - day).days
-            if days_left <= 10:
+            if 1 <= days_left <= 5:
                 item['days_left'] = days_left
                 item['expiry_date'] = expiry.isoformat()
                 alerts.append(item)
@@ -2606,6 +2606,17 @@ def register_telegram_booking(
             existing = c.execute('SELECT * FROM telegram_point_alert_digests WHERE alert_date=?', (alert_day,)).fetchone()
             if existing and not force:
                 return {'sent':False,'date':alert_day,'count':int(existing['customer_count'] or 0),'reason':'今日已检查'}
+            previous_sent = c.execute("""SELECT alert_date FROM telegram_point_alert_digests
+                                         WHERE COALESCE(customer_count,0)>0 AND COALESCE(message_id,0)>0
+                                         ORDER BY alert_date DESC LIMIT 1""").fetchone()
+            if previous_sent and not force:
+                try:
+                    last_day = datetime.strptime(str(previous_sent['alert_date'])[:10], '%Y-%m-%d').date()
+                    this_day = datetime.strptime(alert_day, '%Y-%m-%d').date()
+                    if 0 <= (this_day-last_day).days < 2:
+                        return {'sent':False,'date':alert_day,'count':0,'reason':'隔日提醒间隔未到'}
+                except Exception:
+                    pass
         alerts = point_expiry_alert_rows(alert_day)
         if not alerts:
             with conn() as c:
@@ -2614,10 +2625,10 @@ def register_telegram_booking(
                              ON CONFLICT(alert_date) DO UPDATE SET customer_count=0,sent_at=CURRENT_TIMESTAMP""", (alert_day,))
             return {'sent':False,'date':alert_day,'count':0,'reason':'没有需要提醒的客户'}
         lines = [f"🔴 <b>{escape(alert_day)} 高积分到期提醒：{len(alerts)} 人</b>",
-                 "以下客户积分超过 1,000，并已进入红色到期警报："]
+                 "以下客户积分超过 1,000，且距离到期仅剩 1–5 天（隔日提醒）："]
         for row in alerts[:80]:
             left = int(row['days_left'])
-            status = '已到期' if left <= 0 else f'{left}天后到期'
+            status = f'{left}天后到期'
             lines.append(f"• <b>{escape(row.get('customer_no') or '未编号')}</b>｜{escape(row.get('name') or '未填写')}｜{int(row.get('points') or 0):,} pt｜{escape(status)}")
         if len(alerts) > 80:
             lines.append(f"• 其余 {len(alerts)-80} 人请在 MCR 客户表查看")

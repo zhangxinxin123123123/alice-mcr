@@ -729,6 +729,7 @@ th{
       <button class="primary" id="addShiftBtn" onclick="addShift()">＋ 新增</button>
       <button class="danger" onclick="removeLast()">－ 删除最后</button>
     </div>
+    <div style="margin-top:8px;display:flex;gap:7px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;font-weight:900;color:#7d6470">常用 TAG（追加，不会覆盖原 TAG）：</span><button class="soft" onclick="appendCommonTag('新人')">新人</button><button class="soft" onclick="appendCommonTag('萝莉系')">萝莉系</button><button class="soft" onclick="appendCommonTag('熟女系')">熟女系</button><button class="soft" onclick="appendCommonTag('服务系')">服务系</button><button class="soft" onclick="appendCommonTag('大美女')">大美女</button><button class="soft" onclick="appendCommonTag('清纯')">清纯</button><button class="soft" onclick="appendCommonTag('可爱')">可爱</button><button class="soft" onclick="appendCommonTag('性感')">性感</button><button class="soft" onclick="appendCommonTag('温柔')">温柔</button><button class="soft" onclick="appendCommonTag('健谈')">健谈</button><button class="soft" onclick="appendCommonTag('巨乳')">巨乳</button><button class="soft" onclick="appendCommonTag('长腿')">长腿</button></div>
     <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button class="primary" onclick="syncAliceAvatars()">从东京YY更新头像</button>
       <button class="primary" onclick="syncNekoAvatars()">一键更新喵喵头像</button>
@@ -1131,6 +1132,11 @@ th{
     const d = shiftDate.value || today;
     return shifts.filter(s => s.date === d);
   }
+  window.appendCommonTag = function(tag){
+    const existing=splitTags(tagInput.value||"");
+    if(!existing.includes(tag))existing.push(tag);
+    tagInput.value=existing.join(" ");
+  };
 
   const SHIFT_PAGE_SIZE = 6;
   function previewPages(){

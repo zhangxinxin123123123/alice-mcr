@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v130_explainable_customer_memberships"
+APP_VERSION = "v131_persistent_memberships_customer_tags"
 
 @app.after_request
 def compress_large_json(response):
@@ -220,6 +220,11 @@ def _init_db_schema():
             idempotency_key TEXT NOT NULL UNIQUE, actor_name TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer ON customer_ledger(customer_id,account_type,id)")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_membership_history(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,membership_type TEXT NOT NULL,
+            action TEXT NOT NULL,period TEXT DEFAULT '',reason TEXT DEFAULT '',actor_name TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(customer_id,membership_type,action,period))""")
         c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('ledger_enabled','1')")
         c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('point_rate_bps','500')")
         c.execute("""CREATE TABLE IF NOT EXISTS enum_values(id INTEGER PRIMARY KEY AUTOINCREMENT, enum_type TEXT NOT NULL, value TEXT NOT NULL, sort_order INTEGER DEFAULT 0, UNIQUE(enum_type,value))""")
@@ -296,6 +301,11 @@ def _init_db_schema():
             ('vip_active', 'INTEGER DEFAULT 0'), ('svip_active', 'INTEGER DEFAULT 0'),
             ('vip_reason', "TEXT DEFAULT ''"), ('svip_reason', "TEXT DEFAULT ''"),
             ('membership_period', "TEXT DEFAULT ''"),
+            ('vip_cancelled_period', "TEXT DEFAULT ''"), ('svip_cancelled_period', "TEXT DEFAULT ''"),
+            ('vip_current', 'INTEGER DEFAULT 0'), ('svip_current', 'INTEGER DEFAULT 0'),
+            ('vip_current_reason', "TEXT DEFAULT ''"), ('svip_current_reason', "TEXT DEFAULT ''"),
+            ('auto_tags', "TEXT DEFAULT '[]'"), ('auto_tag_reasons', "TEXT DEFAULT '{}'"),
+            ('auto_tags_updated_at', "TEXT DEFAULT ''"),
         ):
             if column not in customer_cols:
                 c.execute(f"ALTER TABLE customers ADD COLUMN {column} {definition}")
@@ -317,6 +327,11 @@ def _init_db_schema():
             c.execute("ALTER TABLE girls ADD COLUMN avatar_source_url TEXT DEFAULT ''")
         if 'avatar_updated_at' not in girl_cols:
             c.execute("ALTER TABLE girls ADD COLUMN avatar_updated_at TEXT DEFAULT ''")
+        # Keep every existing profile/attendance tag and append the girl type once.
+        c.execute("""UPDATE girls SET tags=trim(COALESCE(tags,'') || ' ' || trim(COALESCE(girl_type,'')))
+                     WHERE trim(COALESCE(girl_type,''))<>''
+                       AND instr(' ' || trim(COALESCE(tags,'')) || ' ',
+                                 ' ' || trim(COALESCE(girl_type,'')) || ' ')=0""")
         order_cols = [r[1] for r in c.execute('PRAGMA table_info(orders)').fetchall()]
         if 'points_used' not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN points_used INTEGER DEFAULT 0")
@@ -420,7 +435,8 @@ def required_module_for_api(path):
         ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'operationAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
-        ('/api/customer_ledger', 'customers'), ('/api/loyalty/settings', 'customers'),
+        ('/api/customer_ledger', 'customers'), ('/api/customer_membership', 'customers'),
+        ('/api/loyalty/settings', 'operationAudit'),
         ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
         ('/api/pure_shifts', 'pureShift'), ('/api/schedules', 'pureShift'),
         ('/api/neko/', 'pureShift'),
@@ -600,7 +616,9 @@ def api_operation_logs():
                                    FROM operation_logs
                                    WHERE {' AND '.join(conditions)}
                                    ORDER BY id DESC LIMIT ?""", values).fetchall())
-    return jsonify(ok=True, date=selected_date, logs=items)
+        bps = point_rate_bps(c)
+        loyalty = {'enabled': ledger_enabled(c), 'point_rate_bps': bps, 'point_rate_percent': bps / 100}
+    return jsonify(ok=True, date=selected_date, logs=items, loyalty_settings=loyalty)
 
 
 @app.route('/api/operation_logs/frontend', methods=['POST'])
@@ -682,7 +700,7 @@ def record_admin_operation(response):
         if request.method not in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE') or not request.path.startswith('/api/'):
             return response
         if request.path in ('/api/login', '/api/login/logout', '/api/health', '/api/db_info',
-                            '/api/operation_logs', '/api/operation_logs/frontend'):
+                            '/api/operation_logs', '/api/operation_logs/frontend', '/api/loyalty/settings'):
             return response
         session = current_session_info()
         actor = str(session.get('username') or '')
@@ -3158,9 +3176,106 @@ def audit_customer_points(c):
             'anomaly_count': len(anomalies), 'counts': counts, 'anomalies': anomalies}
 
 
-def update_customer_type_by_history(c, customer_id=None):
-    """Monthly, explainable memberships: spending top 3 = VIP; booked-hours top 5 = SVIP."""
-    month = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m')
+def _customer_auto_tag_profiles(c, customer_ids=None):
+    """Build explainable, ordered tags without touching staff-written customer tags."""
+    today = (datetime.utcnow() + timedelta(hours=9)).date()
+    cutoff90, cutoff30 = str(today - timedelta(days=89)), str(today - timedelta(days=29))
+    params = [cutoff90]
+    where_ids = ''
+    if customer_ids:
+        ids = sorted({int(x) for x in customer_ids if x})
+        where_ids = ' AND o.customer_id IN (' + ','.join('?' for _ in ids) + ')'
+        params.extend(ids)
+    order_rows = c.execute(f"""SELECT o.customer_id,o.order_date,o.service_time,o.hours,o.received_amount,
+                                      o.points_used,o.payment_method,o.remark,o.remark2,o.raw_text,
+                                      o.girl_id,o.girl_name,COALESCE(g.girl_type,'') AS girl_type,
+                                      COALESCE(g.tags,'') AS girl_tags
+                               FROM orders o LEFT JOIN girls g ON g.id=o.girl_id
+                               WHERE o.customer_id IS NOT NULL AND COALESCE(o.order_status,'') NOT LIKE '%取消%'
+                                 AND COALESCE(o.order_date,'')>=? {where_ids}
+                               ORDER BY o.customer_id,o.order_date,o.id""", params).fetchall()
+    recharge_ids = {int(r['customer_id']) for r in c.execute(
+        "SELECT DISTINCT customer_id FROM recharge_records WHERE customer_id IS NOT NULL AND COALESCE(amount,0)>0").fetchall()}
+    profiles = {}
+    for raw in order_rows:
+        row = dict(raw); cid = int(row['customer_id']); p = profiles.setdefault(cid, {'rows':[]})
+        p['rows'].append(row)
+    results = {}
+    for cid,p in profiles.items():
+        orders = p['rows']
+        if len(orders) < 3:
+            results[cid] = ([], {})
+            continue
+        total_hours = sum(max(.25,float(r.get('hours') or 1)) for r in orders)
+        total_spend = sum(max(0,int(r.get('received_amount') or 0)) for r in orders)
+        recent30 = [r for r in orders if str(r.get('order_date') or '') >= cutoff30]
+        preference_weights = {'萝莉控':0.0,'熟女控':0.0,'服务控':0.0}
+        total_weight = 0.0
+        girl_counts = {}
+        payment_counts = {}
+        point_uses = discount_uses = overnight = late = early = one_hour = 0
+        for r in orders:
+            weight = 2.0 if str(r.get('order_date') or '') >= cutoff30 else 1.0
+            total_weight += weight
+            girl_key = str(r.get('girl_id') or r.get('girl_name') or '')
+            girl_counts[girl_key] = girl_counts.get(girl_key,0) + 1
+            payment = str(r.get('payment_method') or '现金')
+            payment_counts[payment] = payment_counts.get(payment,0) + 1
+            profile_text = (str(r.get('girl_type') or '') + ' ' + str(r.get('girl_tags') or '')).lower()
+            if any(x in profile_text for x in ('年纪小','萝莉','ロリ','少女')): preference_weights['萝莉控'] += weight
+            if any(x in profile_text for x in ('熟女','御姐','姐姐','大美女')): preference_weights['熟女控'] += weight
+            if any(x in profile_text for x in ('服务','服务系','接客')): preference_weights['服务控'] += weight
+            if int(r.get('points_used') or 0)>0: point_uses += 1
+            note = ' '.join(str(r.get(k) or '') for k in ('remark','remark2','raw_text'))
+            if point_use_note_triggered(note): discount_uses += 1
+            service = str(r.get('service_time') or '')
+            if '包夜' in service: overnight += 1
+            start_match = re.search(r'(\d{1,2})(?::\d{2})?', service)
+            start_hour = int(start_match.group(1)) if start_match else 19
+            if start_hour >= 22 or start_hour < 5: late += 1
+            elif start_hour < 19: early += 1
+            if float(r.get('hours') or 1) <= 1.05: one_hour += 1
+        tags, reasons = [], {}
+        top_pref, pref_score = max(preference_weights.items(), key=lambda item:item[1])
+        if total_weight and pref_score/total_weight >= .55:
+            tags.append(top_pref); reasons[top_pref] = f'近90天加权偏好占比 {pref_score/total_weight:.0%}'
+        avg_hourly = total_spend / max(total_hours, .25)
+        spend_tag = '高端消费' if avg_hourly >= 25000 else ('品质型' if avg_hourly >= 18000 else '性价比型')
+        tags.append(spend_tag); reasons[spend_tag] = f'近90天平均每小时消费 ¥{avg_hourly:,.0f}'
+        if cid in recharge_ids:
+            point_tag = '充值客户'; point_reason = '存在有效充值记录'
+        elif point_uses >= 2:
+            point_tag = '积分活跃'; point_reason = f'近90天使用积分 {point_uses} 次'
+        elif discount_uses >= 2:
+            point_tag = '活动敏感'; point_reason = f'近90天积分/折扣备注 {discount_uses} 次'
+        else:
+            point_tag = '积分普通'; point_reason = '近90天积分使用较少'
+        tags.append(point_tag); reasons[point_tag] = point_reason
+        last_day = max(str(r.get('order_date') or '') for r in orders)
+        days_since = max(0,(today - datetime.strptime(last_day[:10],'%Y-%m-%d').date()).days)
+        if len(recent30) >= 4: active_tag,active_reason = '高频客户',f'最近30天预约 {len(recent30)} 单'
+        elif days_since >= 60: active_tag,active_reason = '沉睡客户',f'距上次预约 {days_since} 天'
+        elif days_since >= 30: active_tag,active_reason = '待唤醒',f'距上次预约 {days_since} 天'
+        else: active_tag,active_reason = '稳定复购',f'距上次预约 {days_since} 天'
+        tags.append(active_tag); reasons[active_tag] = active_reason
+        # Lower-priority observations are retained behind the ellipsis.
+        if girl_counts:
+            top_girl_count = max(girl_counts.values())
+            extra = '固定指名' if top_girl_count/len(orders) >= .65 else ('尝鲜型' if len(girl_counts)>=4 else '')
+            if extra: tags.append(extra); reasons[extra] = f'近90天预约 {len(girl_counts)} 位女孩，最高单人占比 {top_girl_count/len(orders):.0%}'
+        time_tag = '包夜偏好' if overnight/len(orders)>=.3 else ('深夜型' if late/len(orders)>=.6 else ('傍晚型' if early/len(orders)>=.6 else ''))
+        if time_tag: tags.append(time_tag); reasons[time_tag] = '近90天预约时段占比达到设定门槛'
+        duration_tag = '长时间预约' if total_hours/len(orders)>=2 else ('快速预约' if one_hour/len(orders)>=.7 else '')
+        if duration_tag: tags.append(duration_tag); reasons[duration_tag] = f'近90天平均预约 {total_hours/len(orders):.1f} 小时'
+        if payment_counts:
+            payment,count = max(payment_counts.items(), key=lambda item:item[1])
+            if count/len(orders)>=.7:
+                pay_tag = f'{payment}常用'; tags.append(pay_tag); reasons[pay_tag] = f'该支付方式占比 {count/len(orders):.0%}'
+        results[cid] = (tags, reasons)
+    return results
+
+
+def _monthly_membership_rankings(c, month):
     spend_rows = c.execute("""SELECT customer_id,SUM(COALESCE(received_amount,0)) AS amount,COUNT(*) AS orders
                               FROM orders WHERE customer_id IS NOT NULL
                                 AND COALESCE(order_status,'') NOT LIKE '%取消%'
@@ -3179,6 +3294,49 @@ def update_customer_type_by_history(c, customer_id=None):
                 for index,row in enumerate(spend_rows, start=1)}
     svip_rank = {int(row['customer_id']):(index, float(row['hours'] or 0))
                  for index,row in enumerate(hour_rows, start=1)}
+    return vip_rank, svip_rank
+
+
+def update_customer_type_by_history(c, customer_id=None):
+    """Show live monthly ranks; retain only finalized month-end winners until staff cancels."""
+    tokyo_today = (datetime.utcnow() + timedelta(hours=9)).date()
+    month = tokyo_today.strftime('%Y-%m')
+    previous_month = (tokyo_today.replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
+    vip_rank, svip_rank = _monthly_membership_rankings(c, month)
+
+    # v130 briefly stored live rankings as retained flags. Remove only those provisional rows once.
+    marker = c.execute("SELECT setting_value FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'").fetchone()
+    if not marker:
+        c.execute("""UPDATE customers SET vip_active=0,vip_reason=''
+                     WHERE COALESCE(customer_type_locked,0)=0 AND membership_period=?
+                       AND vip_reason LIKE ? AND NOT EXISTS(
+                         SELECT 1 FROM customer_membership_history h
+                         WHERE h.customer_id=customers.id AND h.membership_type='VIP' AND h.action='获得')""",
+                  (month, month + ' %'))
+        c.execute("""UPDATE customers SET svip_active=0,svip_reason=''
+                     WHERE COALESCE(customer_type_locked,0)=0 AND membership_period=?
+                       AND svip_reason LIKE ? AND NOT EXISTS(
+                         SELECT 1 FROM customer_membership_history h
+                         WHERE h.customer_id=customers.id AND h.membership_type='SVIP' AND h.action='获得')""",
+                  (month, month + ' %'))
+        c.execute("INSERT INTO financial_settings(setting_key,setting_value) VALUES('membership_retention_v2_initialized','1')")
+
+    # On the first calculation after a month closes, freeze that month's final winners exactly once.
+    prev_vip, prev_svip = _monthly_membership_rankings(c, previous_month)
+    for cid,(rank,amount) in prev_vip.items():
+        reason = f'{previous_month} 月末消费金额第{rank}名（¥{amount:,}）'
+        cur = c.execute("""INSERT OR IGNORE INTO customer_membership_history
+                           (customer_id,membership_type,action,period,reason,actor_name)
+                           VALUES(?,'VIP','获得',?,?,'system')""", (cid,previous_month,reason))
+        if int(cur.rowcount or 0):
+            c.execute("UPDATE customers SET vip_active=1,vip_reason=?,vip_cancelled_period='' WHERE id=?", (reason,cid))
+    for cid,(rank,hours) in prev_svip.items():
+        reason = f'{previous_month} 月末预约时长第{rank}名（{hours:g}小时）'
+        cur = c.execute("""INSERT OR IGNORE INTO customer_membership_history
+                           (customer_id,membership_type,action,period,reason,actor_name)
+                           VALUES(?,'SVIP','获得',?,?,'system')""", (cid,previous_month,reason))
+        if int(cur.rowcount or 0):
+            c.execute("UPDATE customers SET svip_active=1,svip_reason=?,svip_cancelled_period='' WHERE id=?", (reason,cid))
 
     params = []
     where = ""
@@ -3189,7 +3347,14 @@ def update_customer_type_by_history(c, customer_id=None):
         SELECT c.id,c.customer_type,COALESCE(c.customer_type_locked,0) AS customer_type_locked,
                COALESCE(c.vip_active,0) AS vip_active,COALESCE(c.svip_active,0) AS svip_active,
                COALESCE(c.vip_reason,'') AS vip_reason,COALESCE(c.svip_reason,'') AS svip_reason,
-               COALESCE(c.membership_period,'') AS membership_period,COALESCE(o.total_orders,0) AS total_orders
+               COALESCE(c.membership_period,'') AS membership_period,
+               COALESCE(c.vip_cancelled_period,'') AS vip_cancelled_period,
+               COALESCE(c.svip_cancelled_period,'') AS svip_cancelled_period,
+               COALESCE(c.vip_current,0) AS vip_current,COALESCE(c.svip_current,0) AS svip_current,
+               COALESCE(c.vip_current_reason,'') AS vip_current_reason,
+               COALESCE(c.svip_current_reason,'') AS svip_current_reason,
+               COALESCE(c.auto_tags,'[]') AS auto_tags,COALESCE(c.auto_tag_reasons,'{{}}') AS auto_tag_reasons,
+               COALESCE(o.total_orders,0) AS total_orders
         FROM customers c
         LEFT JOIN (
             SELECT customer_id, COUNT(*) AS total_orders
@@ -3200,6 +3365,7 @@ def update_customer_type_by_history(c, customer_id=None):
         {where}
     """, params).fetchall()
 
+    auto_profiles = _customer_auto_tag_profiles(c, [row['id'] for row in customer_rows])
     for row in customer_rows:
         cid = int(row['id'])
         total_orders = int(row['total_orders'] or 0)
@@ -3211,38 +3377,52 @@ def update_customer_type_by_history(c, customer_id=None):
             svip = manual_upper in ('SVIP', 'VIP/SVIP')
             vip_reason = '人工设定 VIP' if vip else ''
             svip_reason = '人工设定 SVIP' if svip else ''
+            vip_now = cid in vip_rank
+            svip_now = cid in svip_rank
+            vip_current_reason = (f'{month} 动态消费第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）' if vip_now else '')
+            svip_current_reason = (f'{month} 动态时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）' if svip_now else '')
             new_type = manual_type or '新客'
-        elif total_orders >= 3:
-            vip = cid in vip_rank
-            svip = cid in svip_rank
-            vip_reason = (f'{month} 消费金额第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）'
-                          if vip else '')
-            svip_reason = (f'{month} 预约时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）'
-                           if svip else '')
-            new_type = 'VIP / SVIP' if vip and svip else ('SVIP' if svip else ('VIP' if vip else '老客'))
         else:
-            vip = cid in vip_rank
-            svip = cid in svip_rank
-            vip_reason = (f'{month} 消费金额第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）'
-                          if vip else '')
-            svip_reason = (f'{month} 预约时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）'
-                           if svip else '')
+            vip_now = cid in vip_rank and str(row['vip_cancelled_period'] or '') != month
+            svip_now = cid in svip_rank and str(row['svip_cancelled_period'] or '') != month
+            vip_retained = bool(int(row['vip_active'] or 0))
+            svip_retained = bool(int(row['svip_active'] or 0))
+            vip = bool(vip_retained or vip_now)
+            svip = bool(svip_retained or svip_now)
+            vip_reason = str(row['vip_reason'] or '')
+            svip_reason = str(row['svip_reason'] or '')
+            vip_current_reason = (f'{month} 动态消费第{vip_rank[cid][0]}名（¥{vip_rank[cid][1]:,}）' if vip_now else '')
+            svip_current_reason = (f'{month} 动态时长第{svip_rank[cid][0]}名（{svip_rank[cid][1]:g}小时）' if svip_now else '')
             if vip and svip:
                 new_type = 'VIP / SVIP'
             elif svip:
                 new_type = 'SVIP'
             elif vip:
                 new_type = 'VIP'
+            elif total_orders >= 3:
+                new_type = '老客'
             elif total_orders >= 2:
                 new_type = '回头客'
             else:
                 new_type = '新客'
-        membership_values = (new_type,1 if vip else 0,1 if svip else 0,vip_reason,svip_reason,month)
+        auto_tags, auto_reasons = auto_profiles.get(cid, ([], {}))
+        auto_tags_json = json.dumps(auto_tags,ensure_ascii=False,separators=(',',':'))
+        auto_reasons_json = json.dumps(auto_reasons,ensure_ascii=False,separators=(',',':'))
+        retained_vip = 1 if (locked and vip) else int(row['vip_active'] or 0)
+        retained_svip = 1 if (locked and svip) else int(row['svip_active'] or 0)
+        membership_values = (new_type,retained_vip,retained_svip,vip_reason,svip_reason,month,
+                             1 if vip_now else 0,1 if svip_now else 0,vip_current_reason,svip_current_reason,
+                             auto_tags_json,auto_reasons_json)
         current_values = (str(row['customer_type'] or ''),int(row['vip_active'] or 0),int(row['svip_active'] or 0),
-                          str(row['vip_reason'] or ''),str(row['svip_reason'] or ''),str(row['membership_period'] or ''))
+                          str(row['vip_reason'] or ''),str(row['svip_reason'] or ''),str(row['membership_period'] or ''),
+                          int(row['vip_current'] or 0),int(row['svip_current'] or 0),
+                          str(row['vip_current_reason'] or ''),str(row['svip_current_reason'] or ''),
+                          str(row['auto_tags'] or '[]'),str(row['auto_tag_reasons'] or '{}'))
         if membership_values != current_values:
             c.execute("""UPDATE customers SET customer_type=?,vip_active=?,svip_active=?,vip_reason=?,svip_reason=?,
-                         membership_period=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                         membership_period=?,vip_current=?,svip_current=?,vip_current_reason=?,svip_current_reason=?,
+                         auto_tags=?,auto_tag_reasons=?,auto_tags_updated_at=CURRENT_TIMESTAMP,
+                         updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                       membership_values + (cid,))
 
 
@@ -3578,7 +3758,11 @@ def api_customer_ledger():
             ensure_customer_ledger_opening(c, customer, 'recharge')
             entries = rows(c.execute('''SELECT * FROM customer_ledger WHERE customer_id=?
                                         ORDER BY id DESC LIMIT 300''', (customer_id,)).fetchall())
+            membership_history = rows(c.execute('''SELECT * FROM customer_membership_history
+                                                    WHERE customer_id=? ORDER BY id DESC LIMIT 100''',
+                                                (customer_id,)).fetchall())
             return jsonify(ok=True, customer=dict(customer), entries=entries,
+                           membership_history=membership_history,
                            settings={'enabled': ledger_enabled(c), 'point_rate_bps': point_rate_bps(c),
                                      'point_rate_percent': point_rate_bps(c) / 100})
 
@@ -3630,6 +3814,43 @@ def api_customer_ledger():
     return jsonify(ok=True, customer=updated, entry=entry)
 
 
+@app.route('/api/customer_membership', methods=['POST'])
+def api_customer_membership():
+    d = request.get_json(silent=True) or {}
+    customer_id = int(d.get('customer_id') or 0)
+    membership_type = str(d.get('membership_type') or '').upper()
+    action = str(d.get('action') or '').strip()
+    reason = str(d.get('reason') or '').strip()
+    if membership_type not in ('VIP','SVIP') or action not in ('cancel','restore'):
+        return jsonify(ok=False,error='会员操作不正确'),400
+    if not customer_id or not reason:
+        return jsonify(ok=False,error='请填写人工操作原因'),400
+    month = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m')
+    active_field = 'vip_active' if membership_type == 'VIP' else 'svip_active'
+    cancel_field = 'vip_cancelled_period' if membership_type == 'VIP' else 'svip_cancelled_period'
+    reason_field = 'vip_reason' if membership_type == 'VIP' else 'svip_reason'
+    with conn() as c:
+        customer = c.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone()
+        if not customer:
+            return jsonify(ok=False,error='客户不存在'),404
+        actor = str(current_session_info().get('username') or '')
+        if action == 'cancel':
+            c.execute(f"UPDATE customers SET {active_field}=0,{reason_field}='',{cancel_field}=?,customer_type_locked=0,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                      (month,customer_id))
+            action_name = '取消'
+        else:
+            c.execute(f"UPDATE customers SET {active_field}=1,{reason_field}=?,{cancel_field}='',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                      (f'人工恢复 {membership_type}：{reason}',customer_id))
+            action_name = '恢复'
+        history_period = f'{month}:{datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")}'
+        c.execute("""INSERT INTO customer_membership_history
+                     (customer_id,membership_type,action,period,reason,actor_name)
+                     VALUES(?,?,?,?,?,?)""", (customer_id,membership_type,action_name,history_period,reason,actor))
+        update_customer_type_by_history(c, customer_id)
+        updated = dict(c.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone())
+    return jsonify(ok=True,customer=updated)
+
+
 @app.route('/api/loyalty/settings', methods=['GET', 'POST'])
 def api_loyalty_settings():
     init_db()
@@ -3641,6 +3862,8 @@ def api_loyalty_settings():
         if current_role() != 'boss':
             return jsonify(ok=False, error='只有老板账号可以修改积分规则'), 403
         d = request.get_json(silent=True) or {}
+        old_bps = point_rate_bps(c)
+        old_enabled = ledger_enabled(c)
         if 'point_rate_percent' in d:
             try:
                 percent = float(d.get('point_rate_percent'))
@@ -3662,6 +3885,21 @@ def api_loyalty_settings():
                          updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP''',
                       (enabled, str(current_session_info().get('username') or '')))
         bps = point_rate_bps(c)
+        new_enabled = ledger_enabled(c)
+        if bps != old_bps or new_enabled != old_enabled:
+            session = current_session_info()
+            detail = json.dumps({
+                '旧积分比例': old_bps / 100, '新积分比例': bps / 100,
+                '旧账本状态': '开启' if old_enabled else '关闭',
+                '新账本状态': '开启' if new_enabled else '关闭',
+                '适用范围': '所有客户之后新增的订单', '历史数据': '不重算'
+            }, ensure_ascii=False, separators=(',', ':'))
+            forwarded = str(request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+            c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,
+                         log_level,action_name,ip,user_agent) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                      (str(session.get('username') or ''), str(session.get('role') or ''), 'POST',
+                       'operationAudit', detail, 200, 'INFO', '修改全局积分规则',
+                       forwarded or str(request.remote_addr or ''), str(request.headers.get('User-Agent') or '')[:500]))
         return jsonify(ok=True, enabled=ledger_enabled(c), point_rate_bps=bps,
                        point_rate_percent=bps / 100)
 
@@ -3718,12 +3956,20 @@ def girls():
     if not name:
         return jsonify(ok=False, error='女孩名不能为空'), 400
     init_db()
+    girl_type = str(d.get('girl_type') or '普通').strip()
     with conn() as c:
+        raw_profile_tags = normalize_tag_text(d.get('tags',''))
         if d.get('id'):
-            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,enrollment=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(name,d.get('girl_alias',''),d.get('girl_type'),d.get('girl_status'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2',''),d.get('id')))
+            old_profile = c.execute('SELECT girl_type FROM girls WHERE id=?',(int(d['id']),)).fetchone()
+            old_type = str(old_profile['girl_type'] or '') if old_profile else ''
+            if old_type and old_type != girl_type:
+                raw_profile_tags = ' '.join(tag for tag in raw_profile_tags.split() if tag != old_type)
+        profile_tags = merge_normal_tags(raw_profile_tags, girl_type)
+        if d.get('id'):
+            c.execute('''UPDATE girls SET name=?,girl_alias=?,girl_type=?,girl_status=?,enrollment=?,take_home_per_hour=?,list_price=?,contact=?,tags=?,remark=?,remark2=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',(name,d.get('girl_alias',''),girl_type,d.get('girl_status'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),profile_tags,d.get('remark',''),d.get('remark2',''),d.get('id')))
             recalc_girl(c,int(d['id']))
         else:
-            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,enrollment,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(name,d.get('girl_alias',''),d.get('girl_type','普通'),d.get('girl_status','在职'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),d.get('tags',''),d.get('remark',''),d.get('remark2','')))
+            c.execute('''INSERT OR IGNORE INTO girls(name,girl_alias,girl_type,girl_status,enrollment,take_home_per_hour,list_price,contact,tags,remark,remark2) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(name,d.get('girl_alias',''),girl_type,d.get('girl_status','在职'),d.get('enrollment',''),int(d.get('take_home_per_hour') or 10000),int(d.get('list_price') or 15000),d.get('contact',''),profile_tags,d.get('remark',''),d.get('remark2','')))
             row=c.execute('SELECT id FROM girls WHERE name=?',(name,)).fetchone()
             if row: recalc_girl(c,row['id'])
     return jsonify(ok=True)
@@ -5364,6 +5610,14 @@ def normalize_tag_text(text):
 def normalize_gold_tag_text(text):
     return " ".join(re.sub(r"[;；]+", " ", str(text or "")).split())
 
+def merge_normal_tags(*values):
+    merged = []
+    for value in values:
+        for tag in normalize_tag_text(value).split():
+            if tag and tag not in merged:
+                merged.append(tag)
+    return ' '.join(merged)
+
 def auto_sync_late_attendance_to_tel(c, shift_date, girl):
     """22:00 后已全面同步的当天，新出现的出勤女孩只补入 TEL 一次。"""
     now = _tokyo_now()
@@ -5384,17 +5638,18 @@ def auto_sync_late_attendance_to_tel(c, shift_date, girl):
 
 def pure_shift_rows_for_date(c, date_str):
     pure = []
+    girl_types = {str(r['name']):str(r['girl_type'] or '') for r in c.execute('SELECT name,girl_type FROM girls').fetchall()}
     for r in c.execute("SELECT * FROM pure_shifts WHERE shift_date=? ORDER BY sort_order ASC,id ASC", (date_str,)).fetchall():
         pure.append({
             'id': f"pure_{r['id']}", 'raw_id': r['id'], 'date': r['shift_date'], 'girl': r['girl_name'],
-            'start': r['start_time'], 'end': r['end_time'], 'tags': normalize_tag_text(r['tags']),
+            'start': r['start_time'], 'end': r['end_time'], 'tags': merge_normal_tags(r['tags'],girl_types.get(str(r['girl_name']))),
             'goldTags': normalize_gold_tag_text(r['gold_tags']), 'source': 'manual', 'sort_order': r['sort_order'] or 0
         })
     schedules = []
     for r in c.execute("SELECT * FROM girl_schedules WHERE schedule_date=? AND COALESCE(status,'出勤')='出勤' ORDER BY id ASC", (date_str,)).fetchall():
         mem = c.execute("SELECT tags,gold_tags FROM girl_tag_memory WHERE girl_name=?", (r['girl_name'],)).fetchone()
-        g = c.execute("SELECT tags FROM girls WHERE name=?", (r['girl_name'],)).fetchone()
-        tag_text = normalize_tag_text((mem['tags'] if mem else '') or (g['tags'] if g else ''))
+        g = c.execute("SELECT tags,girl_type FROM girls WHERE name=?", (r['girl_name'],)).fetchone()
+        tag_text = merge_normal_tags((mem['tags'] if mem else '') or (g['tags'] if g else ''), g['girl_type'] if g else '')
         gold_text = normalize_gold_tag_text(mem['gold_tags'] if mem else '')
         if '房间安排自动生成' in str(r['note'] or '') and '房间' not in gold_text.split():
             gold_text = normalize_gold_tag_text((gold_text + ' 房间').strip())
@@ -5456,7 +5711,9 @@ def api_pure_shifts_get():
         copied = copy_yesterday_pure_if_empty(c, date_str) if autocopy else 0
         shifts = pure_shift_rows_for_date(c, date_str)
         memory_rows = c.execute('SELECT * FROM girl_tag_memory').fetchall()
-        tags = {r['girl_name']: normalize_tag_text(r['tags']) for r in memory_rows}
+        memory = {str(r['girl_name']):str(r['tags'] or '') for r in memory_rows}
+        tags = {str(g['name']):merge_normal_tags(memory.get(str(g['name']),''),g['tags'],g['girl_type'])
+                for g in c.execute('SELECT name,tags,girl_type FROM girls').fetchall()}
         gold_tags = {r['girl_name']: normalize_gold_tag_text(r['gold_tags']) for r in memory_rows}
         return jsonify(ok=True, shifts=shifts, girl_tags=tags, girl_gold_tags=gold_tags, copied=copied)
 
@@ -5474,6 +5731,8 @@ def api_pure_shifts_save():
     gold_tags = normalize_gold_tag_text(d.get('goldTags') if not isinstance(d.get('goldTags'), list) else ' '.join(d.get('goldTags')))
     raw_id = str(d.get('id') or '')
     with conn() as c:
+        girl_profile = c.execute('SELECT girl_type FROM girls WHERE name=?',(girl,)).fetchone()
+        tags = merge_normal_tags(tags,girl_profile['girl_type'] if girl_profile else '')
         c.execute("""INSERT INTO girl_tag_memory(girl_name,tags,gold_tags,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
                      ON CONFLICT(girl_name) DO UPDATE SET tags=excluded.tags,gold_tags=excluded.gold_tags,
                      updated_at=CURRENT_TIMESTAMP""", (girl, tags, gold_tags))
