@@ -65,7 +65,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
                           "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
-                          "telegram_ai_sessions"):
+                          "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
+                          "telegram_ai_usage", "telegram_ai_budget_alerts"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -193,6 +194,71 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn("称呼对方为“姐姐”", girl_body["instructions"])
         self.assertIn("本群绑定女孩", girl_body["input"][-1]["content"])
         self.assertNotIn("客户身份", girl_body["input"][-1]["content"])
+
+    def test_alice_ai_feedback_teaching_usage_and_customer_continuation(self):
+        internal = {"id": -90126, "type": "supergroup", "title": "Alice内部群"}
+        manager = {"id": 9126, "first_name": "主人"}
+        customer = {"id": 9127, "first_name": "客人"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                  "text": "/绑定审核群"}})
+        captured = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_ai_urlopen(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                captured.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output_text": "先看今日空档。",
+                                             "usage": {"input_tokens": 100, "output_tokens": 50,
+                                                       "total_tokens": 150}})
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai_urlopen
+        try:
+            self.webhook({"message": {"message_id": 2, "chat": internal, "from": manager,
+                                      "text": "艾莉兔 今天怎么安排？"}})
+            with self.app_module.conn() as c:
+                interaction = dict(c.execute("SELECT * FROM telegram_ai_interactions ORDER BY id DESC LIMIT 1").fetchone())
+            self.webhook({"callback_query": {"id": "ai-ok", "from": manager,
+                                              "data": f"ai_feedback:approve:{interaction['id']}",
+                                              "message": {"message_id": interaction["response_message_id"],
+                                                          "chat": internal, "text": "艾莉兔回答"}}})
+            self.webhook({"message": {"message_id": 3, "chat": internal, "from": manager,
+                                      "text": "艾莉兔 今天怎么安排？"}})
+
+            private_chat = {"id": customer["id"], "type": "private"}
+            self.webhook({"callback_query": {"id": "book-ai", "from": customer, "data": "book",
+                                              "message": {"chat": private_chat}}})
+            self.webhook({"message": {"message_id": 4, "chat": private_chat, "from": customer,
+                                      "text": "艾莉兔 怎么预约？"}})
+            self.webhook({"message": {"message_id": 5, "chat": private_chat, "from": customer,
+                                      "text": "那明天呢？"}})
+            self.webhook({"message": {"message_id": 6, "chat": private_chat, "from": customer,
+                                      "text": "继续预约"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        self.assertEqual(len(captured), 4)
+        self.assertIn("主人确认的教学", captured[1]["input"][-1]["content"])
+        with self.app_module.conn() as c:
+            teaching = c.execute("SELECT * FROM telegram_ai_teachings WHERE source_interaction_id=?",
+                                 (interaction["id"],)).fetchone()
+            usage = c.execute("SELECT SUM(input_tokens),SUM(output_tokens),SUM(estimated_cost_usd) FROM telegram_ai_usage").fetchone()
+            active = c.execute("SELECT active FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
+                               (str(customer["id"]), str(customer["id"]))).fetchone()[0]
+        self.assertIsNotNone(teaching)
+        self.assertEqual((usage[0], usage[1]), (400, 200))
+        self.assertAlmostEqual(float(usage[2]), 0.0005, places=8)
+        self.assertEqual(active, 0)
+
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"], "X-Alice-User": "Star"}
+        listing = self.client.get("/api/telegram/ai-learning", headers=headers)
+        self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
+        self.assertTrue(listing.json["teachings"])
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {

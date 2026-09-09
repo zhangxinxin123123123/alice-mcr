@@ -410,7 +410,8 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="接龙导入 微信 LINE 日期 女孩 客户编号 新客户"><summary>📥 接龙导入</summary><div class="manual-body"><ol><li>首行写日期和女孩，例如 <code>0908娜娜子</code>。</li><li>预约行写 <code>序号.时间/价格/客户</code>；首次预约写客户名，以后写四位客户编号。</li><li>纯数字客户名使用双斜线，例如 <code>8-9/10000//123</code>。</li><li>导入前会与旧接龙核对：不变的不重复新增，新增的写入，修改的同步修改。</li></ol></div></details>
     <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li></ol></div></details>
     <details class="manual-block" data-search="TEL 关键词 Alice AI 助手 经营建议 导入 最新接龙 自动导入 出勤 积分查询 编号查询 绑定"><summary>⌨️ TEL 群关键词</summary><div class="manual-body">
-     <div class="manual-command"><code>艾莉兔 + 问题</code><span>内部群可询问实时经营数据并称呼老板为“主人”；客户私聊仅回答 TEL 预约信息；女孩专属群仅回答本人的出勤、接龙与结算。三个场景严格隔离，不会互相透露数据。发送 <code>艾莉兔 清空</code> 可清除自己的最近对话，旧叫法 Alice、爱丽丝也兼容。</span></div>
+     <div class="manual-command"><code>艾莉兔 + 问题</code><span>内部群可询问实时经营数据并称呼老板为“主人”；客户私聊可直接说问题，或只叫一次艾莉兔后连续对话，发送 <code>继续预约</code> 可退出 AI；女孩专属群仅回答本人的出勤、接龙与结算。三个场景严格隔离。发送 <code>艾莉兔 清空</code> 可清除自己的最近对话。</span></div>
+     <div class="manual-command"><code>教学：正确回答</code><span>内部群回复艾莉兔的消息发送，会存为相似问题的经营回答范例；不回复直接发送时会存为长期规则。也可点击回答下方的“采纳/不准确”。</span></div>
      <div class="manual-command"><code>AI助手开启 / 关闭 / 状态</code><span>店长、客服或群管理员控制内部 AI 助手；状态会同时显示 OpenAI API 是否配置。</span></div>
      <div class="manual-command"><code>导入</code><span>回复一张接龙消息发送；也可把“导入”写在当天四位日期前。与旧数据核对后仅新增或修改。</span></div>
      <div class="manual-command"><code>最新接龙</code><span>在群里重新发送该女孩当天最新接龙。</span></div>
@@ -466,10 +467,29 @@ body:not(.role-boss) .boss-only{display:none!important}
     <input id="tgAiOwnerTitle" placeholder="内部群称呼，例如 主人">
     <select id="tgAiCustomerEnabled"><option value="1">客户私聊开启</option><option value="0">客户私聊关闭</option></select>
     <select id="tgAiGirlEnabled"><option value="1">女孩专属群开启</option><option value="0">女孩专属群关闭</option></select>
+    <select id="tgAiModel"><option value="gpt-5-mini">经济：GPT-5 Mini</option><option value="gpt-5.6-luna">经济新版：GPT-5.6 Luna</option><option value="gpt-5.6-terra">智能：GPT-5.6 Terra</option><option value="gpt-5.6-sol">高智能：GPT-5.6 Sol</option></select>
+    <label class="small">最大回答 Token<br><input id="tgAiMaxTokens" type="number" min="100" max="3000" step="50"></label>
+    <select id="tgAiLearningEnabled"><option value="1">启用主人教学记忆</option><option value="0">暂停教学记忆</option></select>
+    <label class="small">每次最多参考教学数<br><input id="tgAiMemoryLimit" type="number" min="0" max="20"></label>
+    <label class="small">客户每日 AI 次数<br><input id="tgAiCustomerLimit" type="number" min="1" max="1000"></label>
+    <label class="small">女孩每日 AI 次数<br><input id="tgAiGirlLimit" type="number" min="1" max="1000"></label>
+    <label class="small">每日费用预警（USD）<br><input id="tgAiDailyBudget" type="number" min="0" step="0.1"></label>
+    <label class="small">每月费用预警（USD）<br><input id="tgAiMonthlyBudget" type="number" min="0" step="1"></label>
+    <select id="tgAiBudgetAction"><option value="warn">达到后提醒，继续回答</option><option value="block">达到后提醒并暂停回答</option></select>
+    <input id="tgAiTeacherIds" placeholder="允许教学的 Telegram ID，逗号分隔；留空=群管理员">
    </div>
    <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
    <div id="tgAiStatus" class="note"></div>
+   <div id="tgAiUsage" class="note"></div>
+   <p class="note warn">⚠️ 更换更强模型会增加 OpenAI API 费用；系统只做预警或按设定暂停，不会自动充值、升级模型或 Render 套餐。</p>
    <button class="primary" onclick="saveTelegramSettings('艾莉兔 AI 助手设置已保存')">保存 AI 助手设置</button>
+  </div>
+  <div class="card"><div class="card-title-row"><h2>艾莉兔经营教学</h2><button class="soft" onclick="loadAiLearning()">刷新</button></div>
+   <p class="note">在内部群回复艾莉兔发送 <code>教学：正确回答</code>，可保存为相似问题的回答范例；不回复消息直接发送时，会保存为长期经营规则。</p>
+   <div class="form"><select id="aiTeachingMode"><option value="internal">仅内部经营</option><option value="customer">仅客户预约</option><option value="girl">仅女孩专属群</option><option value="all">通用语气规则</option></select><select id="aiTeachingCategory"><option value="rule">长期规则</option><option value="example">问答范例</option></select><input id="aiTeachingQuestion" placeholder="适用的问题（范例可填）"></div>
+   <textarea id="aiTeachingAnswer" rows="3" placeholder="正确回答、经营规则或喜欢的语气"></textarea>
+   <button class="primary" onclick="addAiTeaching()">保存教学</button>
+   <div id="aiTeachingSummary" class="note"></div><div id="aiTeachingRecords"></div>
   </div>
   <div class="card"><div class="card-title-row"><h2>管理日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
    <p class="note">记录谁在几点几分点击了什么按钮、做了什么筛选查询，以及向后台新增、修改或删除了哪些数据。密码、Token、图片内容及超长正文会自动隐藏。</p>
@@ -710,7 +730,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>Promise.all([loadOperationLogs(),loadTelegramSettings()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>Promise.all([loadOperationLogs(),loadTelegramSettings(),loadAiLearning()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  setLoginActive(false);
@@ -2703,6 +2723,7 @@ let telegramConfig=null;
 let telegramDailyGirls=[];
 let telegramFlowDraft={};
 let telegramFlowStep='welcome';
+let aiTeachingRows=[];
 const telegramFlowDefs={
  welcome:{title:'欢迎页',text:'welcome_text',buttons:['button_start','button_website','button_hotel','button_support']},
  date:{title:'选择日期',text:'text_choose_date',buttons:['button_today','button_tomorrow','button_back','button_cancel']},
@@ -2730,14 +2751,50 @@ async function loadTelegramSettings(){
   tgAiOwnerTitle.value=s.ai_owner_title||'主人';
   tgAiCustomerEnabled.value=String(s.ai_customer_enabled||'1');
   tgAiGirlEnabled.value=String(s.ai_girl_group_enabled||'1');
+  tgAiModel.value=s.ai_model||telegramConfig.ai_model||'gpt-5-mini';
+  tgAiMaxTokens.value=s.ai_max_output_tokens||700;
+  tgAiLearningEnabled.value=String(s.ai_learning_enabled||'1');
+  tgAiMemoryLimit.value=s.ai_memory_limit||6;
+  tgAiCustomerLimit.value=s.ai_customer_daily_limit||20;
+  tgAiGirlLimit.value=s.ai_girl_daily_limit||40;
+  tgAiDailyBudget.value=s.ai_daily_budget_usd||2;
+  tgAiMonthlyBudget.value=s.ai_monthly_budget_usd||20;
+  tgAiBudgetAction.value=s.ai_budget_action||'warn';
+  tgAiTeacherIds.value=s.ai_teacher_user_ids||'';
   tgAiPersona.value=s.ai_assistant_persona||'';
-  tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜内部群提问：<code>${escHtml(s.ai_assistant_name||'艾莉兔')} 今天经营怎么样？</code>`;
+  const rates=(telegramConfig.ai_model_pricing||{})[telegramConfig.ai_model]||{};
+  tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜单价备忘：输入 $${Number(rates.input||0).toFixed(2)} / 输出 $${Number(rates.output||0).toFixed(2)}（每百万 Token）｜内部群提问：<code>${escHtml(s.ai_assistant_name||'艾莉兔')} 今天经营怎么样？</code>`;
+  renderAiUsage(telegramConfig.ai_usage||{});
   telegramFlowDraft={...s};
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
   renderTelegramBindings();
   selectTelegramFlowStep(telegramFlowStep);
   if(!tgDailyDate.value)tgDailyDate.value=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
   await loadTelegramDailyGirls();
+}
+function renderAiUsage(usage={}){
+ const d=usage.today||{},m=usage.this_month||{};
+ tgAiUsage.innerHTML=`今日：<b>${Number(d.calls||0)}</b> 次，${Number(d.input_tokens||0).toLocaleString()} 输入 / ${Number(d.output_tokens||0).toLocaleString()} 输出 Token，估算 <b>$${Number(d.cost||0).toFixed(4)}</b><br>本月：<b>${Number(m.calls||0)}</b> 次，估算 <b>$${Number(m.cost||0).toFixed(4)}</b>。最终费用以 OpenAI Usage Dashboard 为准。`;
+}
+async function loadAiLearning(){
+ if(!auth||auth.role!=='boss')return;
+ const result=await api('/api/telegram/ai-learning',{});
+ aiTeachingRows=result.teachings||[];renderAiUsage(result.usage||{});renderAiTeachingRows();
+}
+function renderAiTeachingRows(){
+ const active=aiTeachingRows.filter(x=>x.status==='active').length;
+ aiTeachingSummary.textContent=`共 ${aiTeachingRows.length} 条，${active} 条正在生效。删除为可审计的软删除，不会破坏历史记录。`;
+ if(!aiTeachingRows.length){aiTeachingRecords.innerHTML='<p class="note">还没有教学记录。</p>';return;}
+ aiTeachingRecords.innerHTML='<div class="table"><table><thead><tr><th>ID</th><th>范围</th><th>类型</th><th>问题/场景</th><th>主人教学</th><th>教师</th><th>状态</th><th>操作</th></tr></thead><tbody>'+aiTeachingRows.map(r=>`<tr><td>${Number(r.id)}</td><td>${escHtml(r.mode||'internal')}</td><td>${r.category==='rule'?'规则':'范例'}</td><td>${escHtml(r.question||'所有相关问题')}</td><td style="min-width:260px;white-space:pre-wrap">${escHtml(r.answer||'')}</td><td>${escHtml(r.created_by_name||'')}</td><td>${r.status==='active'?'✅ 生效':r.status==='disabled'?'⏸ 停用':'🗑 已删除'}</td><td>${r.status==='active'?`<button class="soft" onclick="setAiTeaching(${Number(r.id)},'disable')">停用</button>`:`<button class="soft" onclick="setAiTeaching(${Number(r.id)},'enable')">恢复</button>`} <button class="danger" onclick="setAiTeaching(${Number(r.id)},'delete')">删除</button></td></tr>`).join('')+'</tbody></table></div>';
+}
+async function addAiTeaching(){
+ const answer=aiTeachingAnswer.value.trim();if(!answer){alert('请填写教学内容');return;}
+ await api('/api/telegram/ai-learning',{action:'add',mode:aiTeachingMode.value,category:aiTeachingCategory.value,question:aiTeachingQuestion.value.trim(),answer});
+ aiTeachingQuestion.value='';aiTeachingAnswer.value='';await loadAiLearning();alert('教学已保存并生效');
+}
+async function setAiTeaching(id,action){
+ if(action==='delete'&&!confirm('确认删除这条教学？历史审计仍会保留。'))return;
+ await api('/api/telegram/ai-learning',{action,id});await loadAiLearning();
 }
 function selectTelegramFlowStep(step){
   telegramFlowStep=step;document.querySelectorAll('[data-flow-step]').forEach(x=>x.classList.toggle('on',x.dataset.flowStep===step));
@@ -2804,6 +2861,11 @@ function editTelegramBinding(r){
 }
 function editTelegramBindingAt(index){editTelegramBinding(((telegramConfig&&telegramConfig.bindings)||[])[index]||{});}
 async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
+  const previousModel=(telegramConfig&&telegramConfig.ai_model)||'gpt-5-mini';
+  const nextModel=tgAiModel.value||previousModel;
+  const pricing=(telegramConfig&&telegramConfig.ai_model_pricing)||{};
+  const oldRate=pricing[previousModel]||{},newRate=pricing[nextModel]||{};
+  if(nextModel!==previousModel&&(Number(newRate.input||0)>Number(oldRate.input||0)||Number(newRate.output||0)>Number(oldRate.output||0))&&!confirm(`⚠️ 更换为 ${nextModel} 会提高 OpenAI API 单价。\n输入：$${Number(oldRate.input||0)}/M → $${Number(newRate.input||0)}/M\n输出：$${Number(oldRate.output||0)}/M → $${Number(newRate.output||0)}/M\n\n确认保存吗？`))return;
   telegramConfig=await api('/api/telegram/settings',{
     ...telegramFlowDraft,bot_display_name:tgBotName.value,website_url:tgWebsite.value,
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
@@ -2814,6 +2876,16 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_owner_title:tgAiOwnerTitle.value.trim()||'主人',
     ai_customer_enabled:tgAiCustomerEnabled.value==='1'?'1':'0',
     ai_girl_group_enabled:tgAiGirlEnabled.value==='1'?'1':'0',
+    ai_model:nextModel,
+    ai_max_output_tokens:Number(tgAiMaxTokens.value||700),
+    ai_learning_enabled:tgAiLearningEnabled.value==='1'?'1':'0',
+    ai_memory_limit:Number(tgAiMemoryLimit.value||0),
+    ai_customer_daily_limit:Number(tgAiCustomerLimit.value||20),
+    ai_girl_daily_limit:Number(tgAiGirlLimit.value||40),
+    ai_daily_budget_usd:Number(tgAiDailyBudget.value||0),
+    ai_monthly_budget_usd:Number(tgAiMonthlyBudget.value||0),
+    ai_budget_action:tgAiBudgetAction.value,
+    ai_teacher_user_ids:tgAiTeacherIds.value.trim(),
     ai_assistant_persona:tgAiPersona.value.trim(),
     booking_enabled:tgEnabled.value==='1'
   });
