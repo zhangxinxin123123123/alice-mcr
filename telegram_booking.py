@@ -54,7 +54,7 @@ DEFAULT_SETTINGS = {
     "auto_chain_import_enabled": "1",
     "auto_chain_import_interval_minutes": "30",
     "ai_assistant_enabled": "1",
-    "ai_assistant_name": "爱丽丝",
+    "ai_assistant_name": "艾莉兔",
     "ai_assistant_persona": "温柔、聪明、可爱，像可靠的少女店长助理；说话自然简洁，适量使用可爱语气和 emoji。",
 }
 
@@ -180,6 +180,8 @@ def register_telegram_booking(
             c.execute("INSERT OR IGNORE INTO telegram_chain_sync_state(id) VALUES(1)")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
+            c.execute("""UPDATE telegram_settings SET setting_value='艾莉兔',updated_at=CURRENT_TIMESTAMP
+                         WHERE setting_key='ai_assistant_name' AND setting_value='爱丽丝'""")
             cols = [r[1] for r in c.execute("PRAGMA table_info(customer_reservations)").fetchall()]
             additions = {
                 "telegram_user_id": "TEXT DEFAULT ''",
@@ -380,7 +382,7 @@ def register_telegram_booking(
         if not api_key:
             raise RuntimeError("Render 尚未配置 OPENAI_API_KEY")
         snapshot = business_snapshot_for_ai(question)
-        assistant_name = str(cfg.get("ai_assistant_name") or "爱丽丝").strip()[:30]
+        assistant_name = str(cfg.get("ai_assistant_name") or "艾莉兔").strip()[:30]
         persona = str(cfg.get("ai_assistant_persona") or DEFAULT_SETTINGS["ai_assistant_persona"]).strip()[:1000]
         instructions = (
             f"你是爱丽丝学院的内部 AI 经营助手，名字是{assistant_name}。{persona}"
@@ -441,9 +443,12 @@ def register_telegram_booking(
             else:
                 enabled = str(cfg.get("ai_assistant_enabled") or "1")
             configured = bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
-            send_message(chat.get("id"), f"🎀 AI 助手：<b>{'已开启' if enabled == '1' else '已关闭'}</b>｜API：<b>{'已配置' if configured else '未配置'}</b>\n提问格式：<code>Alice 今天经营怎么样？</code>")
+            assistant_name = escape(str(cfg.get("ai_assistant_name") or "艾莉兔"))
+            send_message(chat.get("id"), f"🎀 AI 助手：<b>{'已开启' if enabled == '1' else '已关闭'}</b>｜API：<b>{'已配置' if configured else '未配置'}</b>\n提问格式：<code>{assistant_name} 今天经营怎么样？</code>")
             return True
-        match = re.match(r"^(?:/?alice(?:@\w+)?|爱丽丝)\s*[+＋:：,，]?\s*(.*)$", text, re.I)
+        configured_name = str(cfg.get("ai_assistant_name") or "艾莉兔").strip()
+        names = [r"/?alice(?:@\w+)?", "爱丽丝", re.escape(configured_name)]
+        match = re.match(r"^(?:" + "|".join(dict.fromkeys(names)) + r")\s*[+＋:：,，]?\s*(.*)$", text, re.I)
         if not match:
             return False
         question = match.group(1).strip()
@@ -457,7 +462,7 @@ def register_telegram_booking(
             send_message(chat.get("id"), "✨ 好的，刚才的对话记忆已经清空啦～")
             return True
         if not question:
-            send_message(chat.get("id"), "🎀 我是 Alice 内部 AI 助手～\n请这样问我：<code>Alice 今天经营怎么样？</code>\n也可以问客户编号、近期业绩、出勤安排或经营建议。")
+            send_message(chat.get("id"), f"🎀 我是 {escape(configured_name)}，Alice 内部 AI 助手～\n请这样问我：<code>{escape(configured_name)} 今天经营怎么样？</code>\n也可以问客户编号、近期业绩、出勤安排或经营建议。")
             return True
         if len(question) > 1200:
             send_message(chat.get("id"), "问题有点太长啦，请缩短到 1200 字以内再问我～")
@@ -480,7 +485,7 @@ def register_telegram_booking(
                                    200, "INFO", "AI经营查询"))
                 except Exception:
                     pass
-                rendered = f"🎀 <b>{escape(str(cfg.get('ai_assistant_name') or '爱丽丝'))}</b>\n\n{escape(answer)}"
+                rendered = f"🎀 <b>{escape(str(cfg.get('ai_assistant_name') or '艾莉兔'))}</b>\n\n{escape(answer)}"
             except Exception as exc:
                 try:
                     with conn() as c:

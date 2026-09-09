@@ -138,7 +138,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.telegram_module.urlopen = fake_ai_urlopen
         try:
             self.webhook({"message": {"message_id": 2, "chat": internal, "from": manager,
-                                       "text": "Alice 今天经营怎么样？"}})
+                                       "text": "艾莉兔 今天经营怎么样？"}})
         finally:
             self.telegram_module.urlopen = old_urlopen
             os.environ.pop("OPENAI_API_KEY", None)
