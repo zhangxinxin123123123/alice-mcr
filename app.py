@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v114a_fast_points_audit"
+APP_VERSION = "v114b_review_and_praise_release"
 
 @app.after_request
 def compress_large_json(response):
@@ -1528,8 +1528,12 @@ def publish_girl_praise_to_wordpress(praise_id):
     mime = str(praise.get('image_mime') or 'image/png')
     extension = {'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif'}.get(mime, '.png')
     upload_name = f"alice-praise-{post['id']}-{praise['id']}{extension}"
-    attachment_id = _wordpress_rest_upload_image(
-        opener, edit_html, edit_url, '', image_bytes, filename=upload_name, content_type=mime)
+    try:
+        attachment_id = _wordpress_rest_upload_image(
+            opener, edit_html, edit_url, '', image_bytes, filename=upload_name, content_type=mime)
+    except Exception:
+        # 部分 WordPress 主机关闭 REST 媒体写入，下面自动改走后台原生上传接口。
+        attachment_id = 0
     if not attachment_id:
         media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
         nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
@@ -1702,6 +1706,7 @@ def review_marketing_drafts(day):
         ]
         long_text = (f'{name}今天出勤。根据已采集的公开评论素材与后台资料，比较突出的印象是{f1}和{f2}。'
                      f'她更适合希望过程自然、沟通轻松，也在意细节感受的客人。第一次见面不用担心尴尬，可以先把喜欢的相处方式、希望的节奏以及在意的服务细节告诉客服，我们会协助确认。'
+                     f'如果你更看重聊天气氛、相处距离或某一种特别体验，也建议预约前主动说明；这样既方便女孩提前准备，也能减少彼此预期不同。我们不会只凭一句标签替你做决定，客服可以结合当天状态、时间长度和你的偏好给出更合适的建议。'
                      f'当天空档会随预约实时变化，请以爱丽丝系统显示为准；如果暂时没有合适时间，也可以联系人工客服询问调整。此段文字是根据公开素材整理的宣传草稿，并非某一位客人的真实原话，上架前请由客服再次核对女孩资料与实际服务内容。')
         result.append({'girl_name':name,'features':features,'source_count':len(sources),'short_drafts':shorts,
                        'long_draft':long_text,'label':'宣传文案草稿（非真实客评）'})
