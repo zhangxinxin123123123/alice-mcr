@@ -1188,6 +1188,36 @@ class TelegramBookingFlowTest(unittest.TestCase):
         gallery_html = '<li class="acf-photo-gallery-mediabox acf-photo-gallery-mediabox-456"></li>'
         self.assertEqual(self.app_module._wordpress_photo_gallery_attachment_ids(gallery_html), [456])
 
+    def test_neko_service_field_and_attendance_page_use_alias_only(self):
+        html = '''<form id="post"><div class="acf-field" data-key="field_service">
+        <label>服务(详细说明,可以写多行)</label>
+        <textarea name="acf[field_service]">旧文案</textarea></div></form>'''
+        self.assertEqual(self.app_module._wordpress_service_field_name(html), 'acf[field_service]')
+        page = (self.app_module.APP_DIR / 'static' / 'neko_dona_shift.html').read_text(encoding='utf-8')
+        self.assertIn('const PAGE_SIZE=6', page)
+        self.assertIn('attendance_names:rows.map(r=>r.alias)', page)
+        self.assertIn('女孩表中已经填写“马甲”', page)
+
+    def test_neko_attendance_sync_reports_missing_render_credentials(self):
+        login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
+        headers = {'X-Alice-Session': login.json['session_token']}
+        keys = ('ALICE_NEKO_ADMIN_USER','ALICE_NEKO_ADMIN_PASSWORD','NEKO_ADMIN_USER',
+                'NEKO_ADMIN_PASS','NEKO_ADMIN_PASSWORD')
+        old = {key: os.environ.pop(key, None) for key in keys}
+        try:
+            response = self.client.post('/api/neko/attendance-sync', headers=headers, json={
+                'date': self.day,
+                'image_data': 'data:image/png;base64,' + base64.b64encode(b'fake-png').decode(),
+                'service_text': '喵喵出勤', 'attendance_names':['喵马甲']
+            })
+        finally:
+            for key, value in old.items():
+                if value is not None:
+                    os.environ[key] = value
+        self.assertEqual(response.status_code, 502, response.get_data(as_text=True))
+        self.assertFalse(response.json['configured'])
+        self.assertIn('ALICE_NEKO_ADMIN_USER', response.json['warning'])
+
     def test_wordpress_visibility_privates_every_non_attending_model(self):
         original_posts = self.app_module._wordpress_model_posts
         original_update = self.app_module._wordpress_inline_model_status

@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v125_closing_keyword_split"
+APP_VERSION = "v126_neko_stationery_sync"
 
 @app.after_request
 def compress_large_json(response):
@@ -403,6 +403,7 @@ def required_module_for_api(path):
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
         ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
         ('/api/pure_shifts', 'pureShift'), ('/api/schedules', 'pureShift'),
+        ('/api/neko/', 'pureShift'),
         ('/api/room', 'rooms'), ('/api/hotel_room', 'rooms'), ('/api/delete_room', 'rooms'),
         ('/api/enums', 'enums'), ('/api/quick_links', 'quickLinks'),
         ('/api/review_crawler', 'reviewCrawler'),
@@ -1308,6 +1309,30 @@ def _wordpress_photo_gallery_field_name(edit_html, gallery_key):
 def _wordpress_photo_gallery_attachment_ids(edit_html):
     return [int(value) for value in re.findall(r'acf-photo-gallery-mediabox-(\d+)', str(edit_html or ''), re.I)]
 
+def _wordpress_service_field_name(edit_html):
+    """Find the ACF/plain textarea used for the public service description."""
+    starts = list(re.finditer(r'<div\b[^>]*class=["\'][^"\']*acf-field[^"\']*["\'][^>]*>',
+                              str(edit_html or ''), re.S | re.I))
+    for index, match in enumerate(starts):
+        end = starts[index + 1].start() if index + 1 < len(starts) else min(len(edit_html), match.end() + 16000)
+        block = edit_html[match.start():end]
+        label = strip_html_text(html_unescape(block[:2500]))
+        if '服务' not in label and '詳細' not in label and '详细' not in label:
+            continue
+        field = re.search(r'<textarea\b[^>]*\bname=["\']([^"\']+)["\']', block, re.S | re.I)
+        if not field:
+            field = re.search(r'<input\b[^>]*\bname=["\'](acf\[[^"\']+\]|content)["\']', block, re.S | re.I)
+        if field:
+            return html_unescape(field.group(1))
+        attrs = parse_input_attrs(match.group(0))
+        key = attrs.get('data-key') or ''
+        if key.startswith('field_'):
+            return f'acf[{key}]'
+    # Some themes use the ordinary WordPress body editor rather than ACF.
+    if re.search(r'<textarea\b[^>]*\bname=["\']content["\']', str(edit_html or ''), re.I):
+        return 'content'
+    return ''
+
 def _wordpress_rest_nonce(edit_html):
     patterns = [
         r'wpApiSettings\s*=\s*\{.*?["\']nonce["\']\s*:\s*["\']([^"\']+)',
@@ -1320,13 +1345,13 @@ def _wordpress_rest_nonce(edit_html):
     return ''
 
 def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes, page_index=0, page_count=1,
-                                 filename='', content_type='image/png'):
+                                 filename='', content_type='image/png', base_url=ALICE_BASE_URL):
     nonce = _wordpress_rest_nonce(edit_html)
     if not nonce:
         return 0
     suffix = f'-{page_index + 1}' if page_count > 1 else ''
     filename = filename or f'alice-attendance-{day}{suffix}.png'
-    req = Request(ALICE_BASE_URL + '/wp-json/wp/v2/media', data=image_bytes, method='POST', headers={
+    req = Request(base_url.rstrip('/') + '/wp-json/wp/v2/media', data=image_bytes, method='POST', headers={
         'Content-Type': content_type, 'Content-Disposition': f'attachment; filename="{filename}"',
         'X-WP-Nonce': nonce, 'Referer': edit_url, 'Accept': 'application/json'})
     with opener.open(req, timeout=90) as response:
@@ -1366,8 +1391,9 @@ def _wordpress_model_title_is_protected(value):
     }
     return title in protected
 
-def _wordpress_model_posts(opener):
-    base = ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'
+def _wordpress_model_posts(opener, base_url=ALICE_BASE_URL):
+    base_url = base_url.rstrip('/')
+    base = base_url + '/wp-admin/edit.php?post_type=model'
     posts, seen, inline_nonce = [], set(), ''
     page = 1
     max_page = 1
@@ -1415,7 +1441,8 @@ def _wordpress_model_posts(opener):
         raise ValueError('找不到官网女孩列表的快速编辑授权码')
     return posts, inline_nonce
 
-def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce, category_term_id=None):
+def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce, category_term_id=None,
+                                   base_url=ALICE_BASE_URL):
     data = {
         'action': 'inline-save', '_inline_edit': inline_nonce, 'post_type': 'model',
         'post_ID': str(post['id']), 'post_title': post['title'],
@@ -1426,9 +1453,10 @@ def _wordpress_inline_model_status(opener, post, desired_status, inline_nonce, c
         data['keep_private'] = 'private'
     if category_term_id:
         data['tax_input[model_category][]'] = str(int(category_term_id))
-    req = Request(ALICE_BASE_URL + '/wp-admin/admin-ajax.php', data=urlencode(data).encode('utf-8'),
+    base_url = base_url.rstrip('/')
+    req = Request(base_url + '/wp-admin/admin-ajax.php', data=urlencode(data).encode('utf-8'),
                   method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
-                                          'Referer': post.get('list_url') or ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'})
+                                          'Referer': post.get('list_url') or base_url + '/wp-admin/edit.php?post_type=model'})
     with opener.open(req, timeout=45) as response:
         result = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace').strip()
     if result in ('', '0', '-1') or ('post-' + str(post['id'])) not in result:
@@ -1526,9 +1554,10 @@ def sync_alice_wordpress_girl_prices(opener, girl_prices):
     result['missing_terms'] = sorted(set(result['missing_terms']))
     return result
 
-def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names):
+def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names, base_url=ALICE_BASE_URL):
     attendance_keys = {_wordpress_girl_key(x) for x in (attendance_names or []) if _wordpress_girl_key(x)}
-    posts, nonce = _wordpress_model_posts(opener)
+    posts, nonce = (_wordpress_model_posts(opener) if base_url.rstrip('/') == ALICE_BASE_URL.rstrip('/')
+                    else _wordpress_model_posts(opener, base_url))
     matches = {}
     for post in posts:
         key = _wordpress_girl_key(post['title'])
@@ -1555,7 +1584,10 @@ def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_name
                 result['unchanged'] += 1
                 continue
             try:
-                _wordpress_inline_model_status(opener, post, desired, nonce)
+                if base_url.rstrip('/') == ALICE_BASE_URL.rstrip('/'):
+                    _wordpress_inline_model_status(opener, post, desired, nonce)
+                else:
+                    _wordpress_inline_model_status(opener, post, desired, nonce, base_url=base_url)
                 if desired == 'publish':
                     result['published'] += 1
                 else:
@@ -2263,6 +2295,142 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
         if not warning.startswith(('官网图片上传失败', '官网“今日出勤”保存失败')):
             warning = f'{stage}失败：{warning}'
         return {'configured': True, 'synced': False, 'stage': stage, 'warning': warning}
+
+def sync_neko_wordpress_attendance(day, image_bytes, service_text, attendance_names=None):
+    """Replace Neko's attendance gallery/text and publish only today's aliased girls."""
+    user, pwd = neko_admin_credentials()
+    if not user or not pwd:
+        return {'configured': False, 'synced': False,
+                'warning': 'Render 尚未设置 ALICE_NEKO_ADMIN_USER 和 ALICE_NEKO_ADMIN_PASSWORD'}
+    base_url = NEKO_BASE_URL.rstrip('/')
+    stage = '登录喵喵官网后台'
+    try:
+        opener = neko_admin_login(user, pwd)
+        stage = '查找喵喵“今日出勤”页面'
+        posts, _unused_nonce = _wordpress_model_posts(opener, base_url)
+        post_id = int(os.environ.get('NEKO_WP_ATTENDANCE_POST_ID') or 0)
+        if not post_id:
+            attendance_posts = [post for post in posts
+                                if _wordpress_girl_key(post.get('title')) == _wordpress_girl_key('今日出勤')]
+            if not attendance_posts:
+                raise ValueError('女孩管理中找不到标题为“今日出勤”的页面')
+            post_id = max(attendance_posts, key=lambda item: int(item.get('id') or 0))['id']
+        stage = '读取喵喵“今日出勤”编辑页'
+        edit_url = f'{base_url}/wp-admin/post.php?post={post_id}&action=edit'
+        edit_html, _ = opener_text(opener, edit_url, timeout=40)
+        gallery_key = _acf_gallery_field_key(edit_html)
+        if not gallery_key:
+            raise ValueError('找不到“照片(可以添加多个照片)”字段')
+        gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key)
+        if not gallery_name:
+            raise ValueError('找不到旧版相册插件的图片字段名')
+        service_field = str(os.environ.get('NEKO_WP_SERVICE_FIELD_NAME') or '').strip()
+        service_field = service_field or _wordpress_service_field_name(edit_html)
+        if not service_field:
+            raise ValueError('找不到“服务（详细说明，可以写多行）”字段')
+        image_bytes_list = ([bytes(image_bytes)] if isinstance(image_bytes, (bytes, bytearray))
+                            else [bytes(item) for item in (image_bytes or []) if item])
+        if not image_bytes_list:
+            raise ValueError('没有可上传的喵喵出勤图片')
+        attachment_ids = []
+        stage = '上传喵喵今日出勤图片'
+        for page_index, page_bytes in enumerate(image_bytes_list):
+            filename = f'neko-attendance-{day}' + (f'-{page_index + 1}' if len(image_bytes_list) > 1 else '') + '.png'
+            try:
+                attachment_id = _wordpress_rest_upload_image(
+                    opener, edit_html, edit_url, day, page_bytes, page_index, len(image_bytes_list),
+                    filename=filename, base_url=base_url)
+            except HTTPError as exc:
+                detail = exc.read().decode('utf-8', 'replace').strip()[:300]
+                raise ValueError(f'喵喵官网图片上传失败（HTTP {exc.code}）' +
+                                 (f'：{strip_html_text(detail)}' if detail else '')) from exc
+            if not attachment_id:
+                stage = '读取喵喵媒体上传页'
+                media_html, _ = opener_text(opener, base_url + '/wp-admin/media-new.php', timeout=35)
+                nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)',
+                                        media_html, re.I)
+                if not nonce_match:
+                    raise ValueError('找不到喵喵官网图片上传授权码')
+                stage = '上传喵喵今日出勤图片'
+                upload_raw = _multipart_request(base_url + '/wp-admin/async-upload.php', [
+                    ('name', filename), ('action', 'upload-attachment'),
+                    ('_wpnonce', html_unescape(nonce_match.group(1)))
+                ], filename, page_bytes, opener, edit_url)
+                upload_data = json.loads(upload_raw)
+                attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
+                if not upload_data.get('success') or not attachment_id:
+                    raise ValueError(((upload_data.get('data') or {}).get('message')) or '喵喵官网图片上传失败')
+            attachment_ids.append(int(attachment_id))
+
+        stage = '保存喵喵“今日出勤”图片和文案'
+        pairs = _wordpress_form_pairs(edit_html)
+        replace_names = {f'acf[{gallery_key}]', gallery_name, gallery_name + '[]', service_field,
+                         'action', 'post_ID'}
+        pairs = [(key, value) for key, value in pairs if key not in replace_names]
+        pairs.extend([('action', 'editpost'), ('post_ID', str(post_id)),
+                      (service_field, str(service_text or '').strip())])
+        pairs.extend((gallery_name + '[]', str(attachment_id)) for attachment_id in attachment_ids)
+        pairs.append(('save', '更新'))
+        req = Request(base_url + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
+                      method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
+                                              'Referer': edit_url})
+        try:
+            with opener.open(req, timeout=60) as response:
+                final_url = response.geturl()
+                result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
+        except HTTPError as exc:
+            detail = exc.read().decode('utf-8', 'replace').strip()[:300]
+            raise ValueError(f'喵喵“今日出勤”保存失败（HTTP {exc.code}）' +
+                             (f'：{strip_html_text(detail)}' if detail else '')) from exc
+        if 'post.php' not in final_url and 'post.php' not in result_html:
+            raise ValueError('喵喵官网没有确认保存成功')
+        stage = '确认喵喵“今日出勤”相册已替换'
+        verify_html, _ = opener_text(opener, edit_url + '&neko_verify=1', timeout=40)
+        verified_ids = _wordpress_photo_gallery_attachment_ids(verify_html)
+        if verified_ids != attachment_ids:
+            raise ValueError(f'喵喵相册没有保存新图片（期望 {attachment_ids}，实际 {verified_ids or "空"}）')
+        stage = '同步喵喵女孩公开/私密状态'
+        try:
+            visibility = sync_alice_wordpress_girl_visibility(
+                opener, attendance_names or [], attendance_names or [], base_url=base_url)
+        except Exception as exc:
+            visibility = {'synced': False, 'warning': str(exc), 'matched': 0,
+                          'published': 0, 'privated': 0, 'unmatched_attendance': list(attendance_names or [])}
+        return {'configured': True, 'synced': True, 'post_id': int(post_id),
+                'attachment_id': attachment_ids[0], 'attachment_ids': attachment_ids,
+                'service_field': service_field, 'visibility': visibility}
+    except Exception as exc:
+        warning = str(exc)
+        if not warning.startswith(('喵喵官网图片上传失败', '喵喵“今日出勤”保存失败')):
+            warning = f'{stage}失败：{warning}'
+        return {'configured': True, 'synced': False, 'stage': stage, 'warning': warning}
+
+@app.route('/api/neko/attendance-sync', methods=['POST'])
+def api_neko_attendance_sync():
+    data = request.get_json(silent=True) or {}
+    day = str(data.get('date') or '').strip()
+    raw_items = data.get('image_data_list') or [data.get('image_data')]
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
+        return jsonify(ok=False, error='日期格式不正确'), 400
+    if not isinstance(raw_items, list):
+        raw_items = [raw_items]
+    if not raw_items or len(raw_items) > 6 or any(
+            not str(raw or '').startswith('data:image/png;base64,') for raw in raw_items):
+        return jsonify(ok=False, error='请先生成 PNG 出勤图'), 400
+    try:
+        image_bytes_list = [base64.b64decode(str(raw).split(',', 1)[1], validate=True) for raw in raw_items]
+    except Exception:
+        return jsonify(ok=False, error='图片数据损坏，请重新生成'), 400
+    if any(not image_bytes or len(image_bytes) > 10 * 1024 * 1024 for image_bytes in image_bytes_list):
+        return jsonify(ok=False, error='图片为空或单张超过10MB'), 400
+    attendance_names = []
+    for name in data.get('attendance_names') or []:
+        name = str(name or '').strip()
+        if name and name not in attendance_names:
+            attendance_names.append(name)
+    result = sync_neko_wordpress_attendance(
+        day, image_bytes_list, str(data.get('service_text') or ''), attendance_names)
+    return jsonify(ok=bool(result.get('synced')), **result), (200 if result.get('synced') else 502)
 
 @app.route('/api/wordpress/diagnose', methods=['GET'])
 def api_wordpress_diagnose():
