@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v127_neko_profile_attendance_sync"
+APP_VERSION = "v128_customer_ledger_foundation"
 
 @app.after_request
 def compress_large_json(response):
@@ -210,6 +210,18 @@ def _init_db_schema():
             UNIQUE(report_date, girl_name))""")
         c.execute("""CREATE TABLE IF NOT EXISTS recharge_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, amount INTEGER, payment_method TEXT DEFAULT '现金', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS points_records(id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER, customer_no TEXT, change_points INTEGER, reason TEXT DEFAULT '', remark TEXT DEFAULT '', remark2 TEXT DEFAULT '', order_id INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS financial_settings(
+            setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL, updated_by TEXT DEFAULT '',
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_ledger(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, customer_no TEXT DEFAULT '',
+            account_type TEXT NOT NULL, transaction_type TEXT NOT NULL, amount INTEGER NOT NULL,
+            balance_after INTEGER NOT NULL, reason TEXT DEFAULT '', order_id INTEGER DEFAULT 0,
+            idempotency_key TEXT NOT NULL UNIQUE, actor_name TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer ON customer_ledger(customer_id,account_type,id)")
+        c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('ledger_enabled','1')")
+        c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('point_rate_bps','500')")
         c.execute("""CREATE TABLE IF NOT EXISTS enum_values(id INTEGER PRIMARY KEY AUTOINCREMENT, enum_type TEXT NOT NULL, value TEXT NOT NULL, sort_order INTEGER DEFAULT 0, UNIQUE(enum_type,value))""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_schedules(id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_date TEXT, girl_id INTEGER, girl_name TEXT, start_time TEXT, end_time TEXT, price INTEGER DEFAULT 0, status TEXT DEFAULT '出勤', note TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS hotel_rooms(
@@ -401,6 +413,7 @@ def required_module_for_api(path):
         ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'operationAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
+        ('/api/customer_ledger', 'customers'), ('/api/loyalty/settings', 'customers'),
         ('/api/orders', 'orders'), ('/api/import_chain', 'importer'), ('/api/chain_', 'chainReserve'),
         ('/api/pure_shifts', 'pureShift'), ('/api/schedules', 'pureShift'),
         ('/api/neko/', 'pureShift'),
@@ -3252,11 +3265,59 @@ def detect_payment_method_from_note(*texts):
             return method
     return None
 
+def financial_setting(c, key, default=''):
+    row = c.execute('SELECT setting_value FROM financial_settings WHERE setting_key=?', (str(key),)).fetchone()
+    return str(row['setting_value']) if row else str(default)
+
+def ledger_enabled(c):
+    return financial_setting(c, 'ledger_enabled', '1') not in ('0', 'false', 'False', 'off')
+
+def point_rate_bps(c):
+    try:
+        return min(2000, max(0, int(financial_setting(c, 'point_rate_bps', '500'))))
+    except Exception:
+        return 500
+
+def ensure_customer_ledger_opening(c, customer, account_type):
+    cid = int(customer['id'])
+    field = 'points' if account_type == 'points' else 'recharge_balance'
+    opening = max(0, int(customer[field] or 0))
+    key = f'opening:{account_type}:{cid}'
+    c.execute("""INSERT OR IGNORE INTO customer_ledger(
+                 customer_id,customer_no,account_type,transaction_type,amount,balance_after,
+                 reason,idempotency_key,actor_name)
+                 VALUES(?,?,?,?,?,?,?,?,?)""",
+              (cid, str(customer['customer_no'] or ''), account_type, '期初余额', 0, opening,
+               '启用新账本时记录原余额；未修改历史数据', key, 'system'))
+
+def append_customer_ledger(c, customer, account_type, transaction_type, amount, reason='',
+                           order_id=0, idempotency_key='', actor_name=''):
+    if not ledger_enabled(c):
+        return None
+    ensure_customer_ledger_opening(c, customer, account_type)
+    key = str(idempotency_key or f'manual:{account_type}:{customer["id"]}:{secrets.token_hex(12)}')
+    existing = c.execute('SELECT * FROM customer_ledger WHERE idempotency_key=?', (key,)).fetchone()
+    if existing:
+        return dict(existing)
+    last = c.execute("""SELECT balance_after FROM customer_ledger
+                        WHERE customer_id=? AND account_type=? ORDER BY id DESC LIMIT 1""",
+                     (int(customer['id']), account_type)).fetchone()
+    balance_after = max(0, int(last['balance_after'] or 0) + int(amount or 0))
+    cur = c.execute("""INSERT INTO customer_ledger(
+                     customer_id,customer_no,account_type,transaction_type,amount,balance_after,
+                     reason,order_id,idempotency_key,actor_name)
+                     VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (int(customer['id']), str(customer['customer_no'] or ''), account_type,
+                     str(transaction_type or ''), int(amount or 0), balance_after, str(reason or ''),
+                     int(order_id or 0), key, str(actor_name or 'system')))
+    return dict(c.execute('SELECT * FROM customer_ledger WHERE id=?', (cur.lastrowid,)).fetchone())
+
 def point_use_note_triggered(*texts):
     text = re.sub(r'\s+', '', ' '.join(str(value or '') for value in texts))
     return '积分' in text and any(word in text for word in ('减免','抵扣','折扣','全扣'))
 
 def create_or_update_order(c,d):
+    saved_order_id = int(d.get('id') or 0)
     old_customer_id = None
     old_points_used = 0
     old_order_points = 0
@@ -3310,7 +3371,8 @@ def create_or_update_order(c,d):
         remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
         remark = f"{remark}｜积分抵扣金额：¥{available:,}"
     else:
-        pts = max(0, math.floor(rec/20))
+        rate_bps = point_rate_bps(c) if ledger_enabled(c) else 500
+        pts = max(0, math.floor(rec * rate_bps / 10000))
         requested_points = max(0, int(d.get('points_used') or 0))
         available = max(0, int(cust['points'] or 0))
         points_used = min(requested_points, available)
@@ -3326,12 +3388,33 @@ def create_or_update_order(c,d):
     else:
         if '取消' in str(d.get('order_status') or ''):
             pts = points_used = 0
+        # 先写账本、最后写订单，保留旧代码依赖 last_insert_rowid() 取得订单ID的兼容行为。
+        # 当前连接已经在写事务中，SQLite 会串行化写入，因此预取的下一订单ID不会被并发抢占。
+        c.execute('UPDATE customers SET id=id WHERE id=?', (cust['id'],))
+        predicted_order_id = int(c.execute('SELECT COALESCE(MAX(id),0)+1 FROM orders').fetchone()[0])
+        if pts:
+            append_customer_ledger(c, cust, 'points', '订单赠送', int(pts),
+                                   f'订单 #{predicted_order_id} 自动累计积分', predicted_order_id,
+                                   f'order:{predicted_order_id}:points:earn', 'system')
+        if points_used:
+            append_customer_ledger(c, cust, 'points', '订单抵扣', -int(points_used),
+                                   f'订单 #{predicted_order_id} 使用积分', predicted_order_id,
+                                   f'order:{predicted_order_id}:points:redeem', 'system')
         cur = c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,points_used,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,remark,d.get('remark2',''),d.get('raw_text','')))
+        order_id = int(cur.lastrowid)
+        saved_order_id = order_id
+        if order_id != predicted_order_id:
+            c.execute("""UPDATE customer_ledger SET order_id=?,
+                         idempotency_key=REPLACE(idempotency_key,?,?)
+                         WHERE order_id=? AND customer_id=?""",
+                      (order_id, f'order:{predicted_order_id}:', f'order:{order_id}:',
+                       predicted_order_id, cust['id']))
         new_balance = max(0, int(cust['points'] or 0) + int(pts or 0) - int(points_used or 0))
         c.execute("UPDATE customers SET points=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_balance,cust['id']))
         refresh_customer_totals(c, cust['id'])
+    return saved_order_id
 
 
 @app.route('/')
@@ -3400,6 +3483,8 @@ def all_data():
                                       ORDER BY o.order_date DESC, o.id DESC''').fetchall()),
             'recharges':rows(c.execute('SELECT * FROM recharge_records ORDER BY id DESC').fetchall()),
             'points':rows(c.execute('SELECT * FROM points_records ORDER BY id DESC').fetchall()),
+            'loyalty_settings': {'enabled': ledger_enabled(c), 'point_rate_bps': point_rate_bps(c),
+                                 'point_rate_percent': point_rate_bps(c) / 100},
             'enums':rows(c.execute('SELECT * FROM enum_values ORDER BY enum_type,sort_order,id').fetchall()),
             'schedules':rows(c.execute('SELECT * FROM girl_schedules ORDER BY schedule_date DESC,id DESC').fetchall()),
             'hotel_rooms':rows(c.execute('SELECT * FROM hotel_rooms ORDER BY hotel_name, room_no').fetchall()),
@@ -3445,11 +3530,132 @@ def customers():
         type_locked = 1 if manual_type.upper() in ('VIP','SVIP') else 0
         vals=(no,d.get('name') or f'客户{no}',manual_type,d.get('customer_status','正常'),int(d.get('recharge_balance') or 0),int(d.get('total_recharge') or 0),int(d.get('total_spent') or 0),int(d.get('points') or 0),int(d.get('total_points') or 0),d.get('source',''),d.get('contact',''),d.get('grade',''),d.get('tags',''),d.get('member_level',''),d.get('remark',''),d.get('remark2',''),type_locked)
         if d.get('id'):
+            old_customer = c.execute('SELECT * FROM customers WHERE id=?', (int(d['id']),)).fetchone()
+            if not old_customer:
+                return jsonify(ok=False, error='客户不存在'), 404
             c.execute('''UPDATE customers SET customer_no=?,name=?,customer_type=?,customer_status=?,recharge_balance=?,total_recharge=?,total_spent=?,points=?,total_points=?,source=?,contact=?,grade=?,tags=?,member_level=?,remark=?,remark2=?,customer_type_locked=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',vals+(d.get('id'),))
+            # 兼容旧编辑入口：只有客服明确改动余额时才追加流水，不回算旧订单。
+            actor = str(current_session_info().get('username') or '')
+            point_delta = int(d.get('points') or 0) - int(old_customer['points'] or 0)
+            balance_delta = int(d.get('recharge_balance') or 0) - int(old_customer['recharge_balance'] or 0)
+            if point_delta:
+                append_customer_ledger(c, old_customer, 'points', '人工调整', point_delta,
+                                       '客户资料编辑页调整', actor_name=actor)
+                c.execute('''INSERT INTO points_records(customer_id,customer_no,change_points,reason,remark)
+                             VALUES(?,?,?,?,?)''', (old_customer['id'], no, point_delta, '人工调整', '客户资料编辑页调整'))
+            if balance_delta:
+                append_customer_ledger(c, old_customer, 'recharge', '人工调整', balance_delta,
+                                       '客户资料编辑页调整', actor_name=actor)
+                c.execute('''INSERT INTO recharge_records(customer_id,customer_no,amount,payment_method,remark)
+                             VALUES(?,?,?,?,?)''', (old_customer['id'], no, balance_delta, '人工调整', '客户资料编辑页调整'))
         else:
             c.execute('''INSERT INTO customers(customer_no,name,customer_type,customer_status,recharge_balance,total_recharge,total_spent,points,total_points,source,contact,grade,tags,member_level,remark,remark2,customer_type_locked) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',vals)
         update_customer_type_by_history(c, None)
     return jsonify(ok=True)
+
+
+@app.route('/api/customer_ledger', methods=['GET', 'POST'])
+def api_customer_ledger():
+    """Future-only customer balance ledger. Opening rows mirror, but never rewrite, legacy balances."""
+    init_db()
+    if request.method == 'GET':
+        customer_id = int(request.args.get('customer_id') or 0)
+        if not customer_id:
+            return jsonify(ok=False, error='缺少客户ID'), 400
+        with conn() as c:
+            customer = c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
+            if not customer:
+                return jsonify(ok=False, error='客户不存在'), 404
+            ensure_customer_ledger_opening(c, customer, 'points')
+            ensure_customer_ledger_opening(c, customer, 'recharge')
+            entries = rows(c.execute('''SELECT * FROM customer_ledger WHERE customer_id=?
+                                        ORDER BY id DESC LIMIT 300''', (customer_id,)).fetchall())
+            return jsonify(ok=True, customer=dict(customer), entries=entries,
+                           settings={'enabled': ledger_enabled(c), 'point_rate_bps': point_rate_bps(c),
+                                     'point_rate_percent': point_rate_bps(c) / 100})
+
+    d = request.get_json(silent=True) or {}
+    customer_id = int(d.get('customer_id') or 0)
+    account_type = str(d.get('account_type') or '').strip()
+    action = str(d.get('action') or 'add').strip()
+    amount = abs(int(d.get('amount') or 0))
+    reason = str(d.get('reason') or '').strip()
+    transaction_type = str(d.get('transaction_type') or '人工调整').strip()
+    payment_method = str(d.get('payment_method') or '现金').strip()
+    if account_type not in ('points', 'recharge'):
+        return jsonify(ok=False, error='请选择积分或充值余额'), 400
+    if action not in ('add', 'deduct') or amount <= 0:
+        return jsonify(ok=False, error='请选择增加/扣除并填写大于0的金额'), 400
+    if not reason:
+        return jsonify(ok=False, error='请填写原因，方便以后核对'), 400
+    delta = amount if action == 'add' else -amount
+    with conn() as c:
+        customer = c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
+        if not customer:
+            return jsonify(ok=False, error='客户不存在'), 404
+        field = 'points' if account_type == 'points' else 'recharge_balance'
+        current = max(0, int(customer[field] or 0))
+        if delta < 0 and amount > current:
+            return jsonify(ok=False, error=f'扣除数量超过当前余额（{current:,}）'), 400
+        ensure_customer_ledger_opening(c, customer, account_type)
+        entry = append_customer_ledger(
+            c, customer, account_type, transaction_type, delta, reason,
+            int(d.get('order_id') or 0), str(d.get('request_id') or ''),
+            str(current_session_info().get('username') or ''))
+        if entry is None:
+            return jsonify(ok=False, error='新账本已关闭，请由老板开启后再操作'), 409
+        new_balance = int(entry['balance_after'])
+        c.execute(f'UPDATE customers SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                  (new_balance, customer_id))
+        if account_type == 'points':
+            c.execute('''INSERT INTO points_records(customer_id,customer_no,change_points,reason,remark,order_id)
+                         VALUES(?,?,?,?,?,?)''', (customer_id, customer['customer_no'], delta,
+                         transaction_type, reason, int(d.get('order_id') or 0)))
+        else:
+            c.execute('''INSERT INTO recharge_records(customer_id,customer_no,amount,payment_method,remark,order_id)
+                         VALUES(?,?,?,?,?,?)''', (customer_id, customer['customer_no'], delta,
+                         payment_method, reason, int(d.get('order_id') or 0)))
+            if action == 'add' and transaction_type == '充值':
+                c.execute('UPDATE customers SET total_recharge=COALESCE(total_recharge,0)+? WHERE id=?',
+                          (amount, customer_id))
+        updated = dict(c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone())
+    return jsonify(ok=True, customer=updated, entry=entry)
+
+
+@app.route('/api/loyalty/settings', methods=['GET', 'POST'])
+def api_loyalty_settings():
+    init_db()
+    with conn() as c:
+        if request.method == 'GET':
+            bps = point_rate_bps(c)
+            return jsonify(ok=True, enabled=ledger_enabled(c), point_rate_bps=bps,
+                           point_rate_percent=bps / 100)
+        if current_role() != 'boss':
+            return jsonify(ok=False, error='只有老板账号可以修改积分规则'), 403
+        d = request.get_json(silent=True) or {}
+        if 'point_rate_percent' in d:
+            try:
+                percent = float(d.get('point_rate_percent'))
+            except Exception:
+                return jsonify(ok=False, error='积分比例格式不正确'), 400
+            if percent < 0 or percent > 20:
+                return jsonify(ok=False, error='积分比例必须在0%到20%之间'), 400
+            bps = int(round(percent * 100))
+            c.execute('''INSERT INTO financial_settings(setting_key,setting_value,updated_by,updated_at)
+                         VALUES('point_rate_bps',?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,
+                         updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP''',
+                      (str(bps), str(current_session_info().get('username') or '')))
+        if 'enabled' in d:
+            enabled = '1' if bool(d.get('enabled')) else '0'
+            c.execute('''INSERT INTO financial_settings(setting_key,setting_value,updated_by,updated_at)
+                         VALUES('ledger_enabled',?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,
+                         updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP''',
+                      (enabled, str(current_session_info().get('username') or '')))
+        bps = point_rate_bps(c)
+        return jsonify(ok=True, enabled=ledger_enabled(c), point_rate_bps=bps,
+                       point_rate_percent=bps / 100)
 
 
 @app.route('/api/customers/cleanup_zero_orders', methods=['POST'])
@@ -3476,6 +3682,7 @@ def cleanup_zero_order_customers():
         snapshot = {'customers': candidates}
         related_tables = {
             'recharge_records': 'customer_id', 'points_records': 'customer_id',
+            'customer_ledger': 'customer_id',
             'customer_accounts': 'customer_id', 'customer_reservations': 'customer_id',
             'telegram_customer_cancellations': 'customer_id', 'telegram_customers': 'customer_id',
         }
@@ -3488,7 +3695,7 @@ def cleanup_zero_order_customers():
         c.execute("""INSERT INTO customer_cleanup_archives(batch_id,actor_name,reason,customer_count,payload_json)
                      VALUES(?,?,?,?,?)""", (batch_id, str(current_session_info().get('username') or ''),
                      '清理预约单数为0的客户', len(candidates), json.dumps(snapshot, ensure_ascii=False)))
-        for table in ('recharge_records', 'points_records', 'telegram_customer_cancellations', 'telegram_customers'):
+        for table in ('recharge_records', 'points_records', 'customer_ledger', 'telegram_customer_cancellations', 'telegram_customers'):
             if table in existing_tables:
                 c.execute(f"DELETE FROM {table} WHERE customer_id IN ({placeholders})", ids)
         for table in ('customer_accounts', 'customer_reservations'):
@@ -3958,8 +4165,7 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
                 updated += 1
             else:
                 assert_no_duplicate_customer_name_for_chain(c, order_data['customer_raw'])
-                create_or_update_order(c, order_data)
-                order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+                order_id = int(create_or_update_order(c, order_data))
                 inserted += 1
 
             c.execute("""INSERT INTO chain_import_rows(
@@ -5650,8 +5856,7 @@ def api_customer_reservation_status():
             acc=c.execute('SELECT * FROM customer_accounts WHERE id=?',(r['customer_account_id'],)).fetchone()
             customer_raw = acc['username'] if acc else r['username']
             g=c.execute('SELECT id FROM girls WHERE name=?',(r['girl_name'],)).fetchone()
-            create_or_update_order(c, {'order_date':r['reserve_date'], 'girl_id': int(g['id']) if g else 0, 'girl_name':r['girl_name'], 'service_time':f"{r['start_time']}-{r['end_time']}", 'received_amount':int(r['price'] or 0), 'customer_raw':customer_raw, 'remark': '客人网站提前预约 '+(r['note'] or ''), 'order_status':'预约中', 'settlement_status':'未结算'})
-            order_id=c.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
+            order_id=create_or_update_order(c, {'order_date':r['reserve_date'], 'girl_id': int(g['id']) if g else 0, 'girl_name':r['girl_name'], 'service_time':f"{r['start_time']}-{r['end_time']}", 'received_amount':int(r['price'] or 0), 'customer_raw':customer_raw, 'remark': '客人网站提前预约 '+(r['note'] or ''), 'order_status':'预约中', 'settlement_status':'未结算'})
         c.execute("UPDATE customer_reservations SET status=?, order_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status,order_id,rid))
         updated = c.execute('SELECT * FROM customer_reservations WHERE id=?', (rid,)).fetchone()
     return jsonify(ok=True, reservation=dict(updated))

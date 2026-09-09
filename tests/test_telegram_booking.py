@@ -63,8 +63,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
-                          "scraped_reviews", "girl_praises", "operation_logs"):
+                          "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger"):
                 c.execute(f"DELETE FROM {table}")
+            c.execute("UPDATE financial_settings SET setting_value='1' WHERE setting_key='ledger_enabled'")
+            c.execute("UPDATE financial_settings SET setting_value='500' WHERE setting_key='point_rate_bps'")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
                              ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""",
@@ -1329,6 +1331,52 @@ class TelegramBookingFlowTest(unittest.TestCase):
                 order = c.execute('SELECT points,points_used,remark FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 1',(customer_id,)).fetchone()
                 self.assertEqual((order['points'],order['points_used']),(500,1200),keyword)
                 self.assertEqual(c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()['points'],500)
+
+    def test_customer_ledger_preserves_opening_balance_and_rate_is_future_only(self):
+        login = self.client.post('/api/login', json={'username':'Star','password':'9941'})
+        headers = {'X-Alice-Session':login.json['session_token']}
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,points,recharge_balance) VALUES('1227','账本客人',7200,5000)")
+            customer_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,
+                         customer_name,received_amount,points,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                      (self.day,'17:00-18:00',girl_id,'娜娜子',customer_id,'1227','账本客人',20000,1000,'已结束'))
+        opened = self.client.get(f'/api/customer_ledger?customer_id={customer_id}', headers=headers)
+        self.assertEqual(opened.status_code, 200, opened.get_data(as_text=True))
+        self.assertEqual(opened.json['customer']['points'], 7200)
+        self.assertEqual(opened.json['customer']['recharge_balance'], 5000)
+        self.assertEqual({x['transaction_type'] for x in opened.json['entries']}, {'期初余额'})
+        changed = self.client.post('/api/loyalty/settings', headers=headers,
+                                   json={'enabled':True,'point_rate_percent':3})
+        self.assertEqual(changed.status_code, 200, changed.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'18:00-19:00',
+                'girl_id':girl_id,'customer_raw':'1227','received_amount':20000,'order_status':'已结束'})
+            customer = c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()
+            old_order = c.execute('SELECT points FROM orders WHERE customer_id=? ORDER BY id LIMIT 1',(customer_id,)).fetchone()
+        self.assertEqual(customer['points'], 7800)
+        self.assertEqual(old_order['points'], 1000)
+        adjusted = self.client.post('/api/customer_ledger', headers=headers, json={
+            'customer_id':customer_id,'account_type':'points','action':'deduct','amount':300,
+            'transaction_type':'积分扣除','reason':'测试核对','request_id':'ledger-test-1'})
+        self.assertEqual(adjusted.status_code, 200, adjusted.get_data(as_text=True))
+        self.assertEqual(adjusted.json['customer']['points'], 7500)
+
+    def test_customer_ledger_rollback_switch_restores_legacy_rate_without_new_rows(self):
+        login = self.client.post('/api/login', json={'username':'Star','password':'9941'})
+        headers = {'X-Alice-Session':login.json['session_token']}
+        disabled = self.client.post('/api/loyalty/settings', headers=headers,
+                                    json={'enabled':False,'point_rate_percent':3})
+        self.assertEqual(disabled.status_code, 200, disabled.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('1228','回滚客人',100)")
+            customer_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'18:00-19:00',
+                'girl_id':girl_id,'customer_raw':'1228','received_amount':20000,'order_status':'已结束'})
+            self.assertEqual(c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()['points'],1100)
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM customer_ledger WHERE idempotency_key LIKE 'order:%' ").fetchone()[0],0)
     def test_review_drafts_are_labeled_non_customer_quotes(self):
         with self.app_module.conn() as c:
             c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)

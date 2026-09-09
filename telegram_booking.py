@@ -766,13 +766,12 @@ def register_telegram_booking(
             used = max(0, min(int(requested_points or 0), max_usable))
             actual = max(0, int(row["price"] or 0) - used * rate)
             girl_row = c.execute("SELECT id FROM girls WHERE name=?", (row["girl_name"],)).fetchone()
-            create_or_update_order(c, {
+            order_id = int(create_or_update_order(c, {
                 "order_date": row["reserve_date"], "girl_id": int(girl_row["id"]) if girl_row else 0,
                 "girl_name": row["girl_name"], "service_time": f"{row['start_time']}-{row['end_time']}",
                 "received_amount": actual, "points_used": used, "customer_raw": customer["customer_no"],
                 "remark": f"Telegram Bot 预约｜使用积分 {used}", "order_status": "预约中", "settlement_status": "未结算",
-            })
-            order_id = int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+            }))
             c.execute("""UPDATE customer_reservations SET order_id=?,points_used=?,actual_payment=?,
                          updated_at=CURRENT_TIMESTAMP WHERE id=?""", (order_id, used, actual, int(rid)))
             order_row = dict(c.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone())
