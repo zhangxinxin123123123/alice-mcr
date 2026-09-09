@@ -1268,7 +1268,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          '温柔', 'hash-review-preview-12345', '公开长评预览'))
             c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash,material_type)
                          VALUES(?,?,?,?,?,?,?)""", ('https://tokyo-yy.com/精华帖/华人出张店/',
-                         'https://tokyo-yy.com/精华帖/98765_未解锁/', '娜娜子', '这是一段很短的公开预览。',
+                         'https://tokyo-yy.com/精华帖/98765_未解锁/', '娜娜子', '这是一段公开预览。您需要回帖后查看隐藏内容',
                          '', 'hash-review-preview-98765', '公开长评预览'))
         listing = self.client.get('/api/review_crawler',headers=headers)
         saved = next(item for item in listing.json['reviews'] if item.get('source_title')=='测试长评')
@@ -1281,12 +1281,13 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn('未新增事实',polished.json['polished']['label'])
         self.assertNotIn('预约',polished.json['polished']['polished_text'])
         preview = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-12345')
-        self.assertEqual(preview['unlock_status'],'已完整归档')
+        self.assertEqual(preview['unlock_status'],'已解锁')
         self.assertEqual(preview['status_color'],'green')
         self.assertFalse(preview['needs_unlock'])
         locked = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-98765')
         self.assertEqual(locked['status_color'],'red')
         self.assertTrue(locked['needs_unlock'])
+        self.assertEqual(locked['unlock_status'],'待解锁')
         generated = self.client.post('/api/review_crawler',headers=headers,json={
             'action':'drafts','date':'2099-01-01','girl_name':'娜娜子','custom_description':'笑容甜美，聊天自然，第一次见面也不会尴尬'})
         self.assertEqual(generated.status_code,200,generated.get_data(as_text=True))

@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v122_openai_review_writer"
+APP_VERSION = "v123_review_unlock_marker"
 
 @app.after_request
 def compress_large_json(response):
@@ -1678,6 +1678,17 @@ def _review_girl_name(text_value, girl_rows):
             return girl.get('name') or ''
     return ''
 
+def _review_needs_unlock(text_value):
+    """Tokyo YY marks gated report bodies with an explicit reply-to-view notice."""
+    compact = re.sub(r'[\s\u200b\u200c\u200d\ufeff]+', '',
+                     unicodedata.normalize('NFKC', str(text_value or '')))
+    return any(marker in compact for marker in (
+        '您需要回帖后查看隐藏内容',
+        '需要回帖后查看隐藏内容',
+        '您需要回复后查看隐藏内容',
+        '需要回复后查看隐藏内容',
+    ))
+
 def _store_scraped_reviews(collected):
     inserted = updated = 0
     with conn() as c:
@@ -1910,14 +1921,16 @@ def review_marketing_drafts(day, selected_name='', custom_description=''):
         girls = {r['name']:dict(r) for r in c.execute("SELECT name,girl_alias,tags,remark,remark2 FROM girls").fetchall()}
         review_rows = rows(c.execute("""SELECT girl_name,review_text,tags,material_type,author_name,source_title
                                       FROM scraped_reviews ORDER BY updated_at DESC,id DESC""").fetchall())
-    global_long_rows = [r for r in review_rows if r.get('material_type') == '登录后长评']
+    global_long_rows = [r for r in review_rows if r.get('material_type') == '登录后长评'
+                        and not _review_needs_unlock(r.get('review_text'))]
     result = []
     for name in dict.fromkeys(names):
         if name not in girls:
             continue
         sources = [r for r in review_rows if _wordpress_girl_key(r.get('girl_name')) == _wordpress_girl_key(name)]
         short_sources = [r for r in sources if r.get('material_type') == '公开短评']
-        long_sources = [r for r in sources if r.get('material_type') == '登录后长评']
+        long_sources = [r for r in sources if r.get('material_type') == '登录后长评'
+                        and not _review_needs_unlock(r.get('review_text'))]
         feature_counts = {}
         for source in sources:
             for tag in str(source.get('tags') or '').split(','):
@@ -1991,6 +2004,8 @@ def polish_archived_customer_review(review_id):
     original = unicodedata.normalize('NFKC', str(item.get('review_text') or '')).strip()
     if not original:
         raise ValueError('评价正文为空')
+    if _review_needs_unlock(original):
+        raise ValueError('这篇长评仍是待解锁内容，请回复解锁并复制完整正文后再润色')
     lines = []
     for line in re.split(r'[\r\n]+', original):
         line = re.sub(r'[ \t\u3000]+', ' ', line).strip()
@@ -2024,7 +2039,8 @@ def assist_real_customer_review(girl_name, original_text, confirmed_details=''):
         style_rows = c.execute("""SELECT review_text FROM scraped_reviews
                                   WHERE material_type IN ('公开短评','登录后长评')
                                   ORDER BY updated_at DESC,id DESC LIMIT 60""").fetchall()
-    style_text = '\n'.join(str(row['review_text'] or '') for row in style_rows)
+    style_text = '\n'.join(str(row['review_text'] or '') for row in style_rows
+                           if not _review_needs_unlock(row['review_text']))
     style_profile = ('论坛口语、短句分段' if re.search(r'哈哈|兄弟|真的|总体|总的来说|推荐', style_text)
                      else '自然口语、重点总结')
     original_clean = original.rstrip('。.!！?？')
@@ -2078,7 +2094,8 @@ def ai_assist_real_customer_review(girl_name, original_text, confirmed_details='
         if author_name:
             samples = [r['review_text'] for r in c.execute("""SELECT review_text FROM scraped_reviews
                        WHERE author_name=? AND material_type IN ('公开短评','登录后长评','公开长评预览')
-                       ORDER BY updated_at DESC,id DESC LIMIT 12""", (author_name,)).fetchall()]
+                       ORDER BY updated_at DESC,id DESC LIMIT 30""", (author_name,)).fetchall()
+                       if not _review_needs_unlock(r['review_text'])][:12]
     if author_name and not samples:
         raise ValueError('这个作者还没有可用的归档样本')
     strength_note = {
@@ -4686,23 +4703,14 @@ def api_review_crawler():
                                        FROM scraped_reviews WHERE COALESCE(author_name,'')!=''
                                        AND material_type IN ('公开短评','登录后长评','公开长评预览')
                                        GROUP BY author_name ORDER BY sample_count DESC,author_name LIMIT 200""").fetchall()
-            unlocked_rows = c.execute("SELECT source_page,source_url,review_text FROM scraped_reviews WHERE material_type='登录后长评'").fetchall()
-        unlocked_lengths = {}
-        for row in unlocked_rows:
-            key = _review_source_identity(row['source_page'] or row['source_url'])
-            unlocked_lengths[key] = max(unlocked_lengths.get(key,0), len(str(row['review_text'] or '').strip()))
         for item in recent:
-            source_key = _review_source_identity(item.get('source_page') or item.get('source_url'))
             own_length = len(str(item.get('review_text') or '').strip())
-            full_length = own_length if item.get('material_type') == '登录后长评' else unlocked_lengths.get(source_key,0)
             item['content_length'] = own_length
             if item.get('material_type') in ('登录后长评','公开长评预览'):
-                if full_length >= 350:
-                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '已完整归档', 'green', False
-                elif full_length > 0:
-                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '疑似未复制完整', 'orange', True
+                if _review_needs_unlock(item.get('review_text')):
+                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '待解锁', 'red', True
                 else:
-                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '只有预览・待解锁', 'red', True
+                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '已解锁', 'green', False
             else:
                 item['unlock_status'], item['status_color'], item['needs_unlock'] = '公开内容', 'blue', False
         return jsonify(ok=True,total=total,reviews=recent,girls=girl_names,authors=rows(author_rows),
@@ -4741,14 +4749,18 @@ def api_review_crawler():
         material_type = str(d.get('material_type') or '登录后长评').strip()
         if material_type not in ('登录后长评','公开短评','公开网页素材'):
             material_type = '登录后长评'
+        locked_notice = _review_needs_unlock(review_text)
+        if locked_notice and material_type == '登录后长评':
+            material_type = '公开长评预览'
         digest = hashlib.sha256((source_page+'\n'+review_text).encode('utf-8')).hexdigest()
         item = {'source_url':source_page,'source_page':source_page,'source_title':str(d.get('source_title') or '').strip(),
                 'girl_name':girl_name,'review_text':review_text,'tags':','.join(_review_tags(review_text)),
                 'review_hash':digest,'review_date':str(d.get('review_date') or '').strip()[:30],
                 'author_name':str(d.get('author_name') or '').strip()[:80],'material_type':material_type,
-                'access_scope':'manual_authorized'}
+                'access_scope':'manual_locked' if locked_notice else 'manual_authorized'}
         inserted, updated = _store_scraped_reviews([item])
-        return jsonify(ok=True,inserted=inserted,updated=updated,girl_name=girl_name)
+        return jsonify(ok=True,inserted=inserted,updated=updated,girl_name=girl_name,
+                       needs_unlock=locked_notice)
     result = crawl_public_reviews(d.get('url'), d.get('max_pages') or 3)
     return jsonify(ok=True, **result)
 
