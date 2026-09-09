@@ -304,16 +304,6 @@ body:not(.role-boss) .boss-only{display:none!important}
    <button class="primary" onclick="saveTelegramSettings()">保存 TEL 预约设置</button>
    <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
   </div>
-  <div class="card"><h2>Alice AI 少女助手</h2>
-   <p class="note">仅在 Alice 内部群回答，不会出现在客户私聊或女孩专属群。AI 只读取经营汇总并给建议，不能通过聊天修改订单、积分或客户资料。</p>
-   <div class="form">
-    <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
-    <input id="tgAiName" placeholder="助手名字，例如 艾莉兔">
-   </div>
-   <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
-   <div id="tgAiStatus" class="note"></div>
-   <button class="primary" onclick="saveTelegramSettings('Alice AI 助手设置已保存')">保存 AI 助手设置</button>
-  </div>
   <div class="card"><h2>客户流程编辑器</h2>
    <p class="note">点击左侧流程节点，编辑该步骤给客户看的文字和按钮；右侧手机会实时预览。变量可用：{girl}、{date}、{free_time}、{start_time}、{end_time}。</p>
    <div class="tg-flow-layout">
@@ -438,7 +428,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="接龙预约 保存 复制 客户 联系 酒店 图片 空闲时间"><summary>🧩 接龙预约</summary><div class="manual-body"><ul><li>选择日期和女孩后读取当天接龙；时间、价格、客户及备注填写后保存。</li><li>“复制完整版”供内部使用，含客户编号和名字；“复制普通版”供女孩群使用。</li><li>空闲时间来自 MCR 订单，不从群消息反推；“刷新空闲时间”后可复制文字或表格。</li><li>接龙表中的“联系客户”可直接打开预约客户的 Telegram。</li></ul></div></details>
     <details class="manual-block" data-search="纯出勤表 全面同步 官网 今日出勤 头像 截图 TEL 自动同步"><summary>📋 纯出勤表 / 全面同步</summary><div class="manual-body"><ol><li>选择当天女孩，填写 24 小时制出勤时间、价格和标签；标签会记忆。</li><li>全面同步前先尝试从 YY 更新头像，成功头像会保存到女孩表。</li><li><b>全面同步：</b>保存出勤、更新 TEL 可预约名单、生成高清出勤图、发送绑定群，并同步 Alice 官网“今日出勤”。</li><li>晚上 22:00 后执行全面同步后，当天再新增出勤女孩，保存时会自动补充同步到 TEL；同一女孩只同步一次。</li><li>超过 6 位女孩时生成多张图；识别或官网同步失败会在内部群明确提示。</li></ol></div></details>
     <details class="manual-block" data-search="收益图表 日 月 支付 房间 成本"><summary>🥧 收益图表</summary><div class="manual-body"><ul><li>按日或月查看客人支付、女孩到手、店铺收益、房间成本和净收益。</li><li>修改日期后图表与下方汇总表同步刷新；仅有相应权限的账号可查看。</li></ul></div></details>
-     <details class="manual-block" data-search="数据诊断 登录检测 权限 管理日志 查询 插入"><summary>🩺 数据诊断与账号</summary><div class="manual-body"><ul><li><b>数据诊断：</b>服务器数据异常或页面内容不一致时点“重新读取”。</li><li><b>登录检测：</b>查看登录时间、IP、设备、在线状态，并可强制下线账号。</li><li><b>管理日志：</b>是左侧独立模块，记录按钮点击、筛选查询以及后台新增、修改、删除的具体字段；可按日期、账号、动作和关键词检索。</li><li>老板可分别勾选“登录检测”和“管理日志”权限，保存后立即生效。</li></ul></div></details>
+     <details class="manual-block" data-search="数据诊断 登录检测 权限 管理日志 AI 艾莉兔 查询 插入"><summary>🩺 数据诊断与账号</summary><div class="manual-body"><ul><li><b>数据诊断：</b>服务器数据异常或页面内容不一致时点“重新读取”。</li><li><b>登录检测：</b>查看登录时间、IP、设备、在线状态，并可强制下线账号。</li><li><b>管理日志：</b>顶部可设置艾莉兔 AI 助手和全局积分规则；下方记录按钮点击、筛选查询以及后台新增、修改、删除的具体字段，可按日期、账号、动作和关键词检索。</li><li>老板可分别勾选“登录检测”和“管理日志”权限，保存后立即生效。</li></ul></div></details>
    </div>
   </div>
  </section>
@@ -468,6 +458,16 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="operationAudit" class="panel">
+  <div class="card"><h2>艾莉兔 AI 助手设置</h2>
+   <p class="note">仅在 Alice 内部群回答，不会出现在客户私聊或女孩专属群。AI 只读取经营汇总并给建议，不能通过聊天修改订单、积分或客户资料。</p>
+   <div class="form">
+    <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
+    <input id="tgAiName" placeholder="助手名字，例如 艾莉兔">
+   </div>
+   <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
+   <div id="tgAiStatus" class="note"></div>
+   <button class="primary" onclick="saveTelegramSettings('艾莉兔 AI 助手设置已保存')">保存 AI 助手设置</button>
+  </div>
   <div class="card"><div class="card-title-row"><h2>管理日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
    <p class="note">记录谁在几点几分点击了什么按钮、做了什么筛选查询，以及向后台新增、修改或删除了哪些数据。密码、Token、图片内容及超长正文会自动隐藏。</p>
    <div class="ledger-settings"><b>全局积分规则（仅影响以后新增的订单）</b><div class="form"><label class="small">所有客户的新订单返积分比例<br><input id="opPointRatePercent" type="number" min="0" max="20" step="0.1"></label><label class="permission-check"><input id="opLedgerEnabled" type="checkbox">启用积分账本</label><button class="primary" type="button" onclick="saveGlobalLoyaltySettings()">保存全局积分规则</button></div><div class="note">比例一旦修改，会统一应用于所有客户之后的新订单；历史订单和现有积分不重算。修改人、旧值和新值会保留在下方日志。</div></div>
@@ -707,7 +707,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>loadOperationLogs().catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>Promise.all([loadOperationLogs(),loadTelegramSettings()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  setLoginActive(false);
