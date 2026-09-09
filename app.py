@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v123_review_unlock_marker"
+APP_VERSION = "v124_sync_guards_and_closing"
 
 @app.after_request
 def compress_large_json(response):
@@ -1353,6 +1353,19 @@ def _wordpress_girl_key(value):
     text = re.sub(r'(?:新人女孩|新人女优|新人|女孩|回归|復帰)', '', text)
     return re.sub(r'[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+', '', text)
 
+WORDPRESS_PROTECTED_MODEL_TITLES = {
+    '今日出勤', '招聘优秀女生', '价格和玩法', '价格与玩法', '爱丽丝积分活动', '商务陪酒',
+}
+
+def _wordpress_model_title_is_protected(value):
+    title = unicodedata.normalize('NFKC', str(value or '')).strip().lower()
+    title = re.sub(r'[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+', '', title)
+    protected = {
+        re.sub(r'[^0-9a-z\u3040-\u30ff\u3400-\u9fff]+', '', x.lower())
+        for x in WORDPRESS_PROTECTED_MODEL_TITLES
+    }
+    return title in protected
+
 def _wordpress_model_posts(opener):
     base = ALICE_BASE_URL + '/wp-admin/edit.php?post_type=model'
     posts, seen, inline_nonce = [], set(), ''
@@ -1522,11 +1535,19 @@ def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_name
         if key:
             matches.setdefault(key, []).append(post)
     result = {'synced': True, 'matched': 0, 'published': 0, 'privated': 0, 'unchanged': 0,
-              'failed': [], 'unmatched_attendance': []}
+              'protected': 0, 'protected_titles': [], 'failed': [], 'unmatched_attendance': []}
     # 官网女孩管理里的全部 model 都由当天出勤控制：出勤者仅保留最新的一篇公开，
     # 其余女孩及同名旧文章全部私密，避免 MCR 名单之外的旧资料继续公开。
     for key, candidates in matches.items():
         candidates = sorted(candidates, key=lambda x: x['id'], reverse=True)
+        protected_posts = [post for post in candidates if _wordpress_model_title_is_protected(post.get('title'))]
+        if protected_posts:
+            result['protected'] += len(protected_posts)
+            result['protected_titles'].extend(post['title'] for post in protected_posts
+                                              if post['title'] not in result['protected_titles'])
+            candidates = [post for post in candidates if post not in protected_posts]
+        if not candidates:
+            continue
         result['matched'] += 1
         for index, post in enumerate(candidates):
             desired = 'publish' if key in attendance_keys and index == 0 else 'private'
@@ -1767,6 +1788,9 @@ def _tokyo_yy_report_materials(start_url, max_pages, girl_rows):
                 detail_payload = detail_raw
             detail = _decode_tokyo_report_payload(detail_payload)
             preview = re.sub(r'\s+', ' ', str(detail.get('preview') or '')).strip()
+            gated_notice = _review_needs_unlock(detail.get('content')) or _review_needs_unlock(preview)
+            if gated_notice and not _review_needs_unlock(preview):
+                preview += '\n您需要回帖后查看隐藏内容'
             title = re.sub(r'\s+', ' ', str(detail.get('title') or summary.get('title') or '')).strip()
             # The public API deliberately separates preview from gated full content. Never archive detail.content here.
             if len(preview) < 12:

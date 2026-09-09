@@ -2037,7 +2037,7 @@ def register_telegram_booking(
         expire_attendance_inquiries()
         if not edited and handle_closing_attendance_reply(message):
             return
-        if not edited and re.fullmatch(r"/?(?:下班|闭店)(?:@\w+)?", text.strip()):
+        if not edited and re.fullmatch(r"/?闭店(?:@\w+)?", text.strip()):
             if start_closing_from_keyword(message):
                 return
         # 编辑旧消息不触发导入；必须重新发送一张带当天 MMDD 标题的完整接龙。
@@ -2507,7 +2507,8 @@ def register_telegram_booking(
                              ON CONFLICT(sync_date) DO UPDATE SET full_synced_at=CURRENT_TIMESTAMP,
                              late_auto_enabled=excluded.late_auto_enabled,updated_at=CURRENT_TIMESTAMP""",
                           (day, late_enabled))
-        closing_result = send_unclosed_prompts(day) if kind == "settlement" else {}
+        # 结算截图只发送截图；女孩下班确认只能由群内“闭店”关键字触发。
+        closing_result = {}
         return jsonify(ok=True, message_id=int((result or {}).get("message_id") or 0), message_ids=message_ids, synced=synced,
                        wordpress=wordpress_result,
                        sync_warnings=sync_warnings,

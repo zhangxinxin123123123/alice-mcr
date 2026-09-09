@@ -414,7 +414,7 @@ body:not(.role-boss) .boss-only{display:none!important}
      <div class="manual-command"><code>自动导入开启 / 关闭 / 状态</code><span>内部群控制每 30 分钟扫描；“状态”同时显示下次检查时间。专属群重发当天接龙时，即使关闭也会即时检查。</span></div>
      <div class="manual-command"><code>文案生成</code><span>在内部群回复一条纯出勤文案发送，或在关键字下一行直接粘贴文案；Bot 会按日期、女孩、TAG、时间和价格生成高清出勤图，超过 6 人自动分图。</span></div>
      <div class="manual-command"><code>询问出勤</code><span>内部群触发；询问所有已绑定女孩，30 分钟未点击默认不出勤。女孩选择 12:00–24:00 后自动写出勤表。</span></div>
-     <div class="manual-command"><code>下班 / 闭店</code><span>女孩专属群触发营业日结算确认：显示单数、女孩到手、店铺收益和应交金额；东京时间 00:00–03:59 发送时归前一天，04:00 起归当天。女孩确认线上转账或线下现金，再回复下次出勤；女孩类型包含“全职”时不询问。内部群发送“闭店”可补发所有未确认女孩。</span></div>
+     <div class="manual-command"><code>闭店</code><span>女孩专属群触发营业日结算确认：显示单数、女孩到手、店铺收益和应交金额；东京时间 00:00–03:59 发送时归前一天，04:00 起归当天。女孩确认线上转账或线下现金，再回复下次出勤；女孩类型包含“全职”时不询问。内部群发送“闭店”可补发所有未确认女孩。“发送今日结算截图”只发送截图，不触发闭店。</span></div>
      <div class="manual-command"><code>积分查询+0016</code><span>内部群按客户编号查询当前积分。</span></div>
      <div class="manual-command"><code>编号查询+客户名</code><span>内部群按客户名查询客户编号，支持部分名字。</span></div>
      <div class="manual-command"><code>/绑定审核群</code><span>把当前群设为内部审核群，仅店长、客服或群管理员操作。</span></div>
@@ -2456,7 +2456,7 @@ async function sendSettlementReport(){
  const signInfo=g=>g.signed===g.count?{text:'已签收',cls:'sign-done'}:(g.signed>0?{text:`部分签收 ${g.signed}/${g.count}`,cls:'sign-partial'}:{text:'未签收',cls:'sign-pending'});
  box.innerHTML=`<h2>💴 ${todayStr} 今日金额结算</h2><table><thead><tr><th>女孩</th><th>单数</th><th>今日收益</th><th>非现金</th><th>应收金额</th><th>签收状态</th></tr></thead><tbody>${list.map(g=>{const sign=signInfo(g);return `<tr><td>${escHtml(g.name)}</td><td>${g.count}</td><td>${yen(g.total)}</td><td>${yen(g.nonCash)}</td><td><b>${yen(g.total-g.nonCash)}</b></td><td><span class="sign-status ${sign.cls}">${sign.text}</span></td></tr>`}).join('')}</tbody></table><div class="report-total">应收合计：${yen(list.reduce((s,g)=>s+g.total-g.nonCash,0))} ｜ 已签收 ${list.filter(g=>g.signed===g.count).length}/${list.length} 人</div>`;
  document.body.appendChild(box);beginBusy('正在生成并发送结算截图…');
- try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const canvas=await html2canvas(box,{backgroundColor:'#090511',scale:2,useCORS:true,logging:false,width:box.scrollWidth,height:box.scrollHeight});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});const closing=result.closing||{};alert(`高清原图已发送到 ${result.chat_title||'Alice内部群'}\n闭店确认新发送：${Number(closing.sent||0)} 人\n已发送过：${Number(closing.already_sent||0)} 人\n未绑定群跳过：${Number(closing.unbound||0)} 人`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
+ try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const canvas=await html2canvas(box,{backgroundColor:'#090511',scale:2,useCORS:true,logging:false,width:box.scrollWidth,height:box.scrollHeight});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});alert(`高清原图已发送到 ${result.chat_title||'Alice内部群'}\n本操作只发送截图，不会给女孩发送闭店确认。`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
 }
 
 function escHtml(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}

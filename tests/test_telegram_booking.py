@@ -1009,7 +1009,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
             c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '转账', '已结束'))
-        self.webhook({"message": {"message_id": 301, "chat": girl_chat, "from": girl, "text": "下班"}})
+        self.webhook({"message": {"message_id": 300, "chat": girl_chat, "from": girl, "text": "下班"}})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_closing_confirmations").fetchone()[0], 0)
+        self.webhook({"message": {"message_id": 301, "chat": girl_chat, "from": girl, "text": "闭店"}})
         with self.app_module.conn() as c:
             closing = dict(c.execute("SELECT * FROM telegram_closing_confirmations").fetchone())
         self.assertEqual(closing['order_count'], 2)
@@ -1043,7 +1046,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
             c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
-        self.webhook({"message": {"message_id": 311, "chat": girl_chat, "from": girl, "text": "下班"}})
+        self.webhook({"message": {"message_id": 311, "chat": girl_chat, "from": girl, "text": "闭店"}})
         with self.app_module.conn() as c:
             closing_id = int(c.execute("SELECT id FROM telegram_closing_confirmations").fetchone()[0])
         self.webhook({"callback_query": {"id": "fulltime-pay", "from": girl,
@@ -1054,7 +1057,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(closing['attendance_prompt_message_id'], 0)
         self.assertEqual(closing['next_attendance_text'], '全职，无需填写下次出勤')
 
-    def test_settlement_screenshot_sends_unclosed_prompt_only_to_bound_girls(self):
+    def test_settlement_screenshot_only_sends_screenshot(self):
         today = self.app_module._tokyo_now().date().isoformat()
         with self.app_module.conn() as c:
             c.execute("""INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled)
@@ -1071,11 +1074,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
             'kind': 'settlement', 'date': today, 'image_data': 'data:image/png;base64,ZmFrZS1wbmc='
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.json['closing']['sent'], 1)
-        self.assertEqual(response.json['closing']['unbound'], 1)
+        self.assertEqual(response.json['closing'], {})
         self.assertTrue(any(method == 'sendDocument' and 'alice-settlement-' in body
                             for method, body in self.telegram_calls))
-        self.assertTrue(any(method == 'sendMessage' and 'chat_id=-52001' in body for method, body in self.telegram_calls))
+        self.assertFalse(any(method == 'sendMessage' and 'chat_id=-52001' in body for method, body in self.telegram_calls))
 
     def test_pure_shift_remembers_normal_and_gold_tags(self):
         login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
@@ -1175,6 +1177,11 @@ class TelegramBookingFlowTest(unittest.TestCase):
             {'id':10,'title':'娜娜子','status':'private'},
             {'id':9,'title':'娜娜子','status':'publish'},
             {'id':8,'title':'官网旧女孩','status':'publish'},
+            {'id':7,'title':'今日出勤','status':'publish'},
+            {'id':6,'title':'招聘优秀女生','status':'private'},
+            {'id':5,'title':'价格和玩法','status':'publish'},
+            {'id':4,'title':'爱丽丝积分活动','status':'publish'},
+            {'id':3,'title':'商务陪酒','status':'private'},
         ], 'nonce')
         self.app_module._wordpress_inline_model_status = lambda _opener, post, status, _nonce: changed.append((post['id'],status))
         try:
@@ -1185,6 +1192,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn((10,'publish'), changed)
         self.assertIn((9,'private'), changed)
         self.assertIn((8,'private'), changed)
+        self.assertFalse(any(post_id in {3,4,5,6,7} for post_id, _status in changed))
+        self.assertEqual(result['protected'], 5)
         self.assertTrue(result['synced'])
 
     def test_points_audit_reports_unstructured_note_and_manual_use_is_clamped(self):
