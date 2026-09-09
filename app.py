@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v120_two_review_outputs"
+APP_VERSION = "v121_review_completeness_and_assisted_copy"
 
 @app.after_request
 def compress_large_json(response):
@@ -1901,7 +1901,8 @@ def crawl_public_reviews(start_url, max_pages=3):
     inserted, updated = _store_scraped_reviews(collected)
     return {'pages':len(visited),'found':len(collected),'inserted':inserted,'updated':updated,'mode':'公开网页'}
 
-def review_marketing_drafts(day, selected_name=''):
+def review_marketing_drafts(day, selected_name='', custom_description=''):
+    custom_description = re.sub(r'\s+', ' ', str(custom_description or '')).strip()[:1200]
     with conn() as c:
         names = ([str(selected_name).strip()] if str(selected_name or '').strip() else
                  [r['girl_name'] for r in c.execute("SELECT girl_name FROM pure_shifts WHERE shift_date=? ORDER BY sort_order,id", (day,)).fetchall()])
@@ -1921,12 +1922,19 @@ def review_marketing_drafts(day, selected_name=''):
             for tag in str(source.get('tags') or '').split(','):
                 if tag:
                     feature_counts[tag] = feature_counts.get(tag,0)+1
+        for tag in _review_tags(custom_description):
+            feature_counts[tag] = feature_counts.get(tag,0) + 100
         girl = girls.get(name) or {}
         if not feature_counts:
             for tag in _review_tags(' '.join(str(girl.get(x) or '') for x in ('tags','remark','remark2'))):
                 feature_counts[tag] = 1
         descriptors = []
-        for value in (girl.get('tags'),girl.get('remark'),girl.get('remark2')):
+        custom_descriptors = []
+        for token in re.split(r'[,，、/|；;。\n]+', custom_description):
+            token = token.strip()
+            if 1 < len(token) <= 32 and token not in custom_descriptors:
+                custom_descriptors.append(token)
+        for value in (custom_description,girl.get('tags'),girl.get('remark'),girl.get('remark2')):
             for token in re.split(r'[,，、/|；;。\n]+', str(value or '')):
                 token = token.strip()
                 if 1 < len(token) <= 24 and token not in descriptors:
@@ -1949,7 +1957,7 @@ def review_marketing_drafts(day, selected_name=''):
         if re.search(r'兄弟|大家|推荐|总结', style_text):
             style_parts.append('口语化总结')
         style_profile = '＋'.join(style_parts[:3]) or '自然叙述＋重点总结'
-        evidence = f'女孩表描述 {len(descriptors)} 项、公开短评 {len(short_sources)} 条、完整长评 {len(long_sources)} 条'
+        evidence = f'你的补充 {len(custom_descriptors)} 项、女孩表/描述 {len(descriptors)} 项、公开短评 {len(short_sources)} 条、完整长评 {len(long_sources)} 条'
         shorts = [
             f'{name}的公开反馈关键词是{f1}和{f2}，想了解她可以先查看实时空档。',
             f'今天想找偏{f1}类型的女孩，可以留意{name}，资料特点是{f2}。',
@@ -1957,12 +1965,13 @@ def review_marketing_drafts(day, selected_name=''):
             f'如果你在意{f1}和相处氛围，{name}是今天值得进一步了解的选择。',
             f'今日女孩介绍：{name}，资料与公开反馈较集中在{f1}、{f2}。'
         ]
-        long_text = (f'【宣传创作稿｜非真实客评】\n\n{name}给人的第一组关键词，是{f1}和{f2}。这不是只看一句介绍得出的结论，而是把女孩表里的资料、已经公开的短评以及素材库中的长评结构放在一起整理后的方向。'
+        custom_sentence = (f'你补充的女孩特点包括：{"、".join(custom_descriptors[:4])}。' if custom_descriptors else '')
+        long_text = (f'【综合评价宣传稿｜非真实客评】\n\n{name}给人的第一组关键词，是{f1}和{f2}。{custom_sentence}这不是只看一句介绍得出的结论，而是把你的描述、女孩表资料、已经公开的短评以及素材库中的长评结构放在一起整理后的方向。'
                      f'从现有资料来看，她更适合重视相处氛围、沟通感受和细节匹配的客人。与其只用一个标签概括，不如预约前告诉客服你喜欢的节奏、在意的部分和希望避免的情况，再结合当天状态判断是否合适。\n\n'
                      f'这篇草稿采用“{style_profile}”的写法：先把{name}最明确的特点说清楚，再补充适合的客人类型和预约建议。现有素材里较稳定的共同点是{f1}、{f2}；其他尚未被多条资料互相印证的描述，不在这里写成确定事实。\n\n'
                      f'如果你正在比较今天的女孩，可以把{name}放进候选名单，再让客服根据实时空档与最新状态确认。预约时间以 MCR 显示为准。本文由系统根据归档资料生成，属于宣传创作草稿，不是任何客人的原话，也不代表真实体验已经发生；发布前请再次核对女孩资料。')
         result.append({'girl_name':name,'features':features,'source_count':len(sources),'short_drafts':shorts,
-                       'long_draft':long_text,'label':'宣传文案草稿（非真实客评）',
+                       'long_draft':long_text,'label':'综合评价宣传稿（非真实客评）',
                        'evidence_summary':evidence,'style_profile':style_profile,
                        'short_source_count':len(short_sources),'long_source_count':len(long_sources)})
     return result
@@ -1998,6 +2007,42 @@ def polish_archived_customer_review(review_id):
             'source_url':item.get('source_page') or item.get('source_url') or '',
             'original_text':original, 'polished_text':polished,
             'label':'真实客户评价润色（仅整理标点与段落，未新增事实）'}
+
+def assist_real_customer_review(girl_name, original_text, confirmed_details=''):
+    """Expand a customer's own short note using only facts and feelings they explicitly supplied."""
+    girl_name = str(girl_name or '').strip()
+    original = re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', str(original_text or ''))).strip()[:1000]
+    details = re.sub(r'\s+', ' ', unicodedata.normalize('NFKC', str(confirmed_details or ''))).strip()[:1500]
+    if not girl_name:
+        raise ValueError('请选择对应女孩')
+    if len(original) < 4:
+        raise ValueError('请至少填写 4 个字的客户原话')
+    with conn() as c:
+        if not c.execute('SELECT 1 FROM girls WHERE name=?', (girl_name,)).fetchone():
+            raise ValueError('女孩表中没有这个女孩')
+        style_rows = c.execute("""SELECT review_text FROM scraped_reviews
+                                  WHERE material_type IN ('公开短评','登录后长评')
+                                  ORDER BY updated_at DESC,id DESC LIMIT 60""").fetchall()
+    style_text = '\n'.join(str(row['review_text'] or '') for row in style_rows)
+    style_profile = ('论坛口语、短句分段' if re.search(r'哈哈|兄弟|真的|总体|总的来说|推荐', style_text)
+                     else '自然口语、重点总结')
+    original_clean = original.rstrip('。.!！?？')
+    detail_clean = details.rstrip('。.!！?？')
+    paragraphs = [f'这次见到{girl_name}，我最直接的感受就是：{original_clean}。']
+    if detail_clean:
+        paragraphs.append(f'具体一点说，我自己确认过的感受还有：{detail_clean}。')
+    first_point = re.split(r'[，。；;、]', original_clean)[0].strip() or original_clean
+    summary_parts = [first_point]
+    if detail_clean:
+        detail_point = re.split(r'[，。；;、]', detail_clean)[0].strip()
+        if detail_point and detail_point not in summary_parts:
+            summary_parts.append(detail_point)
+    paragraphs.append(f'回头想想，比较让我记住的就是{"、".join(summary_parts[:2])}。以上都是我本人这次实际感受到、能够确认的部分，其他没有体验或不能确定的内容就不多写了。')
+    expanded = '\n\n'.join(paragraphs)
+    return {'girl_name':girl_name,'original_text':original,'confirmed_details':details,
+            'polished_text':expanded,'style_profile':style_profile,
+            'label':'真实客户协助润色（依据客户原话与确认感受，未添加他人经历）',
+            'character_count':len(expanded)}
 
 def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
                                     girl_prices=None):
@@ -4555,21 +4600,41 @@ def api_review_crawler():
                                       FROM scraped_reviews ORDER BY updated_at DESC,id DESC LIMIT 100""").fetchall())
             total = int(c.execute('SELECT COUNT(*) FROM scraped_reviews').fetchone()[0])
             girl_names = [r[0] for r in c.execute("SELECT name FROM girls WHERE girl_status!='离职' ORDER BY name").fetchall()]
-            unlocked_rows = c.execute("SELECT source_page,source_url FROM scraped_reviews WHERE material_type='登录后长评'").fetchall()
-        unlocked_keys = {_review_source_identity(r['source_page'] or r['source_url']) for r in unlocked_rows}
+            unlocked_rows = c.execute("SELECT source_page,source_url,review_text FROM scraped_reviews WHERE material_type='登录后长评'").fetchall()
+        unlocked_lengths = {}
+        for row in unlocked_rows:
+            key = _review_source_identity(row['source_page'] or row['source_url'])
+            unlocked_lengths[key] = max(unlocked_lengths.get(key,0), len(str(row['review_text'] or '').strip()))
         for item in recent:
             source_key = _review_source_identity(item.get('source_page') or item.get('source_url'))
-            item['unlock_status'] = ('已归档全文' if item.get('material_type') == '登录后长评' or source_key in unlocked_keys
-                                     else ('待人工解锁' if item.get('material_type') == '公开长评预览' else '公开内容'))
+            own_length = len(str(item.get('review_text') or '').strip())
+            full_length = own_length if item.get('material_type') == '登录后长评' else unlocked_lengths.get(source_key,0)
+            item['content_length'] = own_length
+            if item.get('material_type') in ('登录后长评','公开长评预览'):
+                if full_length >= 350:
+                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '已完整归档', 'green', False
+                elif full_length > 0:
+                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '疑似未复制完整', 'orange', True
+                else:
+                    item['unlock_status'], item['status_color'], item['needs_unlock'] = '只有预览・待解锁', 'red', True
+            else:
+                item['unlock_status'], item['status_color'], item['needs_unlock'] = '公开内容', 'blue', False
         return jsonify(ok=True,total=total,reviews=recent,girls=girl_names)
     d = request.json or {}
     action = str(d.get('action') or 'crawl')
     if action == 'drafts':
         day = str(d.get('date') or tokyo_today_date().isoformat())[:10]
         girl_name = str(d.get('girl_name') or '').strip()
-        return jsonify(ok=True,date=day,girl_name=girl_name,drafts=review_marketing_drafts(day, girl_name))
+        custom_description = str(d.get('custom_description') or '').strip()
+        if custom_description and not girl_name:
+            return jsonify(ok=False,error='填写女孩特点后，请先选择对应女孩'), 400
+        return jsonify(ok=True,date=day,girl_name=girl_name,
+                       drafts=review_marketing_drafts(day, girl_name, custom_description))
     if action == 'polish':
         return jsonify(ok=True,polished=polish_archived_customer_review(d.get('review_id')))
+    if action == 'assist_real':
+        return jsonify(ok=True,polished=assist_real_customer_review(
+            d.get('girl_name'), d.get('original_text'), d.get('confirmed_details')))
     if action == 'archive':
         review_text = re.sub(r'\s+\n', '\n', str(d.get('review_text') or '').strip())
         if len(review_text) < 20:

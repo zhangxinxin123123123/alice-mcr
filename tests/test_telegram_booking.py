@@ -1257,7 +1257,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             'action':'archive', 'girl_name':'娜娜子', 'material_type':'登录后长评',
             'source_url':'https://tokyo-yy.com/精华帖/12345_测试/', 'source_title':'测试长评',
             'author_name':'测试作者', 'review_date':self.day,
-            'review_text':'这是本人登录并按网站规则解锁后手动归档的完整评论正文，内容足够长，也提到了服务温柔和细心。'
+            'review_text':'这是本人登录并按网站规则解锁后手动归档的完整评论正文，内容足够长，也提到了服务温柔和细心。' * 10
         })
         self.assertEqual(result.status_code,200,result.get_data(as_text=True))
         self.assertTrue(result.json['inserted'])
@@ -1266,6 +1266,10 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?,?,?,?)""", ('https://tokyo-yy.com/精华帖/华人出张店/',
                          'https://tokyo-yy.com/精华帖/12345_测试/', '娜娜子', '这是同一篇长评公开显示的预览内容。',
                          '温柔', 'hash-review-preview-12345', '公开长评预览'))
+            c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash,material_type)
+                         VALUES(?,?,?,?,?,?,?)""", ('https://tokyo-yy.com/精华帖/华人出张店/',
+                         'https://tokyo-yy.com/精华帖/98765_未解锁/', '娜娜子', '这是一段很短的公开预览。',
+                         '', 'hash-review-preview-98765', '公开长评预览'))
         listing = self.client.get('/api/review_crawler',headers=headers)
         saved = next(item for item in listing.json['reviews'] if item.get('source_title')=='测试长评')
         self.assertEqual(saved['material_type'],'登录后长评')
@@ -1277,12 +1281,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn('未新增事实',polished.json['polished']['label'])
         self.assertNotIn('预约',polished.json['polished']['polished_text'])
         preview = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-12345')
-        self.assertEqual(preview['unlock_status'],'已归档全文')
+        self.assertEqual(preview['unlock_status'],'已完整归档')
+        self.assertEqual(preview['status_color'],'green')
+        self.assertFalse(preview['needs_unlock'])
+        locked = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-98765')
+        self.assertEqual(locked['status_color'],'red')
+        self.assertTrue(locked['needs_unlock'])
         generated = self.client.post('/api/review_crawler',headers=headers,json={
-            'action':'drafts','date':'2099-01-01','girl_name':'娜娜子'})
+            'action':'drafts','date':'2099-01-01','girl_name':'娜娜子','custom_description':'笑容甜美，聊天自然，第一次见面也不会尴尬'})
         self.assertEqual(generated.status_code,200,generated.get_data(as_text=True))
         self.assertEqual(generated.json['drafts'][0]['girl_name'],'娜娜子')
         self.assertIn('完整长评',generated.json['drafts'][0]['evidence_summary'])
+        self.assertIn('你的补充',generated.json['drafts'][0]['evidence_summary'])
+        self.assertIn('笑容甜美',generated.json['drafts'][0]['long_draft'])
+        assisted = self.client.post('/api/review_crawler',headers=headers,json={
+            'action':'assist_real','girl_name':'娜娜子','original_text':'本人比照片好看，聊天很自然',
+            'confirmed_details':'见面不会尴尬，态度温柔'})
+        self.assertEqual(assisted.status_code,200,assisted.get_data(as_text=True))
+        assisted_text = assisted.json['polished']['polished_text']
+        self.assertIn('本人比照片好看',assisted_text)
+        self.assertIn('见面不会尴尬',assisted_text)
+        self.assertNotIn('按摩',assisted_text)
+        self.assertGreaterEqual(assisted.json['polished']['character_count'],70)
 
     def test_new_customer_midnight_digest_is_idempotent(self):
         report_day = (self.app_module._tokyo_now().date()-timedelta(days=1)).isoformat()
