@@ -64,7 +64,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
                           "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
-                          "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews"):
+                          "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
+                          "telegram_ai_sessions"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -117,6 +118,40 @@ class TelegramBookingFlowTest(unittest.TestCase):
                             for method, body in self.telegram_calls))
         self.assertTrue(any(method == 'sendMessage' and '%E6%96%87%E6%A1%88%E7%94%9F%E6%88%90%E5%AE%8C%E6%88%90' in body
                             for method, body in self.telegram_calls))
+
+    def test_internal_group_alice_ai_uses_read_only_mcr_snapshot(self):
+        internal = {"id": -90123, "type": "supergroup", "title": "Alice内部群"}
+        manager = {"id": 9123, "first_name": "店长"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                   "text": "/绑定审核群"}})
+        captured = {}
+        old_urlopen = self.telegram_module.urlopen
+        def fake_ai_urlopen(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                captured["body"] = json.loads(req.data.decode("utf-8"))
+                return FakeTelegramResponse({"output": [{"content": [{
+                    "type": "output_text", "text": "今天有 1 位女孩出勤，建议先确认晚间空档哦～"
+                }]}]})
+            return old_urlopen(req, timeout=timeout)
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai_urlopen
+        try:
+            self.webhook({"message": {"message_id": 2, "chat": internal, "from": manager,
+                                       "text": "Alice 今天经营怎么样？"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+        self.assertFalse(captured["body"]["store"])
+        self.assertIn("只有只读权限", captured["body"]["instructions"])
+        self.assertIn("MCR实时摘要", captured["body"]["input"][-1]["content"])
+        self.assertTrue(any(method == "editMessageText" and "%E5%BB%BA%E8%AE%AE" in body
+                            for method, body in self.telegram_calls))
+        with self.app_module.conn() as c:
+            history = c.execute("SELECT history_json FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
+                                (str(internal["id"]), str(manager["id"]))).fetchone()
+        self.assertIsNotNone(history)
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {

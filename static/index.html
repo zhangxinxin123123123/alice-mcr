@@ -304,6 +304,16 @@ body:not(.role-boss) .boss-only{display:none!important}
    <button class="primary" onclick="saveTelegramSettings()">保存 TEL 预约设置</button>
    <button class="soft" onclick="setupTelegramWebhook()">启用 / 更新 Webhook</button>
   </div>
+  <div class="card"><h2>Alice AI 少女助手</h2>
+   <p class="note">仅在 Alice 内部群回答，不会出现在客户私聊或女孩专属群。AI 只读取经营汇总并给建议，不能通过聊天修改订单、积分或客户资料。</p>
+   <div class="form">
+    <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
+    <input id="tgAiName" placeholder="助手名字，例如 爱丽丝">
+   </div>
+   <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
+   <div id="tgAiStatus" class="note"></div>
+   <button class="primary" onclick="saveTelegramSettings('Alice AI 助手设置已保存')">保存 AI 助手设置</button>
+  </div>
   <div class="card"><h2>客户流程编辑器</h2>
    <p class="note">点击左侧流程节点，编辑该步骤给客户看的文字和按钮；右侧手机会实时预览。变量可用：{girl}、{date}、{free_time}、{start_time}、{end_time}。</p>
    <div class="tg-flow-layout">
@@ -409,7 +419,9 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
     <details class="manual-block" data-search="接龙导入 微信 LINE 日期 女孩 客户编号 新客户"><summary>📥 接龙导入</summary><div class="manual-body"><ol><li>首行写日期和女孩，例如 <code>0908娜娜子</code>。</li><li>预约行写 <code>序号.时间/价格/客户</code>；首次预约写客户名，以后写四位客户编号。</li><li>纯数字客户名使用双斜线，例如 <code>8-9/10000//123</code>。</li><li>导入前会与旧接龙核对：不变的不重复新增，新增的写入，修改的同步修改。</li></ol></div></details>
     <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li></ol></div></details>
-    <details class="manual-block" data-search="TEL 关键词 导入 最新接龙 自动导入 出勤 积分查询 编号查询 绑定"><summary>⌨️ TEL 群关键词</summary><div class="manual-body">
+    <details class="manual-block" data-search="TEL 关键词 Alice AI 助手 经营建议 导入 最新接龙 自动导入 出勤 积分查询 编号查询 绑定"><summary>⌨️ TEL 群关键词</summary><div class="manual-body">
+     <div class="manual-command"><code>Alice + 问题</code><span>在内部群询问实时业绩、出勤、指定客户编号或经营建议，例如 <code>Alice 今天经营怎么样？</code>。只读分析，不会修改 MCR 数据；发送 <code>Alice 清空</code> 可清除自己的最近对话。</span></div>
+     <div class="manual-command"><code>AI助手开启 / 关闭 / 状态</code><span>店长、客服或群管理员控制内部 AI 助手；状态会同时显示 OpenAI API 是否配置。</span></div>
      <div class="manual-command"><code>导入</code><span>回复一张接龙消息发送；也可把“导入”写在当天四位日期前。与旧数据核对后仅新增或修改。</span></div>
      <div class="manual-command"><code>最新接龙</code><span>在群里重新发送该女孩当天最新接龙。</span></div>
      <div class="manual-command"><code>自动导入开启 / 关闭 / 状态</code><span>内部群控制每 30 分钟扫描；“状态”同时显示下次检查时间。专属群重发当天接龙时，即使关闭也会即时检查。</span></div>
@@ -2710,6 +2722,10 @@ async function loadTelegramSettings(){
   tgSupportUsername.value=s.support_username||'';
   tgPointRate.value=s.points_yen_per_point||1;
   tgHotelTimeout.value=s.hotel_upload_timeout_seconds||120;
+  tgAiEnabled.value=String(s.ai_assistant_enabled||'1');
+  tgAiName.value=s.ai_assistant_name||'爱丽丝';
+  tgAiPersona.value=s.ai_assistant_persona||'';
+  tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜内部群提问：<code>Alice 今天经营怎么样？</code>`;
   telegramFlowDraft={...s};
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
   renderTelegramBindings();
@@ -2787,6 +2803,9 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     hotel_url:tgHotel.value,hotel_upload_timeout_seconds:tgHotelTimeout.value||120,
     support_username:tgSupportUsername.value.trim().replace(/^@/,''),
     points_yen_per_point:Math.max(1,Number(tgPointRate.value||1)),
+    ai_assistant_enabled:tgAiEnabled.value==='1'?'1':'0',
+    ai_assistant_name:tgAiName.value.trim()||'爱丽丝',
+    ai_assistant_persona:tgAiPersona.value.trim(),
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();
