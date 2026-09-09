@@ -54,7 +54,7 @@ DEFAULT_SETTINGS = {
     "auto_chain_import_enabled": "1",
     "auto_chain_import_interval_minutes": "30",
     "ai_assistant_enabled": "1",
-    "ai_assistant_name": "艾莉兔",
+    "ai_assistant_name": "兔兔",
     "ai_assistant_persona": "温柔、聪明、可爱，像忠诚可靠的少女女仆助手；说话自然简洁，适量使用可爱语气和 emoji。",
     "ai_customer_enabled": "1",
     "ai_girl_group_enabled": "1",
@@ -69,6 +69,9 @@ DEFAULT_SETTINGS = {
     "ai_customer_daily_limit": "20",
     "ai_girl_daily_limit": "40",
     "ai_teacher_user_ids": "",
+    "ai_abnormal_alerts_enabled": "1",
+    "ai_block_out_of_scope": "1",
+    "ai_single_token_warning": "8000",
 }
 
 
@@ -227,8 +230,8 @@ def register_telegram_booking(
             c.execute("INSERT OR IGNORE INTO telegram_chain_sync_state(id) VALUES(1)")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
-            c.execute("""UPDATE telegram_settings SET setting_value='艾莉兔',updated_at=CURRENT_TIMESTAMP
-                         WHERE setting_key='ai_assistant_name' AND setting_value='爱丽丝'""")
+            c.execute("""UPDATE telegram_settings SET setting_value='兔兔',updated_at=CURRENT_TIMESTAMP
+                         WHERE setting_key='ai_assistant_name' AND setting_value IN ('爱丽丝','艾莉兔')""")
             cols = [r[1] for r in c.execute("PRAGMA table_info(customer_reservations)").fetchall()]
             additions = {
                 "telegram_user_id": "TEXT DEFAULT ''",
@@ -488,9 +491,9 @@ def register_telegram_booking(
         daily_budget = max(0.0, float(cfg.get("ai_daily_budget_usd") or 0))
         monthly_budget = max(0.0, float(cfg.get("ai_monthly_budget_usd") or 0))
         if daily_budget and float(usage["today"]["cost"] or 0) >= daily_budget:
-            raise RuntimeError("艾莉兔已达今日费用上限，等待主人调整。")
+            raise RuntimeError("兔兔已达今日费用上限，等待主人调整。")
         if monthly_budget and float(usage["this_month"]["cost"] or 0) >= monthly_budget:
-            raise RuntimeError("艾莉兔已达本月费用上限，等待主人调整。")
+            raise RuntimeError("兔兔已达本月费用上限，等待主人调整。")
 
     def record_ai_usage(cfg, mode, user_id, model, payload):
         usage = payload.get("usage") or {}
@@ -538,7 +541,7 @@ def register_telegram_booking(
             if valid_group_chat_id(internal_id):
                 try:
                     send_message(internal_id,
-                                 f"⚠️ <b>艾莉兔费用提醒</b>\n{label}估算用量已达 <b>${cost:.4f}</b>，"
+                                 f"⚠️ <b>兔兔费用提醒</b>\n{label}估算用量已达 <b>${cost:.4f}</b>，"
                                  f"预警线为 <b>${budget:.2f}</b>。\n系统不会自动升级模型或套餐。",
                                  thread_id=int(cfg.get("default_review_thread_id") or 0))
                 except Exception:
@@ -591,6 +594,81 @@ def register_telegram_booking(
                           (int(interaction_id),))
         return teaching_id
 
+    def safe_ai_log_text(value):
+        text = str(value or "")[:600]
+        text = re.sub(r"sk-[A-Za-z0-9_-]{6,}", "[API_KEY已隐藏]", text, flags=re.I)
+        text = re.sub(r"(?i)(password|passwd|pwd|密码)\s*[:=：]\s*\S+", r"\1：[已隐藏]", text)
+        text = re.sub(r"(?<!\d)\d{7,15}(?!\d)", "[长号码已隐藏]", text)
+        return text
+
+    def ai_scope_issue(mode, question):
+        value = str(question or "").strip().lower()
+        if mode == "internal" or not value:
+            return ""
+        common = ("你好", "嗨", "hello", "hi", "谢谢", "谢啦", "你是谁", "艾莉兔", "兔兔")
+        if any(word in value for word in common):
+            return ""
+        unrelated_terms = ("天气", "新闻", "股票", "基金", "比特币", "加密货币", "翻译", "作文", "写代码",
+                           "政治", "选举", "游戏", "星座", "算命", "菜谱", "电影", "音乐", "旅游攻略")
+        if any(term in value for term in unrelated_terms):
+            return "与TEL预约无关" if mode == "customer" else "超出本女孩专属群可查范围"
+        customer_terms = ("预约", "怎么约", "想约", "女孩", "妹妹", "空闲", "空档", "时间", "今天", "明天",
+                          "后天", "出勤", "酒店", "地址", "房号", "积分", "取消", "改期", "客服", "价格", "多少钱",
+                          "约满", "满了", "可以约", "我的预约")
+        girl_terms = ("出勤", "上班", "下班", "接龙", "预约", "几单", "单数", "结算", "到手", "收入",
+                      "时间", "tel", "bot", "机器人", "怎么用", "金额")
+        terms = customer_terms if mode == "customer" else girl_terms
+        return "" if any(term in value for term in terms) else "与TEL预约无关" if mode == "customer" else "超出本女孩专属群可查范围"
+
+    def log_ai_monitor(user, mode, question, level="INFO", action="AI查询", extra=None):
+        detail = {"action": action, "mode": mode, "question": safe_ai_log_text(question)}
+        if extra:
+            detail.update(extra)
+        try:
+            with conn() as c:
+                c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,
+                    response_status,log_level,action_name) VALUES(?,?,?,?,?,?,?,?)""",
+                          (display_name(user), "telegram_" + str(mode), "TELEGRAM", "alice_ai_assistant",
+                           json.dumps(detail, ensure_ascii=False), 200 if level != "ERROR" else 500,
+                           level, action))
+        except Exception:
+            pass
+
+    def notify_ai_monitor(cfg, user, mode, question, reason, level="WARN"):
+        if str(cfg.get("ai_abnormal_alerts_enabled") or "1") != "1":
+            return
+        internal_id = str(cfg.get("default_review_chat_id") or "")
+        if not valid_group_chat_id(internal_id):
+            return
+        try:
+            icon = "⛔" if level == "ERROR" else "⚠️"
+            send_message(internal_id,
+                         f"{icon} <b>兔兔{escape(reason)}</b>\n"
+                         f"场景：{escape(str(mode))}｜用户：{escape(display_name(user))}\n"
+                         f"询问：{escape(safe_ai_log_text(question))}",
+                         thread_id=int(cfg.get("default_review_thread_id") or 0))
+        except Exception:
+            pass
+
+    def ai_usage_anomaly(cfg, mode, user_id, usage):
+        reasons = []
+        total = int((usage or {}).get("total_tokens") or 0)
+        token_warning = max(1000, int(float(cfg.get("ai_single_token_warning") or 8000)))
+        if total >= token_warning:
+            reasons.append(f"单次用量 {total} Token")
+        if mode in ("customer", "girl"):
+            key = "ai_customer_daily_limit" if mode == "customer" else "ai_girl_daily_limit"
+            limit = max(1, int(float(cfg.get(key) or (20 if mode == "customer" else 40))))
+            calls = ai_mode_daily_calls(mode, user_id)
+            if calls >= max(3, int(limit * 0.8)):
+                reasons.append(f"今日已调用 {calls}/{limit} 次")
+            with conn() as c:
+                rapid = int(c.execute("""SELECT COUNT(*) FROM telegram_ai_usage WHERE mode=? AND user_id=?
+                    AND created_at>=datetime('now','-10 minutes')""", (str(mode), str(user_id))).fetchone()[0] or 0)
+            if rapid >= 5:
+                reasons.append(f"10分钟内调用 {rapid} 次")
+        return "；".join(dict.fromkeys(reasons))
+
     def ai_session_history(chat_id, user_id):
         with conn() as c:
             row = c.execute("SELECT history_json FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
@@ -634,7 +712,7 @@ def register_telegram_booking(
             snapshot = girl_group_snapshot_for_ai(chat_id)
         else:
             snapshot = business_snapshot_for_ai(question)
-        assistant_name = str(cfg.get("ai_assistant_name") or "艾莉兔").strip()[:30]
+        assistant_name = str(cfg.get("ai_assistant_name") or "兔兔").strip()[:30]
         persona = str(cfg.get("ai_assistant_persona") or DEFAULT_SETTINGS["ai_assistant_persona"]).strip()[:1000]
         common = (f"你是爱丽丝学院的 AI 少女女仆助手，名字是{assistant_name}。{persona}"
                   "始终用“兔兔”自称，不用“我”自称。"
@@ -703,7 +781,7 @@ def register_telegram_booking(
             return False
         chat, user = message.get("chat") or {}, message.get("from") or {}
         if not teacher_allowed(user, chat.get("id"), cfg):
-            send_message(chat.get("id"), "❌ 只有艾莉兔设置中允许的老师可以教学。")
+            send_message(chat.get("id"), "❌ 只有兔兔设置中允许的老师可以教学。")
             return True
         if not match:
             with conn() as c:
@@ -771,15 +849,15 @@ def register_telegram_booking(
             else:
                 enabled = str(cfg.get("ai_assistant_enabled") or "1")
             configured = bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
-            assistant_name = escape(str(cfg.get("ai_assistant_name") or "艾莉兔"))
+            assistant_name = escape(str(cfg.get("ai_assistant_name") or "兔兔"))
             send_message(chat.get("id"), f"🎀 AI 助手：<b>{'已开启' if enabled == '1' else '已关闭'}</b>｜API：<b>{'已配置' if configured else '未配置'}</b>\n提问格式：<code>{assistant_name} 今天经营怎么样？</code>")
             return True
-        configured_name = str(cfg.get("ai_assistant_name") or "艾莉兔").strip()
+        configured_name = str(cfg.get("ai_assistant_name") or "兔兔").strip()
         if mode == "customer" and text in ("退出艾莉兔", "继续预约", "结束对话"):
             set_ai_session_active(chat.get("id"), user.get("id"), False)
             send_message(chat.get("id"), "🎀 已切回预约流程～请继续点击上方按钮，或发送 /start 重新开始。")
             return True
-        names = [r"/?alice(?:@\w+)?", "爱丽丝", re.escape(configured_name)]
+        names = [r"/?alice(?:@\w+)?", "爱丽丝", "艾莉兔", "兔兔", re.escape(configured_name)]
         match = re.match(r"^(?:" + "|".join(dict.fromkeys(names)) + r")\s*[+＋:：,，]?\s*(.*)$", text, re.I)
         if match:
             question = match.group(1).strip()
@@ -807,10 +885,27 @@ def register_telegram_booking(
             help_text = ("可以问我怎么预约、今天谁有空、怎么发送酒店或取消改期"
                          if mode == "customer" else ("可以问我本人的出勤、接龙和结算问题"
                          if mode == "girl" else "可以问客户编号、近期业绩、出勤安排或经营建议"))
-            send_message(chat.get("id"), f"🎀 我是女仆助手 {escape(configured_name)}～\n{help_text}。")
+            send_message(chat.get("id"), f"🎀 兔兔是女仆助手 {escape(configured_name)}～\n{help_text}。")
             return True
         if len(question) > 1200:
+            log_ai_monitor(user, mode, question, "WARN", "AI异常询问", {"reason": "问题超过1200字", "openai_called": False})
+            notify_ai_monitor(cfg, user, mode, question, "异常询问：问题超过1200字")
             send_message(chat.get("id"), "问题有点太长啦，请缩短到 1200 字以内再问我～")
+            return True
+        scope_reason = ai_scope_issue(mode, question)
+        if scope_reason and str(cfg.get("ai_block_out_of_scope") or "1") == "1":
+            log_ai_monitor(user, mode, question, "WARN", "AI无关询问",
+                           {"reason": scope_reason, "openai_called": False, "saved_api_cost": True})
+            notify_ai_monitor(cfg, user, mode, question, "收到无关询问（已拦截，未消耗API）")
+            if mode == "customer":
+                rendered = ("🎀 兔兔只可以协助TEL预约相关的问题哦～\n\n"
+                            "客人哥哥可以问兔兔谁有空、预约时间、价格、积分、酒店、取消或改期♡")
+                support = support_url_button(cfg)
+                keyboard = inline_keyboard([[support]]) if support else None
+            else:
+                rendered = ("🎀 兔兔在这个专属群里，只可以回答姐姐自己的出勤、接龙、预约单数和结算问题哦～♡")
+                keyboard = None
+            send_message(chat.get("id"), rendered, keyboard)
             return True
         placeholder = send_message(chat.get("id"), f"🎀 {escape(configured_name)}正在认真帮你看，请稍等一下下～")
         message_id = int((placeholder or {}).get("message_id") or 0)
@@ -831,33 +926,25 @@ def register_telegram_booking(
                             chat_id,user_id,response_message_id,mode,question,answer) VALUES(?,?,?,?,?,?)""",
                                            (str(chat_id), str(user_id), message_id, mode, question[:2000], answer[:5000]))
                         interaction_id = int(cursor.lastrowid)
-                try:
-                    with conn() as c:
-                        c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,
-                            response_status,log_level,action_name) VALUES(?,?,?,?,?,?,?,?)""",
-                                  (display_name(user), "telegram_" + mode, "TELEGRAM", "alice_ai_assistant",
-                                   json.dumps({"action": "AI对话", "mode": mode, "model": used_model,
-                                               "tokens": usage.get("total_tokens", 0),
-                                               "estimated_cost_usd": round(float(usage.get("estimated_cost_usd") or 0), 8),
-                                               "question": question[:300] if mode != "customer" else "[客户预约咨询已隐藏]"}, ensure_ascii=False),
-                                   200, "INFO", "AI对话"))
-                except Exception:
-                    pass
-                rendered = f"🎀 <b>{escape(str(cfg.get('ai_assistant_name') or '艾莉兔'))}</b>\n\n{escape(answer)}"
+                anomaly = ai_usage_anomaly(current_cfg, mode, user_id, usage)
+                if scope_reason:
+                    anomaly = "；".join(x for x in (scope_reason, anomaly) if x)
+                log_ai_monitor(user, mode, question, "WARN" if anomaly else "INFO",
+                               "AI异常调用" if anomaly else "AI查询",
+                               {"model": used_model, "tokens": usage.get("total_tokens", 0),
+                                "estimated_cost_usd": round(float(usage.get("estimated_cost_usd") or 0), 8),
+                                "reason": anomaly, "openai_called": True})
+                if anomaly:
+                    notify_ai_monitor(current_cfg, user, mode, question, "调用预警：" + anomaly)
+                rendered = f"🎀 <b>{escape(str(cfg.get('ai_assistant_name') or '兔兔'))}</b>\n\n{escape(answer)}"
                 feedback_keyboard = (inline_keyboard([[
                     callback_button("👍 采纳", f"ai_feedback:approve:{interaction_id}"),
                     callback_button("❌ 不准确", f"ai_feedback:reject:{interaction_id}"),
                 ]]) if mode == "internal" and interaction_id else None)
             except Exception as exc:
-                try:
-                    with conn() as c:
-                        c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,
-                            response_status,log_level,action_name) VALUES(?,?,?,?,?,?,?,?)""",
-                                  (display_name(user), "telegram_" + mode, "TELEGRAM", "alice_ai_assistant",
-                                   json.dumps({"action": "AI经营查询失败", "error": str(exc)[:300]}, ensure_ascii=False),
-                                   500, "ERROR", "AI经营查询失败"))
-                except Exception:
-                    pass
+                log_ai_monitor(user, mode, question, "ERROR", "AI调用异常",
+                               {"error": safe_ai_log_text(str(exc)), "openai_attempted": True})
+                notify_ai_monitor(settings(), user, mode, question, "调用异常，请到管理日志查看", "ERROR")
                 if mode == "customer":
                     rendered = ("🎀 嗚…兔兔今天有一点点累啦，想先休息一下下～\n\n"
                                 "客人哥哥稍后再来找兔兔吧，着急的话可以先联系人工客服哦♡")
@@ -1001,7 +1088,7 @@ def register_telegram_booking(
             rows.append([support])
         welcome = cfg.get("welcome_text") or DEFAULT_SETTINGS["welcome_text"]
         if str(cfg.get("ai_assistant_enabled") or "1") == "1" and str(cfg.get("ai_customer_enabled") or "1") == "1":
-            welcome += f"\n\n🎀 预约问题也可以直接问女仆助手：<code>{escape(str(cfg.get('ai_assistant_name') or '艾莉兔'))} 怎么预约？</code>"
+            welcome += f"\n\n🎀 预约问题也可以直接问女仆助手：<code>{escape(str(cfg.get('ai_assistant_name') or '兔兔'))} 怎么预约？</code>"
         send_message(chat_id, welcome, inline_keyboard(rows))
 
     def flow_keyboard(back_data=None, back_text="⬅️ 返回上一层"):
@@ -3031,6 +3118,8 @@ def register_telegram_booking(
                             value = str(max(0.0, min(10000.0, float(value or 0))))
                         elif key in ("ai_customer_daily_limit", "ai_girl_daily_limit"):
                             value = str(max(1, min(1000, int(float(value or 1)))))
+                        elif key == "ai_single_token_warning":
+                            value = str(max(1000, min(100000, int(float(value or 8000)))))
                         c.execute("""INSERT INTO telegram_settings(setting_key,setting_value,updated_at)
                                      VALUES(?,?,CURRENT_TIMESTAMP)
                                      ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP""", (key, value))

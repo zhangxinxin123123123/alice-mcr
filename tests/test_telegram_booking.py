@@ -287,6 +287,75 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertNotIn("Render", edits[-1])
         self.assertNotIn("AI+%E6%B2%A1%E6%9C%89%E8%BF%94%E5%9B%9E", edits[-1])
 
+    def test_out_of_scope_ai_question_is_logged_alerted_and_costs_no_api_call(self):
+        internal = {"id": -90131, "type": "supergroup", "title": "Alice内部群"}
+        manager = {"id": 9131, "first_name": "店长"}
+        customer = {"id": 9132, "first_name": "客人"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                  "text": "/绑定审核群"}})
+        api_calls = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def reject_ai_call(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                api_calls.append(req.full_url)
+                raise AssertionError("无关问题不应调用 OpenAI")
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = reject_ai_call
+        self.telegram_calls.clear()
+        try:
+            self.webhook({"message": {"message_id": 2, "chat": {"id": 9132, "type": "private"},
+                                      "from": customer, "text": "东京天气怎么样"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        self.assertEqual(api_calls, [])
+        self.assertTrue(any(method == "sendMessage" and "%E5%85%94%E5%85%94" in body
+                            for method, body in self.telegram_calls))
+        self.assertTrue(any(method == "sendMessage" and "-90131" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
+                            for method, body in self.telegram_calls))
+        with self.app_module.conn() as c:
+            row = dict(c.execute("SELECT * FROM operation_logs ORDER BY id DESC LIMIT 1").fetchone())
+        self.assertEqual(row["action_name"], "AI无关询问")
+        self.assertEqual(row["log_level"], "WARN")
+        self.assertIn("东京天气怎么样", row["detail"])
+        self.assertIn('"openai_called": false', row["detail"])
+
+    def test_tutu_alias_works_in_bound_girl_group(self):
+        internal = {"id": -90133, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -90134, "type": "supergroup", "title": "娜娜子群"}
+        manager = {"id": 9133, "first_name": "店长"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
+                                  "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 2, "chat": girl_chat, "from": manager,
+                                  "text": "/绑定女孩 娜娜子"}})
+        calls = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_ai(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                calls.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output_text": "姐姐今天19点出勤哦～"})
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai
+        try:
+            self.webhook({"message": {"message_id": 3, "chat": girl_chat, "from": manager,
+                                      "text": "兔兔 我今天几点出勤？"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("称呼对方为“姐姐”", calls[0]["instructions"])
+
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {
             "message_id": 0,
