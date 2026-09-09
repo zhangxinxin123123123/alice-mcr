@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v118_tokyo_review_archive"
+APP_VERSION = "v119_review_unlock_and_girl_drafts"
 
 @app.after_request
 def compress_large_json(response):
@@ -1647,6 +1647,14 @@ def _safe_public_url(value):
 def _review_tags(text):
     return [label for label, words in REVIEW_FEATURE_WORDS.items() if any(word.lower() in text.lower() for word in words)]
 
+def _review_source_identity(value):
+    url = str(value or '').strip()
+    parsed = urlparse(url)
+    match = re.search(r'/(?:精华帖/)?(\d{4,})(?:[_/-]|$)', unquote(parsed.path))
+    if match and parsed.hostname and 'tokyo-yy.com' in parsed.hostname.lower():
+        return 'tokyo-report:' + match.group(1)
+    return (parsed.scheme.lower()+'://'+parsed.netloc.lower()+parsed.path.rstrip('/')) if parsed.netloc else url
+
 TOKYO_REPORT_XOR_KEY = b'Yk9zQ2h0RjdtVnBMejRYZ1R1RjhNMXZSYmdBcWVIeXJEdE5uV3VCc1BkVUk='
 
 def _decode_tokyo_report_payload(payload):
@@ -1893,14 +1901,21 @@ def crawl_public_reviews(start_url, max_pages=3):
     inserted, updated = _store_scraped_reviews(collected)
     return {'pages':len(visited),'found':len(collected),'inserted':inserted,'updated':updated,'mode':'公开网页'}
 
-def review_marketing_drafts(day):
+def review_marketing_drafts(day, selected_name=''):
     with conn() as c:
-        names = [r['girl_name'] for r in c.execute("SELECT girl_name FROM pure_shifts WHERE shift_date=? ORDER BY sort_order,id", (day,)).fetchall()]
-        girls = {r['name']:dict(r) for r in c.execute("SELECT name,tags,remark,remark2 FROM girls").fetchall()}
-        review_rows = rows(c.execute("SELECT girl_name,review_text,tags FROM scraped_reviews ORDER BY updated_at DESC,id DESC").fetchall())
+        names = ([str(selected_name).strip()] if str(selected_name or '').strip() else
+                 [r['girl_name'] for r in c.execute("SELECT girl_name FROM pure_shifts WHERE shift_date=? ORDER BY sort_order,id", (day,)).fetchall()])
+        girls = {r['name']:dict(r) for r in c.execute("SELECT name,girl_alias,tags,remark,remark2 FROM girls").fetchall()}
+        review_rows = rows(c.execute("""SELECT girl_name,review_text,tags,material_type,author_name,source_title
+                                      FROM scraped_reviews ORDER BY updated_at DESC,id DESC""").fetchall())
+    global_long_rows = [r for r in review_rows if r.get('material_type') == '登录后长评']
     result = []
     for name in dict.fromkeys(names):
+        if name not in girls:
+            continue
         sources = [r for r in review_rows if _wordpress_girl_key(r.get('girl_name')) == _wordpress_girl_key(name)]
+        short_sources = [r for r in sources if r.get('material_type') == '公开短评']
+        long_sources = [r for r in sources if r.get('material_type') == '登录后长评']
         feature_counts = {}
         for source in sources:
             for tag in str(source.get('tags') or '').split(','):
@@ -1910,21 +1925,46 @@ def review_marketing_drafts(day):
         if not feature_counts:
             for tag in _review_tags(' '.join(str(girl.get(x) or '') for x in ('tags','remark','remark2'))):
                 feature_counts[tag] = 1
-        features = [x[0] for x in sorted(feature_counts.items(), key=lambda x:(-x[1],x[0]))[:4]] or ['自然亲切','轻松陪伴']
+        descriptors = []
+        for value in (girl.get('tags'),girl.get('remark'),girl.get('remark2')):
+            for token in re.split(r'[,，、/|；;。\n]+', str(value or '')):
+                token = token.strip()
+                if 1 < len(token) <= 24 and token not in descriptors:
+                    descriptors.append(token)
+        features = [x[0] for x in sorted(feature_counts.items(), key=lambda x:(-x[1],x[0]))[:4]]
+        for descriptor in descriptors:
+            if len(features) >= 4:
+                break
+            if descriptor not in features:
+                features.append(descriptor)
+        features = features or ['自然亲切','轻松陪伴']
         f1, f2 = features[0], features[min(1,len(features)-1)]
+        style_sources = long_sources or global_long_rows
+        style_text = '\n'.join(str(r.get('review_text') or '') for r in style_sources[:20])
+        style_parts = []
+        if re.search(r'评分|\d(?:\.\d)?分|颜值.{0,8}身材', style_text):
+            style_parts.append('先概括重点、再分项评价')
+        if re.search(r'见面|进门|开始|后来|最后|结束', style_text):
+            style_parts.append('按见面过程推进')
+        if re.search(r'兄弟|大家|推荐|总结', style_text):
+            style_parts.append('口语化总结')
+        style_profile = '＋'.join(style_parts[:3]) or '自然叙述＋重点总结'
+        evidence = f'女孩表描述 {len(descriptors)} 项、公开短评 {len(short_sources)} 条、完整长评 {len(long_sources)} 条'
         shorts = [
-            f'{name}今天出勤，{f1}又有{f2}，想放松一下可以来看看。',
-            f'想找{f1}系女孩？{name}今日可约，氛围自然不赶时间。',
-            f'{name}的关键词是{f1}、{f2}，适合想轻松相处的客人。',
-            f'今晚想要一点特别的陪伴，{name}会是值得留意的选择。',
-            f'今日推荐{name}：{f1}，相处舒服，预约前可先查询实时空档。'
+            f'{name}的公开反馈关键词是{f1}和{f2}，想了解她可以先查看实时空档。',
+            f'今天想找偏{f1}类型的女孩，可以留意{name}，资料特点是{f2}。',
+            f'{name}｜{f1} × {f2}，结合女孩资料与公开短评整理，预约前可先咨询。',
+            f'如果你在意{f1}和相处氛围，{name}是今天值得进一步了解的选择。',
+            f'今日女孩介绍：{name}，资料与公开反馈较集中在{f1}、{f2}。'
         ]
-        long_text = (f'{name}今天出勤。根据已采集的公开评论素材与后台资料，比较突出的印象是{f1}和{f2}。'
-                     f'她更适合希望过程自然、沟通轻松，也在意细节感受的客人。第一次见面不用担心尴尬，可以先把喜欢的相处方式、希望的节奏以及在意的服务细节告诉客服，我们会协助确认。'
-                     f'如果你更看重聊天气氛、相处距离或某一种特别体验，也建议预约前主动说明；这样既方便女孩提前准备，也能减少彼此预期不同。我们不会只凭一句标签替你做决定，客服可以结合当天状态、时间长度和你的偏好给出更合适的建议。'
-                     f'当天空档会随预约实时变化，请以爱丽丝系统显示为准；如果暂时没有合适时间，也可以联系人工客服询问调整。此段文字是根据公开素材整理的宣传草稿，并非某一位客人的真实原话，上架前请由客服再次核对女孩资料与实际服务内容。')
+        long_text = (f'【宣传创作稿｜非真实客评】\n\n{name}给人的第一组关键词，是{f1}和{f2}。这不是只看一句介绍得出的结论，而是把女孩表里的资料、已经公开的短评以及素材库中的长评结构放在一起整理后的方向。'
+                     f'从现有资料来看，她更适合重视相处氛围、沟通感受和细节匹配的客人。与其只用一个标签概括，不如预约前告诉客服你喜欢的节奏、在意的部分和希望避免的情况，再结合当天状态判断是否合适。\n\n'
+                     f'这篇草稿采用“{style_profile}”的写法：先把{name}最明确的特点说清楚，再补充适合的客人类型和预约建议。现有素材里较稳定的共同点是{f1}、{f2}；其他尚未被多条资料互相印证的描述，不在这里写成确定事实。\n\n'
+                     f'如果你正在比较今天的女孩，可以把{name}放进候选名单，再让客服根据实时空档与最新状态确认。预约时间以 MCR 显示为准。本文由系统根据归档资料生成，属于宣传创作草稿，不是任何客人的原话，也不代表真实体验已经发生；发布前请再次核对女孩资料。')
         result.append({'girl_name':name,'features':features,'source_count':len(sources),'short_drafts':shorts,
-                       'long_draft':long_text,'label':'宣传文案草稿（非真实客评）'})
+                       'long_draft':long_text,'label':'宣传文案草稿（非真实客评）',
+                       'evidence_summary':evidence,'style_profile':style_profile,
+                       'short_source_count':len(short_sources),'long_source_count':len(long_sources)})
     return result
 
 def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
@@ -4478,17 +4518,24 @@ def api_review_crawler():
     init_db()
     if request.method == 'GET':
         with conn() as c:
-            recent = rows(c.execute("""SELECT id,source_url,source_page,girl_name,review_text,tags,review_date,
+            recent = rows(c.execute("""SELECT id,source_url,source_page,girl_name,review_text,tags,review_hash,review_date,
                                       material_type,author_name,source_title,access_scope,created_at,updated_at
                                       FROM scraped_reviews ORDER BY updated_at DESC,id DESC LIMIT 100""").fetchall())
             total = int(c.execute('SELECT COUNT(*) FROM scraped_reviews').fetchone()[0])
             girl_names = [r[0] for r in c.execute("SELECT name FROM girls WHERE girl_status!='离职' ORDER BY name").fetchall()]
+            unlocked_rows = c.execute("SELECT source_page,source_url FROM scraped_reviews WHERE material_type='登录后长评'").fetchall()
+        unlocked_keys = {_review_source_identity(r['source_page'] or r['source_url']) for r in unlocked_rows}
+        for item in recent:
+            source_key = _review_source_identity(item.get('source_page') or item.get('source_url'))
+            item['unlock_status'] = ('已归档全文' if item.get('material_type') == '登录后长评' or source_key in unlocked_keys
+                                     else ('待人工解锁' if item.get('material_type') == '公开长评预览' else '公开内容'))
         return jsonify(ok=True,total=total,reviews=recent,girls=girl_names)
     d = request.json or {}
     action = str(d.get('action') or 'crawl')
     if action == 'drafts':
         day = str(d.get('date') or tokyo_today_date().isoformat())[:10]
-        return jsonify(ok=True,date=day,drafts=review_marketing_drafts(day))
+        girl_name = str(d.get('girl_name') or '').strip()
+        return jsonify(ok=True,date=day,girl_name=girl_name,drafts=review_marketing_drafts(day, girl_name))
     if action == 'archive':
         review_text = re.sub(r'\s+\n', '\n', str(d.get('review_text') or '').strip())
         if len(review_text) < 20:

@@ -1261,11 +1261,23 @@ class TelegramBookingFlowTest(unittest.TestCase):
         })
         self.assertEqual(result.status_code,200,result.get_data(as_text=True))
         self.assertTrue(result.json['inserted'])
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash,material_type)
+                         VALUES(?,?,?,?,?,?,?)""", ('https://tokyo-yy.com/精华帖/华人出张店/',
+                         'https://tokyo-yy.com/精华帖/12345_测试/', '娜娜子', '这是同一篇长评公开显示的预览内容。',
+                         '温柔', 'hash-review-preview-12345', '公开长评预览'))
         listing = self.client.get('/api/review_crawler',headers=headers)
         saved = next(item for item in listing.json['reviews'] if item.get('source_title')=='测试长评')
         self.assertEqual(saved['material_type'],'登录后长评')
         self.assertEqual(saved['author_name'],'测试作者')
         self.assertIn('温柔',saved['tags'])
+        preview = next(item for item in listing.json['reviews'] if item.get('review_hash')=='hash-review-preview-12345')
+        self.assertEqual(preview['unlock_status'],'已归档全文')
+        generated = self.client.post('/api/review_crawler',headers=headers,json={
+            'action':'drafts','date':'2099-01-01','girl_name':'娜娜子'})
+        self.assertEqual(generated.status_code,200,generated.get_data(as_text=True))
+        self.assertEqual(generated.json['drafts'][0]['girl_name'],'娜娜子')
+        self.assertIn('完整长评',generated.json['drafts'][0]['evidence_summary'])
 
     def test_new_customer_midnight_digest_is_idempotent(self):
         report_day = (self.app_module._tokyo_now().date()-timedelta(days=1)).isoformat()

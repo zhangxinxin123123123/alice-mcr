@@ -432,7 +432,8 @@ body:not(.role-boss) .boss-only{display:none!important}
  <section id="reviewCrawler" class="panel">
   <div class="card"><h2>评论素材采集与宣传草稿</h2>
    <p class="note">东京夜游网动态页面会从公开接口低频归档公开预览；登录并回复后才能看到的完整长评不会自动抓取，可在下方手动归档。生成结果统一标注为“宣传文案草稿（非真实客评）”，客服核对后再使用。</p>
-   <div class="form"><input id="reviewSourceUrl" type="url" value="https://tokyo-yy.com/" placeholder="粘贴东京夜游网评论页网址"><input id="reviewMaxPages" type="number" min="1" max="10" value="3"><button class="primary" onclick="crawlReviewSource()">归档公开素材</button><button class="soft" onclick="reviewSourceUrl.value='https://tokyo-yy.com/';crawlReviewSource()">首页女孩短评</button><button class="soft" onclick="reviewSourceUrl.value='https://tokyo-yy.com/精华帖/华人出张店/';crawlReviewSource()">精华长评预览</button><input id="reviewDraftDate" type="date"><button class="soft" onclick="generateReviewDrafts()">根据归档生成文案</button></div>
+   <div class="form"><input id="reviewSourceUrl" type="url" value="https://tokyo-yy.com/" placeholder="粘贴东京夜游网评论页网址"><input id="reviewMaxPages" type="number" min="1" max="10" value="3"><button class="primary" onclick="crawlReviewSource()">归档公开素材</button><button class="soft" onclick="reviewSourceUrl.value='https://tokyo-yy.com/';crawlReviewSource()">首页女孩短评</button><button class="soft" onclick="reviewSourceUrl.value='https://tokyo-yy.com/精华帖/华人出张店/';crawlReviewSource()">精华长评预览</button></div>
+   <div class="form"><input id="reviewDraftDate" type="date"><select id="reviewGenerateGirl"><option value="">当天全部出勤女孩</option></select><button class="soft" onclick="generateReviewDrafts()">生成选中女孩文案</button></div>
    <div id="reviewCrawlerSummary" class="note">请先粘贴具体评论页网址。</div>
   </div>
   <div class="card"><h2>归档已解锁的完整长评</h2>
@@ -2137,9 +2138,12 @@ async function loadReviewCrawler(){
  const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取评论素材失败');
  reviewCrawlerSummary.innerHTML=`已归档评论素材 <b>${Number(j.total||0)}</b> 条。公开预览和手动长评会分开标记。`;
  const selected=window.reviewArchiveGirl?reviewArchiveGirl.value:'';
- if(window.reviewArchiveGirl){reviewArchiveGirl.innerHTML='<option value="">选择女孩</option>'+(j.girls||[]).map(name=>`<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');reviewArchiveGirl.value=selected;}
+ const generateSelected=window.reviewGenerateGirl?reviewGenerateGirl.value:'';
+ const girlOptions=(j.girls||[]).map(name=>`<option value="${escHtml(name)}">${escHtml(name)}</option>`).join('');
+ if(window.reviewArchiveGirl){reviewArchiveGirl.innerHTML='<option value="">选择女孩</option>'+girlOptions;reviewArchiveGirl.value=selected;}
+ if(window.reviewGenerateGirl){reviewGenerateGirl.innerHTML='<option value="">当天全部出勤女孩</option>'+girlOptions;reviewGenerateGirl.value=generateSelected;}
  const items=j.reviews||[];
- reviewSourceResults.innerHTML='<div class="table"><table><thead><tr><th>类型</th><th>女孩</th><th>作者 / 日期</th><th>特征</th><th>素材摘录</th><th>来源页</th></tr></thead><tbody>'+((items.map(x=>`<tr><td>${escHtml(x.material_type||'公开素材')}</td><td>${escHtml(x.girl_name||'待匹配')}</td><td>${escHtml(x.author_name||'—')}<br><span class="note">${escHtml(String(x.review_date||'').slice(0,10)||'—')}</span></td><td>${escHtml(x.tags||'—')}</td><td style="white-space:normal;max-width:520px"><b>${escHtml(x.source_title||'')}</b>${x.source_title?'<br>':''}${escHtml(String(x.review_text||'').slice(0,300))}</td><td><a href="${escHtml(x.source_page||x.source_url)}" target="_blank" rel="noopener">打开</a></td></tr>`).join(''))||'<tr><td colspan="6">还没有归档素材</td></tr>')+'</tbody></table></div>';
+ reviewSourceResults.innerHTML='<div class="table"><table><thead><tr><th>状态</th><th>类型</th><th>女孩</th><th>作者 / 日期</th><th>特征</th><th>素材摘录</th><th>来源页</th></tr></thead><tbody>'+((items.map(x=>{const src=x.source_page||x.source_url||'';const unlock=x.unlock_status==='待人工解锁'?`<button class="soft" data-url="${encodeURIComponent(src)}" data-title="${encodeURIComponent(x.source_title||'')}" data-author="${encodeURIComponent(x.author_name||'')}" data-date="${encodeURIComponent(String(x.review_date||'').slice(0,10))}" data-girl="${encodeURIComponent(x.girl_name||'')}" onclick="openReviewForArchive(this)">打开并解锁</button>`:`<span class="${x.unlock_status==='已归档全文'?'status-ok':'note'}">${escHtml(x.unlock_status||'公开内容')}</span>`;return `<tr><td>${unlock}</td><td>${escHtml(x.material_type||'公开素材')}</td><td>${x.girl_name?`<button class="soft" data-girl="${encodeURIComponent(x.girl_name)}" onclick="generateOneReviewGirl(this)">${escHtml(x.girl_name)}</button>`:'待匹配'}</td><td>${escHtml(x.author_name||'—')}<br><span class="note">${escHtml(String(x.review_date||'').slice(0,10)||'—')}</span></td><td>${escHtml(x.tags||'—')}</td><td style="white-space:normal;max-width:520px"><b>${escHtml(x.source_title||'')}</b>${x.source_title?'<br>':''}${escHtml(String(x.review_text||'').slice(0,300))}</td><td><a href="${escHtml(src)}" target="_blank" rel="noopener">打开</a></td></tr>`}).join(''))||'<tr><td colspan="7">还没有归档素材</td></tr>')+'</tbody></table></div>';
 }
 async function crawlReviewSource(){
  const url=String(reviewSourceUrl.value||'').trim();if(!url){alert('请先粘贴具体公开评论页网址');return;}
@@ -2152,13 +2156,19 @@ async function saveReviewArchive(){
  const j=await api('/api/review_crawler',{action:'archive',girl_name:girl,material_type:reviewArchiveType.value,source_url:url,source_title:reviewArchiveTitle.value,author_name:reviewArchiveAuthor.value,review_date:reviewArchiveDate.value,review_text:body});
  reviewArchiveText.value='';await loadReviewCrawler();alert(j.inserted?'长评已归档，可以用于生成文案。':'这篇内容已存在，归档资料已更新。');
 }
+function openReviewForArchive(button){
+ reviewArchiveUrl.value=decodeURIComponent(button.dataset.url||'');reviewArchiveTitle.value=decodeURIComponent(button.dataset.title||'');reviewArchiveAuthor.value=decodeURIComponent(button.dataset.author||'');reviewArchiveDate.value=decodeURIComponent(button.dataset.date||'')||todayStr;
+ const girl=decodeURIComponent(button.dataset.girl||'');if(girl)reviewArchiveGirl.value=girl;
+ window.open(reviewArchiveUrl.value,'_blank','noopener');reviewArchiveText.focus();reviewArchiveText.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function generateOneReviewGirl(button){reviewGenerateGirl.value=decodeURIComponent(button.dataset.girl||'');generateReviewDrafts();}
 async function copyReviewDraft(button){
  const text=decodeURIComponent(button.dataset.text||'');try{await navigator.clipboard.writeText(text);button.textContent='已复制';setTimeout(()=>button.textContent='复制',1200);}catch(e){prompt('请手动复制：',text);}
 }
 async function generateReviewDrafts(){
- const j=await api('/api/review_crawler',{action:'drafts',date:reviewDraftDate.value||todayStr});
+ const j=await api('/api/review_crawler',{action:'drafts',date:reviewDraftDate.value||todayStr,girl_name:reviewGenerateGirl.value||''});
  const drafts=j.drafts||[];
- reviewDraftResults.innerHTML=drafts.map(x=>{const shorts=(x.short_drafts||[]).map((s,i)=>`<li>${escHtml(s)} <button class="soft" data-text="${encodeURIComponent(s)}" onclick="copyReviewDraft(this)">复制</button></li>`).join('');return `<div class="praise-tile"><h3>${escHtml(x.girl_name)}</h3><p class="note">${escHtml(x.label)}｜参考素材 ${Number(x.source_count||0)} 条｜特征：${escHtml((x.features||[]).join('、'))}</p><ol>${shorts}</ol><p style="white-space:pre-wrap">${escHtml(x.long_draft||'')}</p><button class="primary" data-text="${encodeURIComponent(x.long_draft||'')}" onclick="copyReviewDraft(this)">复制长文</button></div>`}).join('')||'<p class="note">所选日期没有纯出勤表女孩。</p>';
+ reviewDraftResults.innerHTML=drafts.map(x=>{const shorts=(x.short_drafts||[]).map((s,i)=>`<li>${escHtml(s)} <button class="soft" data-text="${encodeURIComponent(s)}" onclick="copyReviewDraft(this)">复制</button></li>`).join('');return `<div class="praise-tile"><h3>${escHtml(x.girl_name)}</h3><p class="note">${escHtml(x.label)}｜${escHtml(x.evidence_summary||'')}｜结构风格：${escHtml(x.style_profile||'')}</p><p><b>提炼特征：</b>${escHtml((x.features||[]).join('、'))}</p><ol>${shorts}</ol><p style="white-space:pre-wrap">${escHtml(x.long_draft||'')}</p><button class="primary" data-text="${encodeURIComponent(x.long_draft||'')}" onclick="copyReviewDraft(this)">复制长文</button></div>`}).join('')||'<p class="note">没有找到可生成的女孩；请选择女孩，或确认所选日期已有纯出勤表。</p>';
 }
 
 function gotoGirlFromOrder(girlName){
