@@ -1,4 +1,5 @@
 import importlib
+import base64
 import json
 import os
 import shutil
@@ -1239,6 +1240,32 @@ class TelegramBookingFlowTest(unittest.TestCase):
         nana = next(item for item in result.json['drafts'] if item['girl_name']=='娜娜子')
         self.assertIn('非真实客评',nana['label'])
         self.assertEqual(len(nana['short_drafts']),5)
+
+    def test_tokyo_public_report_payload_decoder(self):
+        expected = {'report': {'post_id': 99, 'title': '测试长评', 'preview': '公开预览内容'}}
+        clear = json.dumps(expected, ensure_ascii=False).encode('utf-8')
+        key = self.app_module.TOKYO_REPORT_XOR_KEY
+        encoded = base64.b64encode(bytes(value ^ key[index % len(key)] for index, value in enumerate(clear))).decode()
+        decoded = self.app_module._decode_tokyo_report_payload(encoded)
+        self.assertEqual(decoded['post_id'], 99)
+        self.assertEqual(decoded['preview'], '公开预览内容')
+
+    def test_manual_unlocked_review_can_be_archived(self):
+        login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        headers={'X-Alice-Session':login.json['session_token']}
+        result = self.client.post('/api/review_crawler', headers=headers, json={
+            'action':'archive', 'girl_name':'娜娜子', 'material_type':'登录后长评',
+            'source_url':'https://tokyo-yy.com/精华帖/12345_测试/', 'source_title':'测试长评',
+            'author_name':'测试作者', 'review_date':self.day,
+            'review_text':'这是本人登录并按网站规则解锁后手动归档的完整评论正文，内容足够长，也提到了服务温柔和细心。'
+        })
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        self.assertTrue(result.json['inserted'])
+        listing = self.client.get('/api/review_crawler',headers=headers)
+        saved = next(item for item in listing.json['reviews'] if item.get('source_title')=='测试长评')
+        self.assertEqual(saved['material_type'],'登录后长评')
+        self.assertEqual(saved['author_name'],'测试作者')
+        self.assertIn('温柔',saved['tags'])
 
     def test_new_customer_midnight_digest_is_idempotent(self):
         report_day = (self.app_module._tokyo_now().date()-timedelta(days=1)).isoformat()

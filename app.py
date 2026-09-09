@@ -8,7 +8,7 @@ except Exception:
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from pathlib import Path
-from urllib.parse import quote, urlencode, urljoin, urlparse
+from urllib.parse import quote, unquote, urlencode, urljoin, urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from urllib import robotparser
@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v117_pc_table_scrollbar"
+APP_VERSION = "v118_tokyo_review_archive"
 
 @app.after_request
 def compress_large_json(response):
@@ -300,6 +300,12 @@ def _init_db_schema():
         order_cols = [r[1] for r in c.execute('PRAGMA table_info(orders)').fetchall()]
         if 'points_used' not in order_cols:
             c.execute("ALTER TABLE orders ADD COLUMN points_used INTEGER DEFAULT 0")
+        review_cols = [r[1] for r in c.execute('PRAGMA table_info(scraped_reviews)').fetchall()]
+        for column, definition in (
+            ('material_type', "TEXT DEFAULT '公开素材'"), ('author_name', "TEXT DEFAULT ''"),
+            ('source_title', "TEXT DEFAULT ''"), ('access_scope', "TEXT DEFAULT 'public'")):
+            if column not in review_cols:
+                c.execute(f"ALTER TABLE scraped_reviews ADD COLUMN {column} {definition}")
         praise_cols = [r[1] for r in c.execute('PRAGMA table_info(girl_praises)').fetchall()]
         if 'image_mime' not in praise_cols:
             c.execute("ALTER TABLE girl_praises ADD COLUMN image_mime TEXT DEFAULT 'image/png'")
@@ -1641,12 +1647,192 @@ def _safe_public_url(value):
 def _review_tags(text):
     return [label for label, words in REVIEW_FEATURE_WORDS.items() if any(word.lower() in text.lower() for word in words)]
 
+TOKYO_REPORT_XOR_KEY = b'Yk9zQ2h0RjdtVnBMejRYZ1R1RjhNMXZSYmdBcWVIeXJEdE5uV3VCc1BkVUk='
+
+def _decode_tokyo_report_payload(payload):
+    """Decode the public report API payload in the same way as Tokyo YY's browser JavaScript."""
+    encoded = payload.get('data') if isinstance(payload, dict) else payload
+    raw = base64.b64decode(str(encoded or ''), validate=True)
+    clear = bytes(value ^ TOKYO_REPORT_XOR_KEY[index % len(TOKYO_REPORT_XOR_KEY)]
+                  for index, value in enumerate(raw))
+    result = json.loads(clear.decode('utf-8'))
+    if not isinstance(result, dict):
+        raise ValueError('东京夜游网评论数据格式异常')
+    report = result.get('report')
+    return report if isinstance(report, dict) else result
+
+def _review_girl_name(text_value, girl_rows):
+    normalized = unicodedata.normalize('NFKC', str(text_value or '')).lower().replace(' ', '')
+    for girl in girl_rows:
+        aliases = [girl.get('name'), girl.get('girl_alias')]
+        if any(_wordpress_girl_key(alias) and _wordpress_girl_key(alias) in normalized for alias in aliases):
+            return girl.get('name') or ''
+    return ''
+
+def _store_scraped_reviews(collected):
+    inserted = updated = 0
+    with conn() as c:
+        for item in collected:
+            old = c.execute('SELECT id FROM scraped_reviews WHERE review_hash=?', (item['review_hash'],)).fetchone()
+            values = (item.get('girl_name',''), item.get('tags',''), item.get('source_page',''),
+                      item.get('review_date',''), item.get('material_type','公开素材'),
+                      item.get('author_name',''), item.get('source_title',''), item.get('access_scope','public'))
+            if old:
+                c.execute("""UPDATE scraped_reviews SET girl_name=?,tags=?,source_page=?,review_date=?,material_type=?,
+                             author_name=?,source_title=?,access_scope=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                          values + (old['id'],))
+                updated += 1
+            else:
+                c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,rating,review_date,
+                             tags,review_hash,material_type,author_name,source_title,access_scope)
+                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                          (item.get('source_url',''), item.get('source_page',''), item.get('girl_name',''),
+                           item.get('review_text',''), float(item.get('rating') or 0), item.get('review_date',''),
+                           item.get('tags',''), item['review_hash'], item.get('material_type','公开素材'),
+                           item.get('author_name',''), item.get('source_title',''), item.get('access_scope','public')))
+                inserted += 1
+    return inserted, updated
+
+def _tokyo_yy_report_materials(start_url, max_pages, girl_rows):
+    """Collect only previews exposed by Tokyo YY's public report API; full member text stays manual."""
+    parsed = urlparse(start_url)
+    if parsed.hostname not in ('tokyo-yy.com', 'www.tokyo-yy.com'):
+        return None
+    decoded_path = unquote(parsed.path)
+    if '/精华帖/' not in decoded_path and '/report' not in decoded_path.lower():
+        return None
+    report_match = re.search(r'/精华帖/(\d+)', decoded_path)
+    report_type = 'jp' if ('日本' in decoded_path or 'type=jp' in parsed.query) else 'cn'
+    api_pages = []
+    if report_match:
+        report_batches = [[{'post_id': int(report_match.group(1))}]]
+    else:
+        list_url = f'{TOKYO_YY_BASE_URL}/api/report?type={report_type}'
+        req = Request(_safe_public_url(list_url), headers={
+            'User-Agent':'AliceReviewResearchBot/1.0 (+public review research; low frequency)',
+            'Accept':'application/json'})
+        with urlopen(req, timeout=25) as response:
+            listing = json.loads(response.read(2_000_000).decode('utf-8'))
+        latest_page = int(listing.get('page') or 0)
+        report_batches = [listing.get('reports') or []]
+        api_pages.append(latest_page)
+        for offset in range(1, max_pages):
+            page_no = latest_page - offset
+            if page_no < 0:
+                break
+            page_url = f'{TOKYO_YY_BASE_URL}/api/report?type={report_type}&page={page_no}'
+            req = Request(_safe_public_url(page_url), headers={
+                'User-Agent':'AliceReviewResearchBot/1.0 (+public review research; low frequency)',
+                'Accept':'application/json'})
+            with urlopen(req, timeout=25) as response:
+                page_data = json.loads(response.read(2_000_000).decode('utf-8'))
+            report_batches.append(page_data.get('reports') or [])
+            api_pages.append(page_no)
+    collected = []
+    for batch in report_batches:
+        for summary in batch:
+            post_id = int(summary.get('post_id') or 0)
+            if not post_id:
+                continue
+            detail_url = f'{TOKYO_YY_BASE_URL}/api/report/{post_id}?v=3'
+            req = Request(_safe_public_url(detail_url), headers={
+                'User-Agent':'AliceReviewResearchBot/1.0 (+public review research; low frequency)',
+                'Accept':'application/json'})
+            with urlopen(req, timeout=25) as response:
+                detail_raw = response.read(2_000_000).decode('utf-8').strip()
+            try:
+                detail_payload = json.loads(detail_raw)
+            except json.JSONDecodeError:
+                # This endpoint currently returns the encoded value as text/plain.
+                detail_payload = detail_raw
+            detail = _decode_tokyo_report_payload(detail_payload)
+            preview = re.sub(r'\s+', ' ', str(detail.get('preview') or '')).strip()
+            title = re.sub(r'\s+', ' ', str(detail.get('title') or summary.get('title') or '')).strip()
+            # The public API deliberately separates preview from gated full content. Never archive detail.content here.
+            if len(preview) < 12:
+                continue
+            source_page = f'{TOKYO_YY_BASE_URL}/精华帖/{post_id}_{quote(title, safe="")}/'
+            girl_name = _review_girl_name(title + ' ' + preview, girl_rows)
+            digest = hashlib.sha256((source_page+'\n'+preview).encode('utf-8')).hexdigest()
+            collected.append({
+                'source_url':start_url, 'source_page':source_page, 'source_title':title,
+                'girl_name':girl_name, 'review_text':preview, 'tags':','.join(_review_tags(title+' '+preview)),
+                'review_hash':digest, 'review_date':str(detail.get('report_date') or summary.get('report_date') or ''),
+                'author_name':str(detail.get('author_name') or summary.get('author_name') or ''),
+                'material_type':'公开长评预览', 'access_scope':'public'
+            })
+            time.sleep(.08)
+    inserted, updated = _store_scraped_reviews(collected)
+    return {'pages': max(1, len(api_pages)), 'found':len(collected), 'inserted':inserted,
+            'updated':updated, 'mode':'东京夜游网公开数据接口'}
+
+def _tokyo_yy_home_materials(start_url, max_pages, girl_rows):
+    """Archive published short comments shown below Alice girls on Tokyo YY's public home/detail pages."""
+    parsed = urlparse(start_url)
+    if parsed.hostname not in ('tokyo-yy.com', 'www.tokyo-yy.com') or parsed.path.rstrip('/'):
+        return None
+    headers = {'User-Agent':'AliceReviewResearchBot/1.0 (+public review research; low frequency)',
+               'Accept':'application/json'}
+    list_url = f'{TOKYO_YY_BASE_URL}/api/homepage/all-girls'
+    with urlopen(Request(_safe_public_url(list_url), headers=headers), timeout=30) as response:
+        listing = json.loads(response.read(5_000_000).decode('utf-8'))
+    target_shop = _wordpress_girl_key(TOKYO_ALICE_SHOP_ID)
+    external_girls = [item for item in (listing.get('girls') or [])
+                      if _wordpress_girl_key(item.get('shopId')) == target_shop and int(item.get('comment_count') or 0) > 0]
+    collected = []
+    visited_pages = 1
+    for external in external_girls:
+        post_id = int(external.get('post_id') or 0)
+        if not post_id:
+            continue
+        meta_url = f'{TOKYO_YY_BASE_URL}/api/comment/{post_id}/meta'
+        with urlopen(Request(_safe_public_url(meta_url), headers=headers), timeout=20) as response:
+            meta = json.loads(response.read(200_000).decode('utf-8'))
+        total_pages = min(max_pages, max(1, int(meta.get('totalPages') or 1)))
+        title = re.sub(r'\s+', ' ', str(external.get('name') or external.get('seo_name') or '')).strip()
+        shop_id = quote(str(external.get('shopId') or TOKYO_ALICE_SHOP_ID), safe='')
+        source_page = f'{TOKYO_YY_BASE_URL}/华人出张店/{shop_id}/{post_id}-{quote(title, safe="")}/'
+        girl_name = _review_girl_name(title, girl_rows)
+        for page_no in range(total_pages):
+            comments_url = f'{TOKYO_YY_BASE_URL}/api/comment/{post_id}/{page_no}'
+            with urlopen(Request(_safe_public_url(comments_url), headers=headers), timeout=20) as response:
+                raw = response.read(2_000_000).decode('utf-8').strip()
+            comments = (_decode_tokyo_report_payload(raw).get('comments') or [])
+            visited_pages += 1
+            for comment in comments:
+                # Only use comments the site's public data marks as published.
+                if str(comment.get('status') or '').lower() != 'publish':
+                    continue
+                content = re.sub(r'\s+', ' ', str(comment.get('content') or '')).strip()
+                if len(content) < 8:
+                    continue
+                digest = hashlib.sha256((source_page+'\ncomment:'+str(comment.get('id') or '')+'\n'+content).encode('utf-8')).hexdigest()
+                collected.append({
+                    'source_url':start_url, 'source_page':source_page, 'source_title':title,
+                    'girl_name':girl_name, 'review_text':content,
+                    'tags':','.join(_review_tags(title+' '+content)), 'review_hash':digest,
+                    'review_date':str(comment.get('date') or ''), 'author_name':str(comment.get('username') or ''),
+                    'material_type':'公开短评', 'access_scope':'public'
+                })
+            time.sleep(.08)
+    inserted, updated = _store_scraped_reviews(collected)
+    return {'pages':visited_pages, 'girls':len(external_girls), 'found':len(collected),
+            'inserted':inserted, 'updated':updated, 'mode':'东京夜游网首页公开短评'}
+
 def crawl_public_reviews(start_url, max_pages=3):
-    if BeautifulSoup is None:
-        raise RuntimeError('服务器尚未安装评论采集解析组件，请等待本次部署完成')
     start_url = _safe_public_url(start_url)
     max_pages = min(10, max(1, int(max_pages or 3)))
     root = urlparse(start_url)
+    with conn() as c:
+        girl_rows = rows(c.execute("SELECT name,girl_alias,tags,remark,remark2 FROM girls ORDER BY id").fetchall())
+    tokyo_home_result = _tokyo_yy_home_materials(start_url, max_pages, girl_rows)
+    if tokyo_home_result is not None:
+        return tokyo_home_result
+    tokyo_result = _tokyo_yy_report_materials(start_url, max_pages, girl_rows)
+    if tokyo_result is not None:
+        return tokyo_result
+    if BeautifulSoup is None:
+        raise RuntimeError('服务器尚未安装评论采集解析组件，请等待本次部署完成')
     robots_url = f'{root.scheme}://{root.netloc}/robots.txt'
     rp = robotparser.RobotFileParser()
     rp.set_url(robots_url)
@@ -1659,8 +1845,6 @@ def crawl_public_reviews(start_url, max_pages=3):
     except Exception:
         # robots.txt 不可用时仍保持低频、少页面，并在结果中说明。
         pass
-    with conn() as c:
-        girl_rows = rows(c.execute("SELECT name,girl_alias,tags,remark,remark2 FROM girls ORDER BY id").fetchall())
     queue = [start_url]
     visited = set()
     collected = []
@@ -1691,16 +1875,11 @@ def crawl_public_reviews(start_url, max_pages=3):
             if len(text_value) < 20 or len(text_value) > 2000 or text_value in seen_page:
                 continue
             seen_page.add(text_value)
-            normalized = unicodedata.normalize('NFKC', text_value).lower().replace(' ', '')
-            girl_name = ''
-            for girl in girl_rows:
-                aliases = [girl.get('name'), girl.get('girl_alias')]
-                if any(_wordpress_girl_key(alias) and _wordpress_girl_key(alias) in normalized for alias in aliases):
-                    girl_name = girl.get('name') or ''
-                    break
+            girl_name = _review_girl_name(text_value, girl_rows)
             digest = hashlib.sha256((final_url+'\n'+text_value).encode('utf-8')).hexdigest()
             collected.append({'source_url':start_url,'source_page':final_url,'girl_name':girl_name,
-                              'review_text':text_value,'tags':','.join(_review_tags(text_value)),'review_hash':digest})
+                              'review_text':text_value,'tags':','.join(_review_tags(text_value)),'review_hash':digest,
+                              'material_type':'公开网页素材','access_scope':'public'})
         if len(visited) < max_pages:
             links = []
             for anchor in soup.select('a[href]'):
@@ -1711,19 +1890,8 @@ def crawl_public_reviews(start_url, max_pages=3):
                     links.append(href.split('#')[0])
             queue.extend(link for link in dict.fromkeys(links) if link not in visited and link not in queue)
         time.sleep(.2)
-    inserted = updated = 0
-    with conn() as c:
-        for item in collected:
-            old = c.execute('SELECT id FROM scraped_reviews WHERE review_hash=?', (item['review_hash'],)).fetchone()
-            if old:
-                c.execute("UPDATE scraped_reviews SET girl_name=?,tags=?,source_page=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                          (item['girl_name'],item['tags'],item['source_page'],old['id']))
-                updated += 1
-            else:
-                c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)
-                             VALUES(?,?,?,?,?,?)""", (item['source_url'],item['source_page'],item['girl_name'],item['review_text'],item['tags'],item['review_hash']))
-                inserted += 1
-    return {'pages':len(visited),'found':len(collected),'inserted':inserted,'updated':updated}
+    inserted, updated = _store_scraped_reviews(collected)
+    return {'pages':len(visited),'found':len(collected),'inserted':inserted,'updated':updated,'mode':'公开网页'}
 
 def review_marketing_drafts(day):
     with conn() as c:
@@ -4310,15 +4478,39 @@ def api_review_crawler():
     init_db()
     if request.method == 'GET':
         with conn() as c:
-            recent = rows(c.execute("""SELECT id,source_url,source_page,girl_name,review_text,tags,created_at,updated_at
+            recent = rows(c.execute("""SELECT id,source_url,source_page,girl_name,review_text,tags,review_date,
+                                      material_type,author_name,source_title,access_scope,created_at,updated_at
                                       FROM scraped_reviews ORDER BY updated_at DESC,id DESC LIMIT 100""").fetchall())
             total = int(c.execute('SELECT COUNT(*) FROM scraped_reviews').fetchone()[0])
-        return jsonify(ok=True,total=total,reviews=recent)
+            girl_names = [r[0] for r in c.execute("SELECT name FROM girls WHERE girl_status!='离职' ORDER BY name").fetchall()]
+        return jsonify(ok=True,total=total,reviews=recent,girls=girl_names)
     d = request.json or {}
     action = str(d.get('action') or 'crawl')
     if action == 'drafts':
         day = str(d.get('date') or tokyo_today_date().isoformat())[:10]
         return jsonify(ok=True,date=day,drafts=review_marketing_drafts(day))
+    if action == 'archive':
+        review_text = re.sub(r'\s+\n', '\n', str(d.get('review_text') or '').strip())
+        if len(review_text) < 20:
+            return jsonify(ok=False,error='长评正文至少需要 20 个字'), 400
+        source_page = _safe_public_url(d.get('source_url'))
+        girl_name = str(d.get('girl_name') or '').strip()
+        if not girl_name:
+            return jsonify(ok=False,error='请选择对应女孩'), 400
+        with conn() as c:
+            if not c.execute('SELECT 1 FROM girls WHERE name=?', (girl_name,)).fetchone():
+                return jsonify(ok=False,error='女孩表中没有这个女孩'), 400
+        material_type = str(d.get('material_type') or '登录后长评').strip()
+        if material_type not in ('登录后长评','公开短评','公开网页素材'):
+            material_type = '登录后长评'
+        digest = hashlib.sha256((source_page+'\n'+review_text).encode('utf-8')).hexdigest()
+        item = {'source_url':source_page,'source_page':source_page,'source_title':str(d.get('source_title') or '').strip(),
+                'girl_name':girl_name,'review_text':review_text,'tags':','.join(_review_tags(review_text)),
+                'review_hash':digest,'review_date':str(d.get('review_date') or '').strip()[:30],
+                'author_name':str(d.get('author_name') or '').strip()[:80],'material_type':material_type,
+                'access_scope':'manual_authorized'}
+        inserted, updated = _store_scraped_reviews([item])
+        return jsonify(ok=True,inserted=inserted,updated=updated,girl_name=girl_name)
     result = crawl_public_reviews(d.get('url'), d.get('max_pages') or 3)
     return jsonify(ok=True, **result)
 
