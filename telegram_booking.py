@@ -152,6 +152,15 @@ def register_telegram_booking(
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_digests(
                 digest_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
                 message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_name_reviews(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,review_date TEXT NOT NULL,
+                issue_type TEXT NOT NULL,original_name TEXT DEFAULT '',original_source TEXT DEFAULT '',
+                suggested_name TEXT DEFAULT '',suggested_source TEXT DEFAULT '',detail TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending',prompt_chat_id TEXT DEFAULT '',prompt_message_id INTEGER DEFAULT 0,
+                reviewed_by TEXT DEFAULT '',reviewed_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(customer_id,review_date,issue_type))""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_tg_customer_name_review_prompt ON telegram_customer_name_reviews(prompt_chat_id,prompt_message_id,status)")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_point_alert_digests(
                 alert_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
                 message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -2038,6 +2047,8 @@ def register_telegram_booking(
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
         expire_attendance_inquiries()
+        if not edited and handle_customer_name_review_reply(message):
+            return
         if not edited and handle_closing_attendance_reply(message):
             return
         closing_match = None if edited else re.fullmatch(r"/?(下班|闭店)(?:@\w+)?", text.strip())
@@ -2120,6 +2131,22 @@ def register_telegram_booking(
         user = callback.get("from") or {}
         msg = callback.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
+        if data.startswith("customer_review:"):
+            parts = data.split(':')
+            action = parts[1] if len(parts) > 1 else ''
+            review_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+            cfg = settings()
+            if str(chat_id) != str(cfg.get('default_review_chat_id') or ''):
+                answer_callback(callback.get('id'), '只能在内部群确认', True)
+                return
+            if not (is_manager(user.get('id'), chat_id) or is_chat_admin(chat_id, user.get('id'))):
+                answer_callback(callback.get('id'), '只有店长、客服或群管理员可以确认', True)
+                return
+            ok, result = apply_customer_name_review(review_id, user, action)
+            answer_callback(callback.get('id'), result, not ok)
+            if ok:
+                edit_message_text(chat_id, int(msg.get('message_id') or 0), '✅ <b>' + escape(result) + '</b>')
+            return
         if data.startswith("closing:"):
             parts = data.split(':')
             action, closing_id = (parts[1], int(parts[2])) if len(parts) >= 3 else ('', 0)
@@ -2523,6 +2550,147 @@ def register_telegram_booking(
     def telegram_chain_import_run_api():
         return jsonify(ok=True, **run_pending_chain_imports(force=True))
 
+    def customer_name_review_candidates(report_day):
+        """Detect likely source prefixes and obvious time/address text without changing customer data."""
+        with conn() as c:
+            customer_rows = c.execute("""SELECT id,customer_no,name,source,created_at FROM customers
+                                         WHERE date(datetime(created_at,'+9 hours'))=?
+                                         ORDER BY created_at,id""", (report_day,)).fetchall()
+        candidates = []
+        source_pattern = re.compile(
+            r"^\s*(QQ|扣扣|飞机|飛機|Telegram|TG|TEL|电话|電話|手机|手機|微信|VX|WeChat|LINE|尾号|尾號)"
+            r"\s*[：:_\-—|/]*\s*(.+?)\s*$", re.I)
+        source_names = {
+            'qq':'QQ','扣扣':'QQ','飞机':'飞机（TEL）','飛機':'飞机（TEL）','telegram':'飞机（TEL）',
+            'tg':'飞机（TEL）','tel':'飞机（TEL）','电话':'电话','電話':'电话','手机':'电话','手機':'电话',
+            '尾号':'电话尾号','尾號':'电话尾号','微信':'微信','vx':'微信','wechat':'微信','line':'LINE'
+        }
+        for raw in customer_rows:
+            row = dict(raw); name = str(row.get('name') or '').strip(); source = str(row.get('source') or '').strip()
+            match = source_pattern.match(name)
+            reviewed_name = name
+            if match:
+                prefix, remainder = match.group(1), match.group(2).strip(' ：:_-—|/')
+                suggested_source = source_names.get(prefix.lower(), source_names.get(prefix, prefix))
+                if remainder and (remainder != name or suggested_source != source):
+                    candidates.append({**row, 'issue_type':'source_prefix', 'original_name':name,
+                        'original_source':source, 'suggested_name':remainder,
+                        'suggested_source':suggested_source,
+                        'detail':f'识别到来源前缀“{prefix}”'})
+                    reviewed_name = remainder
+            looks_like_time = bool(re.search(r"(?:^|\D)\d{1,2}(?::|\.)?\d{0,2}\s*[-到至~～]\s*\d{1,2}(?::|\.)?\d{0,2}(?:\D|$)", reviewed_name))
+            looks_like_address = bool(re.search(r"(?:池袋|新宿|涩谷|渋谷|上野|住所|地址|酒店|ホテル|号室|丁目|番地)|\d{1,3}-\d{1,3}-\d{1,3}", reviewed_name, re.I))
+            if looks_like_time or looks_like_address:
+                reason = '疑似把地址/酒店写进客户名' if looks_like_address else '疑似把预约时间写进客户名'
+                candidates.append({**row, 'issue_type':'suspicious_name', 'original_name':name,
+                    'original_source':source, 'suggested_name':'', 'suggested_source':'', 'detail':reason})
+        return candidates
+
+    def apply_customer_name_review(review_id, user, action='apply'):
+        with conn() as c:
+            found = c.execute("SELECT * FROM telegram_customer_name_reviews WHERE id=?", (int(review_id),)).fetchone()
+            if not found or found['status'] != 'pending':
+                return False, '这条检查已经处理过了'
+            row = dict(found)
+            customer = c.execute("SELECT * FROM customers WHERE id=?", (row['customer_id'],)).fetchone()
+            if not customer:
+                c.execute("UPDATE telegram_customer_name_reviews SET status='stale',updated_at=CURRENT_TIMESTAMP WHERE id=?", (row['id'],))
+                return False, '客户已经不存在'
+            actor = display_name(user)
+            if action == 'dismiss':
+                c.execute("""UPDATE telegram_customer_name_reviews SET status='dismissed',reviewed_by=?,
+                             reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (actor,row['id']))
+                return True, '已跳过，不修改客户资料'
+            if row['issue_type'] != 'source_prefix' or not row['suggested_name']:
+                return False, '这条需要客服到客户表手动修改'
+            if str(customer['name'] or '') != str(row['original_name'] or '') or str(customer['source'] or '') != str(row['original_source'] or ''):
+                c.execute("UPDATE telegram_customer_name_reviews SET status='stale',updated_at=CURRENT_TIMESTAMP WHERE id=?", (row['id'],))
+                return False, '客户资料后来已经变化，请重新检查'
+            c.execute("UPDATE customers SET name=?,source=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                      (row['suggested_name'],row['suggested_source'],row['customer_id']))
+            c.execute("UPDATE orders SET customer_name=?,updated_at=CURRENT_TIMESTAMP WHERE customer_id=?",
+                      (row['suggested_name'],row['customer_id']))
+            c.execute("""UPDATE telegram_customer_name_reviews SET status='applied',reviewed_by=?,
+                         reviewed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (actor,row['id']))
+            try:
+                detail = json.dumps({'客户ID':row['customer_id'],'原客户名':row['original_name'],
+                                     '新客户名':row['suggested_name'],'原来源':row['original_source'],
+                                     '新来源':row['suggested_source'],'确认方式':'内部群 OK'},
+                                    ensure_ascii=False,separators=(',',':'))
+                c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,response_status,
+                             log_level,action_name) VALUES(?,?,?,?,?,?,?,?)""",
+                          (actor,'telegram_manager','BOT','customers',detail,200,'INFO','确认拆分新客户来源'))
+            except Exception:
+                pass
+            return True, f"已拆分：来源 {row['suggested_source']}｜客户名 {row['suggested_name']}"
+
+    def send_customer_name_reviews(report_day):
+        cfg = settings(); chat_id = str(cfg.get('default_review_chat_id') or '')
+        if not valid_group_chat_id(chat_id):
+            return {'sent':0,'candidates':0,'reason':'未绑定内部群'}
+        candidates = customer_name_review_candidates(report_day)
+        sent = 0
+        with conn() as c:
+            for item in candidates:
+                c.execute("""INSERT OR IGNORE INTO telegram_customer_name_reviews(
+                             customer_id,review_date,issue_type,original_name,original_source,
+                             suggested_name,suggested_source,detail) VALUES(?,?,?,?,?,?,?,?)""",
+                          (item['id'],report_day,item['issue_type'],item['original_name'],item['original_source'],
+                           item['suggested_name'],item['suggested_source'],item['detail']))
+            pending = c.execute("""SELECT r.*,c.customer_no FROM telegram_customer_name_reviews r
+                                   LEFT JOIN customers c ON c.id=r.customer_id
+                                   WHERE r.review_date=? AND r.status='pending' AND COALESCE(r.prompt_message_id,0)=0
+                                   ORDER BY r.id""", (report_day,)).fetchall()
+        for raw in pending:
+            row = dict(raw)
+            if row['issue_type'] == 'source_prefix':
+                text = (f"🧹 <b>新客户名称检查</b>｜{escape(report_day)}\n"
+                        f"客户编号：<b>{escape(str(row.get('customer_no') or row['customer_id']))}</b>\n"
+                        f"原客户名：<b>{escape(row['original_name'])}</b>\n"
+                        f"建议拆分为：来源 <b>{escape(row['suggested_source'])}</b>｜客户名 <b>{escape(row['suggested_name'])}</b>\n\n"
+                        "请回复本消息 <code>OK</code> 后再修改；也可以点击按钮确认。")
+                keyboard = inline_keyboard([[callback_button('✅ OK，确认拆分', f"customer_review:apply:{row['id']}"),
+                                             callback_button('跳过', f"customer_review:dismiss:{row['id']}")]])
+            else:
+                text = (f"⚠️ <b>新客户名可能写错</b>｜{escape(report_day)}\n"
+                        f"客户编号：<b>{escape(str(row.get('customer_no') or row['customer_id']))}</b>\n"
+                        f"当前名称：<b>{escape(row['original_name'])}</b>\n"
+                        f"原因：{escape(row['detail'])}\n\n"
+                        "系统不会自动猜名字，请客服在 MCR 客户表核对并手动修改。")
+                keyboard = inline_keyboard([[callback_button('知道了，稍后手动改', f"customer_review:dismiss:{row['id']}")]])
+            message = send_message(chat_id, text, keyboard, thread_id=int(cfg.get('default_review_thread_id') or 0))
+            message_id = int((message or {}).get('message_id') or 0)
+            with conn() as c:
+                c.execute("""UPDATE telegram_customer_name_reviews SET prompt_chat_id=?,prompt_message_id=?,
+                             updated_at=CURRENT_TIMESTAMP WHERE id=?""", (chat_id,message_id,row['id']))
+            sent += 1
+        return {'sent':sent,'candidates':len(candidates),'date':report_day}
+
+    def handle_customer_name_review_reply(message):
+        text = str(message.get('text') or '').strip()
+        if not re.fullmatch(r'(?i)(?:ok|确认|好的|跳过)', text):
+            return False
+        reply_id = int(((message.get('reply_to_message') or {}).get('message_id') or 0))
+        if not reply_id:
+            return False
+        cfg = settings(); chat = message.get('chat') or {}; user = message.get('from') or {}
+        if str(chat.get('id')) != str(cfg.get('default_review_chat_id') or ''):
+            return False
+        if not (is_manager(user.get('id'), chat.get('id')) or is_chat_admin(chat.get('id'), user.get('id'))):
+            send_message(chat.get('id'), '只有店长、客服或群管理员可以确认客户资料修改。',
+                         thread_id=message.get('message_thread_id') or 0)
+            return True
+        with conn() as c:
+            row = c.execute("""SELECT id FROM telegram_customer_name_reviews
+                               WHERE prompt_chat_id=? AND prompt_message_id=? AND status='pending'""",
+                            (str(chat.get('id')),reply_id)).fetchone()
+        if not row:
+            return False
+        ok, result = apply_customer_name_review(row['id'], user, 'dismiss' if text == '跳过' else 'apply')
+        send_message(chat.get('id'), ('✅ ' if ok else '⚠️ ') + escape(result),
+                     thread_id=message.get('message_thread_id') or 0)
+        return True
+
     def send_new_customer_digest(report_day=None, force=False):
         report_day = str(report_day or (tokyo_now().date() - timedelta(days=1)).isoformat())[:10]
         cfg = settings()
@@ -2557,12 +2725,20 @@ def register_telegram_booking(
                          ON CONFLICT(digest_date) DO UPDATE SET customer_count=excluded.customer_count,
                          message_id=excluded.message_id,sent_at=CURRENT_TIMESTAMP""",
                       (report_day,len(customer_rows),message_id))
-        return {'sent':True,'date':report_day,'count':len(customer_rows),'message_id':message_id}
+        name_review = send_customer_name_reviews(report_day)
+        return {'sent':True,'date':report_day,'count':len(customer_rows),'message_id':message_id,
+                'name_review_sent':int(name_review.get('sent') or 0)}
 
     @app.route("/api/telegram/new-customer-digest/run", methods=["POST"])
     def telegram_new_customer_digest_run_api():
         payload = request.get_json(silent=True) or {}
         return jsonify(ok=True, **send_new_customer_digest(payload.get('date'), bool(payload.get('force'))))
+
+    @app.route("/api/telegram/new-customer-name-review/run", methods=["POST"])
+    def telegram_new_customer_name_review_run_api():
+        payload = request.get_json(silent=True) or {}
+        day = str(payload.get('date') or (tokyo_now().date() - timedelta(days=1)).isoformat())[:10]
+        return jsonify(ok=True, **send_customer_name_reviews(day))
 
     def point_expiry_alert_rows(alert_day):
         """Non-recharge points above 1,000 in the final 1-5 valid days."""
@@ -2660,6 +2836,17 @@ def register_telegram_booking(
                                    "allowed_updates": ["message", "edited_message", "callback_query"]})
             except Exception:
                 pass
+        # One-time rollout backfill: review both today and yesterday, including the requested Sep 9/10 launch window.
+        try:
+            with conn() as c:
+                marker = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='customer_name_review_backfill_v1'").fetchone()
+            if not marker:
+                for audit_day in (tokyo_now().date() - timedelta(days=1), tokyo_now().date()):
+                    send_customer_name_reviews(audit_day.isoformat())
+                with conn() as c:
+                    c.execute("INSERT INTO telegram_settings(setting_key,setting_value,updated_at) VALUES('customer_name_review_backfill_v1','1',CURRENT_TIMESTAMP)")
+        except Exception:
+            pass
         while True:
             time.sleep(60)
             try:

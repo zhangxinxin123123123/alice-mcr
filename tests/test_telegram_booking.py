@@ -64,7 +64,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
                           "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
-                          "points_records", "recharge_records", "girl_tag_memory"):
+                          "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -1617,6 +1617,35 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertFalse(second.json['sent'])
         self.assertEqual(second.json['reason'],'已发送')
         self.assertTrue(any(method=='sendMessage' and '0777' in body for method,body in self.telegram_calls))
+
+    def test_new_customer_name_review_requires_internal_confirmation(self):
+        report_day = self.app_module._tokyo_now().date().isoformat()
+        internal = {'id':-30003,'type':'supergroup','title':'Alice内部群'}
+        manager = {'id':9901,'first_name':'客服'}
+        self.webhook({'message':{'message_id':700,'chat':internal,'from':manager,'text':'/绑定审核群'}})
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO customers(customer_no,name,source,created_at) VALUES('1701','QQ小王','',?)",(report_day+' 03:00:00',))
+            customer_id=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,source,created_at) VALUES('1702','20822.6-7','',?)",(report_day+' 03:05:00',))
+            c.execute("INSERT INTO customers(customer_no,name,source,created_at) VALUES('1703','池袋2-16-18','',?)",(report_day+' 03:10:00',))
+        login=self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        headers={'X-Alice-Session':login.json['session_token']}
+        review=self.client.post('/api/telegram/new-customer-name-review/run',headers=headers,json={'date':report_day})
+        self.assertEqual(review.status_code,200,review.get_data(as_text=True))
+        self.assertEqual(review.json['sent'],3)
+        with self.app_module.conn() as c:
+            before=dict(c.execute('SELECT name,source FROM customers WHERE id=?',(customer_id,)).fetchone())
+            prompt=c.execute("SELECT prompt_message_id FROM telegram_customer_name_reviews WHERE customer_id=? AND issue_type='source_prefix'",(customer_id,)).fetchone()[0]
+            suspicious=c.execute("SELECT COUNT(*) FROM telegram_customer_name_reviews WHERE issue_type='suspicious_name'").fetchone()[0]
+        self.assertEqual(before,{'name':'QQ小王','source':''})
+        self.assertEqual(suspicious,2)
+        self.webhook({'message':{'message_id':710,'chat':internal,'from':manager,'text':'OK',
+                                 'reply_to_message':{'message_id':prompt,'text':'新客户名称检查'}}})
+        with self.app_module.conn() as c:
+            after=dict(c.execute('SELECT name,source FROM customers WHERE id=?',(customer_id,)).fetchone())
+        self.assertEqual(after,{'name':'小王','source':'QQ'})
+        duplicate=self.client.post('/api/telegram/new-customer-name-review/run',headers=headers,json={'date':report_day})
+        self.assertEqual(duplicate.json['sent'],0)
 
 
 if __name__ == "__main__":

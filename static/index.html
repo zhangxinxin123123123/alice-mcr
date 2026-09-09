@@ -418,6 +418,7 @@ body:not(.role-boss) .boss-only{display:none!important}
      <div class="manual-command"><code>下班 / 闭店</code><span>女孩专属群发送“下班”，只给该女孩发送营业日结算确认；内部群发送“闭店”，给当天所有有账目且已绑定群的女孩发送。东京时间 00:00–03:59 归前一天，04:00 起归当天。女孩确认线上转账或线下现金，再回复下次出勤；女孩类型包含“全职”时不询问。“发送今日结算截图”只发送截图，不触发下班或闭店。</span></div>
      <div class="manual-command"><code>积分查询+0016</code><span>内部群按客户编号查询当前积分。</span></div>
      <div class="manual-command"><code>编号查询+客户名</code><span>内部群按客户名查询客户编号，支持部分名字。</span></div>
+     <div class="manual-command"><code>新客名称检查 / 回复 OK</code><span>每天 00:00 汇总上一日新客时，识别 QQ、飞机/TEL、电话、微信、LINE、尾号等来源前缀，并在内部群提出拆分建议。客服回复检查消息 <b>OK</b> 或点击确认后才会修改；疑似时间、酒店或地址的名称只提醒客服手动核对，系统不会猜测。</span></div>
      <div class="manual-command"><code>/绑定审核群</code><span>把当前群设为内部审核群，仅店长、客服或群管理员操作。</span></div>
      <div class="manual-command"><code>/绑定女孩 女孩名</code><span>把当前群绑定为该女孩专属群。</span></div>
      <p><b>自动识别规则：</b>接龙首个非空行必须独立为四位日期（如 <code>0908</code>），且女孩在对应日期出勤表。每天 00:00 开始接受当天接龙；00:00–03:59 同时接受前一天和当天，04:00 后停止前一天自动导入。编辑旧消息不导入，必须重发；没有预约不导入也不提醒；新增、修改或失败才在内部群播报。</p>
