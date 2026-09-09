@@ -260,6 +260,33 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
         self.assertTrue(listing.json["teachings"])
 
+    def test_customer_ai_failure_is_cute_and_never_exposes_backend_details(self):
+        customer = {"id": 9130, "first_name": "客人"}
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_empty_ai(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output": []})
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_empty_ai
+        try:
+            self.webhook({"message": {"message_id": 1, "chat": {"id": 9130, "type": "private"},
+                                      "from": customer, "text": "明天还能预约吗？"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        edits = [body for method, body in self.telegram_calls if method == "editMessageText"]
+        self.assertTrue(edits)
+        self.assertIn("%E5%85%94%E5%85%94", edits[-1])
+        self.assertNotIn("OPENAI_API_KEY", edits[-1])
+        self.assertNotIn("Render", edits[-1])
+        self.assertNotIn("AI+%E6%B2%A1%E6%9C%89%E8%BF%94%E5%9B%9E", edits[-1])
+
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {
             "message_id": 0,
