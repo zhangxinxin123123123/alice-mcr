@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v114_praise_review_points_digest"
+APP_VERSION = "v114a_fast_points_audit"
 
 @app.after_request
 def compress_large_json(response):
@@ -2522,10 +2522,39 @@ def recalc_customer_points(c, customer_id=None, update_types=True):
 def audit_customer_points(c):
     """只检查、不改数据；定位历史积分和当前规则不一致的客户/订单。"""
     anomalies = []
-    customers = c.execute("SELECT id,customer_no,name,COALESCE(points,0) points,COALESCE(total_points,0) total_points,COALESCE(total_spent,0) total_spent FROM customers ORDER BY id").fetchall()
+    customers = rows(c.execute("SELECT id,customer_no,name,COALESCE(points,0) points,COALESCE(total_points,0) total_points,COALESCE(total_spent,0) total_spent FROM customers ORDER BY id").fetchall())
+    orders_by_customer = {}
+    for order in rows(c.execute("""SELECT id,customer_id,order_date,received_amount,points,points_used,remark,remark2,
+                                          raw_text,order_status,created_at FROM orders
+                                   WHERE customer_id IS NOT NULL ORDER BY customer_id,substr(order_date,1,10),id""").fetchall()):
+        orders_by_customer.setdefault(int(order['customer_id']), []).append(order)
+    cancellation_times = {int(row['customer_id']):str(row['created_at'] or '') for row in c.execute("""
+        SELECT customer_id,MIN(created_at) AS created_at FROM telegram_customer_cancellations
+        WHERE cancellation_no=1 AND customer_id IS NOT NULL GROUP BY customer_id""").fetchall()}
+    today = tokyo_today_date()
     for customer in customers:
         cid = int(customer['id'])
-        calculated, total_points, total_spent, _last_day, expired = active_customer_points(c, cid)
+        order_rows = orders_by_customer.get(cid, [])
+        active_balance = total_points = total_spent = 0
+        last_day = None
+        forfeited_through = cancellation_times.get(cid, '')
+        for order in order_rows:
+            if '取消' in str(order['order_status'] or ''):
+                continue
+            day = parse_order_day(order['order_date'])
+            if not day:
+                continue
+            if last_day and (day-last_day).days >= 30:
+                active_balance = 0
+            actual = int(order['points'] or 0)
+            used = max(0, int(order['points_used'] or 0))
+            if not forfeited_through or str(order['created_at'] or '') > forfeited_through:
+                active_balance = max(0, active_balance + actual - used)
+            total_points += actual
+            total_spent += int(order['received_amount'] or 0)
+            last_day = day
+        expired = bool(last_day and (today-last_day).days >= 30)
+        calculated = 0 if expired else active_balance
         if (int(customer['points'] or 0), int(customer['total_points'] or 0), int(customer['total_spent'] or 0)) != (calculated, total_points, total_spent):
             anomalies.append({
                 'kind': '客户汇总不一致', 'customer_id': cid, 'customer_no': customer['customer_no'],
@@ -2534,8 +2563,6 @@ def audit_customer_points(c):
                 'calculated_total_points': total_points, 'stored_total_spent': int(customer['total_spent'] or 0),
                 'calculated_total_spent': total_spent, 'expired': bool(expired)
             })
-        order_rows = c.execute("""SELECT id,order_date,received_amount,points,points_used,remark,remark2,raw_text,order_status
-                                  FROM orders WHERE customer_id=? ORDER BY substr(order_date,1,10),id""", (cid,)).fetchall()
         running = 0
         last_day = None
         for order in order_rows:
