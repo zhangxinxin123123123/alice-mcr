@@ -748,11 +748,10 @@ def _install(module):
                 role = str(payload.get("role") or "")
                 label = str(payload.get("label") or _role_label(role))
                 token = str(payload.get("session_token") or "")
-                c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='replaced',updated_at=CURRENT_TIMESTAMP
-                             WHERE username=? AND status='active' AND COALESCE(logout_at,'')=''""", (now, now, username))
-                c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,status)
-                             VALUES(?,?,?,?,?,?,?,?,?)""",
-                          (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), token, now, now, "active"))
+                if not c.execute("SELECT 1 FROM login_sessions WHERE session_token=? LIMIT 1", (token,)).fetchone():
+                    c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,status)
+                                 VALUES(?,?,?,?,?,?,?,?,?)""",
+                              (username, role, label, _client_ip(), request.headers.get("User-Agent", ""), token, now, now, "active"))
             return response
         _login_audit_login._login_audit_wrapped = True
         app.view_functions["api_login"] = _login_audit_login

@@ -871,6 +871,20 @@ class TelegramBookingFlowTest(unittest.TestCase):
         uid = next(x["id"] for x in listing if x["username"] == "permission_test")
         self.client.post("/api/system/users", headers=headers, json={"action": "delete", "id": uid})
 
+    def test_login_survives_process_memory_reset_and_second_same_account_login(self):
+        first = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        self.assertEqual(first.status_code, 200)
+        first_headers = {"X-Alice-Session": first.json["session_token"]}
+        self.app_module.ACTIVE_SESSIONS.clear()
+        restored = self.client.get("/api/all", headers=first_headers)
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        self.assertTrue(restored.json["ok"])
+
+        second = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        self.assertEqual(second.status_code, 200)
+        still_valid = self.client.get("/api/all", headers=first_headers)
+        self.assertEqual(still_valid.status_code, 200, still_valid.get_data(as_text=True))
+
     def test_boss_can_query_per_admin_operation_logs(self):
         login = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
         headers = {"X-Alice-Role": "boss", "X-Alice-Session": login.json["session_token"]}

@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v115b_incremental_points_only"
+APP_VERSION = "v116_stable_sessions_balance_colors"
 
 @app.after_request
 def compress_large_json(response):
@@ -148,6 +148,12 @@ def _init_db_schema():
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
             role TEXT DEFAULT 'user', label TEXT DEFAULT '', permissions TEXT DEFAULT '[]', enabled INTEGER DEFAULT 1,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS login_sessions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT DEFAULT '', role TEXT DEFAULT '', role_label TEXT DEFAULT '',
+            ip TEXT DEFAULT '', user_agent TEXT DEFAULT '', session_token TEXT DEFAULT '', login_at TEXT DEFAULT '',
+            last_seen_at TEXT DEFAULT '', logout_at TEXT DEFAULT '', status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_login_sessions_token ON login_sessions(session_token)")
         c.execute("""CREATE TABLE IF NOT EXISTS operation_logs(
             id INTEGER PRIMARY KEY AUTOINCREMENT, actor_name TEXT NOT NULL, actor_role TEXT DEFAULT '',
             method TEXT NOT NULL, target TEXT NOT NULL, detail TEXT DEFAULT '', response_status INTEGER DEFAULT 0,
@@ -354,7 +360,29 @@ def current_session_token():
     return request.headers.get('X-Alice-Session') or request.args.get('session_token') or ''
 
 def current_session_info():
-    return ACTIVE_SESSIONS.get(current_session_token()) or {}
+    token = current_session_token()
+    if not token:
+        return {}
+    # Render 重启或切换实例会清空进程内存；有效登录必须能从持久数据库恢复。
+    try:
+        with conn() as c:
+            row = c.execute("""SELECT ls.username,ls.role,ls.status,ls.logout_at,
+                                      su.label,su.permissions,su.enabled
+                               FROM login_sessions ls
+                               LEFT JOIN system_users su ON su.username=ls.username
+                               WHERE ls.session_token=? ORDER BY ls.id DESC LIMIT 1""", (token,)).fetchone()
+        if not row or row['status'] != 'active' or row['logout_at'] or not int(row['enabled'] or 0):
+            ACTIVE_SESSIONS.pop(token, None)
+            return {}
+        role = str(row['role'] or '')
+        info = {'username': str(row['username'] or ''), 'role': role,
+                'label': str(row['label'] or row['username'] or ''),
+                'permissions': normalize_permissions(row['permissions'], role)}
+        ACTIVE_SESSIONS[token] = info
+        return info
+    except sqlite3.OperationalError:
+        # 首次建库、登录记录表尚未创建时仅使用本进程刚签发的令牌。
+        return ACTIVE_SESSIONS.get(token) or {}
 
 def required_module_for_api(path):
     if path == '/api/telegram/report-photo':
@@ -410,9 +438,28 @@ def api_login():
     if info and password_matches(p, info.get('password_hash')):
         permissions = normalize_permissions(info.get('permissions'), info.get('role'))
         token = secrets.token_urlsafe(24)
-        ACTIVE_SESSIONS[token] = {'username': u, 'role': info['role'], 'permissions': permissions}
+        session_info = {'username': u, 'role': info['role'], 'label': info['label'], 'permissions': permissions}
+        ACTIVE_SESSIONS[token] = session_info
+        now = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
+        with conn() as c:
+            c.execute("""INSERT INTO login_sessions(username,role,role_label,ip,user_agent,session_token,login_at,last_seen_at,status)
+                         VALUES(?,?,?,?,?,?,?,?,?)""",
+                      (u, info['role'], info['label'], str(request.remote_addr or ''),
+                       str(request.headers.get('User-Agent') or ''), token, now, now, 'active'))
         return jsonify(ok=True, username=u, role=info['role'], label=info['label'], permissions=permissions, session_token=token)
     return jsonify(ok=False, error='用户名或密码错误'), 401
+
+@app.route('/api/login/logout', methods=['POST'])
+def api_login_logout():
+    d = request.json or {}
+    token = str(d.get('session_token') or current_session_token() or '').strip()
+    if token:
+        ACTIVE_SESSIONS.pop(token, None)
+        now = (datetime.utcnow() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')
+        with conn() as c:
+            c.execute("""UPDATE login_sessions SET logout_at=?,last_seen_at=?,status='logout',updated_at=CURRENT_TIMESTAMP
+                         WHERE session_token=? AND COALESCE(logout_at,'')=''""", (now, now, token))
+    return jsonify(ok=True)
 
 @app.route('/api/system/users', methods=['GET', 'POST'])
 def api_system_users():
