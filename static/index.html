@@ -403,7 +403,7 @@ body:not(.role-boss) .boss-only{display:none!important}
    <div class="manual-grid" id="manualGrid">
     <details class="manual-block" open data-search="学院总览 收益 客户数 订单数 刷新"><summary>🏫 学院总览</summary><div class="manual-body"><ul><li>显示今日及本月收益、客户数、订单数、支付构成和女孩收益。</li><li><b>强制读取全部数据：</b>立即从服务器重新读取全部 MCR 数据；页面数据不一致时使用。</li><li>图表随订单、结算和筛选日期自动更新。</li></ul></div></details>
     <details class="manual-block" data-search="订单 预约 编辑 删除 筛选 批量结算 积分折扣"><summary>🧾 订单 / 预约</summary><div class="manual-body"><ul><li>日期、女孩、客户、备注和结算状态均可组合筛选；“清空筛选”恢复全部。</li><li>点击一行的编辑按钮修改预约；删除后会同步影响客户消费、积分和接龙。</li><li><b>批量结算 / 批量未结算 / 批量删除：</b>先勾选左侧预约，再执行对应操作。</li><li>普通预约按客人实付金额每 ¥20 累计 1 积分；取消单不累计。</li><li>备注含“积分折扣”时自动使用此前可用积分，备注写入抵扣金额；客人实付仍由客服手工填写，本单赠送 500 积分，重复保存不会重复扣。</li></ul></div></details>
-    <details class="manual-block" data-search="客户 编号 积分 充值 流水 回滚 联系"><summary>🐰 客户表 / 积分充值</summary><div class="manual-body"><ol><li>找到客户，点击最左侧<b>“积分 / 充值”</b>。</li><li>选择“积分”或“充值余额”，再选增加/扣除，填写正数金额与原因。</li><li>点击保存后立即更新余额，并留下时间、原因和操作人流水；不需要改客户资料页。</li></ol><ul><li>旧客户第一次打开时只建立“期初余额”快照，不修改任何旧订单或旧余额。</li><li>积分只在新增订单时按老板设定比例增量计算；历史订单不批量重算。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发积分使用，使用后本单赠送500积分。</li><li>老板可在流水窗口底部修改新订单积分比例，或关闭新账本回滚到原 5% 逻辑。</li></ul></div></details>
+    <details class="manual-block" data-search="客户 编号 积分 充值 流水 回滚 到期 提醒 联系"><summary>🐰 客户表 / 积分充值</summary><div class="manual-body"><ol><li>找到客户，点击最左侧<b>“积分 / 充值”</b>。</li><li>选择“积分”或“充值余额”，再选增加/扣除，填写正数金额与原因。</li><li>点击保存后立即更新余额，并留下时间、原因和操作人流水；不需要改客户资料页。</li></ol><ul><li>旧客户第一次打开时只建立“期初余额”快照，不修改任何旧订单或旧余额。</li><li>积分只在新增订单时按老板设定比例增量计算；历史订单不批量重算。</li><li>充值客户的赠送积分永久有效，不进入到期警报。</li><li>非充值客户积分超过 1,000 且距离到期不超过 10 天时进入红色警报，每天在内部群汇总提醒一次。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发积分使用，使用后本单赠送500积分。</li><li>老板可在流水窗口底部修改新订单积分比例，或关闭新账本回滚到原 5% 逻辑。</li></ul></div></details>
     <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 群绑定 好评"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
     <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群，图中会标明每位女孩已签收、部分签收或未签收。</li></ul></div></details>
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
@@ -2310,6 +2310,7 @@ function customerRetention(c){
   return {days, status:'正常', cls:''};
 }
 function customerPointExpire(c){
+  if(Number(c.total_recharge||0)>0 || Number(c.recharge_balance||0)>0 || String(c.customer_type||'').toUpperCase()==='SVIP') return {txt:'永久有效（充值客户）',cls:'log-ok'};
   const os=ordersForCustomer(c).filter(o=>Number(o.points||0)>0).sort((a,b)=>String(b.order_date).localeCompare(a.order_date));
   if(!os.length || Number(c.points||0)<=0) return {txt:'—',cls:''};
   const last=os[0].order_date; const expire=new Date(last); expire.setDate(expire.getDate()+30);

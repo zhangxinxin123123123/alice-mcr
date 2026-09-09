@@ -152,6 +152,9 @@ def register_telegram_booking(
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_digests(
                 digest_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
                 message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_point_alert_digests(
+                alert_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
+                message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
                 sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -2561,6 +2564,80 @@ def register_telegram_booking(
         payload = request.get_json(silent=True) or {}
         return jsonify(ok=True, **send_new_customer_digest(payload.get('date'), bool(payload.get('force'))))
 
+    def point_expiry_alert_rows(alert_day):
+        """Points above 1,000 whose 30-day validity has entered the final red 10-day window."""
+        day = datetime.strptime(str(alert_day)[:10], '%Y-%m-%d').date()
+        with conn() as c:
+            candidates = c.execute("""SELECT c.id,c.customer_no,c.name,c.points,c.customer_type,
+                                      c.total_recharge,c.recharge_balance,
+                                      MAX(CASE WHEN COALESCE(o.points,0)>0 AND COALESCE(o.order_status,'') NOT LIKE '%取消%'
+                                               THEN o.order_date ELSE NULL END) AS last_point_date,
+                                      EXISTS(SELECT 1 FROM recharge_records r WHERE r.customer_id=c.id AND COALESCE(r.amount,0)>0) AS has_recharge
+                               FROM customers c
+                               LEFT JOIN orders o ON o.customer_id=c.id
+                               WHERE COALESCE(c.points,0)>1000
+                               GROUP BY c.id ORDER BY c.points DESC,c.id""").fetchall()
+        alerts = []
+        for row in candidates:
+            item = dict(row)
+            # 充值客户的赠送积分永久有效，不参与任何到期警报。
+            permanent = (int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
+                         or int(item.get('recharge_balance') or 0)>0
+                         or str(item.get('customer_type') or '').upper() == 'SVIP')
+            if permanent or not item.get('last_point_date'):
+                continue
+            try:
+                expiry = datetime.strptime(str(item['last_point_date'])[:10], '%Y-%m-%d').date() + timedelta(days=30)
+            except Exception:
+                continue
+            days_left = (expiry - day).days
+            if days_left <= 10:
+                item['days_left'] = days_left
+                item['expiry_date'] = expiry.isoformat()
+                alerts.append(item)
+        return alerts
+
+    def send_point_expiry_alert(alert_day=None, force=False):
+        alert_day = str(alert_day or tokyo_now().date().isoformat())[:10]
+        cfg = settings()
+        chat_id = str(cfg.get('default_review_chat_id') or '')
+        if not valid_group_chat_id(chat_id):
+            return {'sent':False,'date':alert_day,'count':0,'reason':'未绑定内部群'}
+        with conn() as c:
+            existing = c.execute('SELECT * FROM telegram_point_alert_digests WHERE alert_date=?', (alert_day,)).fetchone()
+            if existing and not force:
+                return {'sent':False,'date':alert_day,'count':int(existing['customer_count'] or 0),'reason':'今日已检查'}
+        alerts = point_expiry_alert_rows(alert_day)
+        if not alerts:
+            with conn() as c:
+                c.execute("""INSERT INTO telegram_point_alert_digests(alert_date,customer_count,message_id,sent_at)
+                             VALUES(?,0,0,CURRENT_TIMESTAMP)
+                             ON CONFLICT(alert_date) DO UPDATE SET customer_count=0,sent_at=CURRENT_TIMESTAMP""", (alert_day,))
+            return {'sent':False,'date':alert_day,'count':0,'reason':'没有需要提醒的客户'}
+        lines = [f"🔴 <b>{escape(alert_day)} 高积分到期提醒：{len(alerts)} 人</b>",
+                 "以下客户积分超过 1,000，并已进入红色到期警报："]
+        for row in alerts[:80]:
+            left = int(row['days_left'])
+            status = '已到期' if left <= 0 else f'{left}天后到期'
+            lines.append(f"• <b>{escape(row.get('customer_no') or '未编号')}</b>｜{escape(row.get('name') or '未填写')}｜{int(row.get('points') or 0):,} pt｜{escape(status)}")
+        if len(alerts) > 80:
+            lines.append(f"• 其余 {len(alerts)-80} 人请在 MCR 客户表查看")
+        lines.extend(['', '充值客户的赠送积分永久有效，已自动排除。请客服联系需要提醒的客户。'])
+        message = send_message(chat_id, '\n'.join(lines)[:3900], thread_id=int(cfg.get('default_review_thread_id') or 0))
+        message_id = int((message or {}).get('message_id') or 0)
+        with conn() as c:
+            c.execute("""INSERT INTO telegram_point_alert_digests(alert_date,customer_count,message_id,sent_at)
+                         VALUES(?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(alert_date) DO UPDATE SET customer_count=excluded.customer_count,
+                         message_id=excluded.message_id,sent_at=CURRENT_TIMESTAMP""",
+                      (alert_day,len(alerts),message_id))
+        return {'sent':True,'date':alert_day,'count':len(alerts),'message_id':message_id}
+
+    @app.route("/api/telegram/point-expiry-alert/run", methods=["POST"])
+    def telegram_point_expiry_alert_run_api():
+        payload = request.get_json(silent=True) or {}
+        return jsonify(ok=True, **send_point_expiry_alert(payload.get('date'), bool(payload.get('force'))))
+
     def auto_chain_import_loop():
         public_url = str(os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
         render_host = str(os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "").strip()
@@ -2578,6 +2655,7 @@ def register_telegram_booking(
             try:
                 expire_attendance_inquiries()
                 send_new_customer_digest()
+                send_point_expiry_alert()
                 run_pending_chain_imports(force=False)
             except Exception:
                 pass
