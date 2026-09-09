@@ -61,7 +61,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_daily_girls", "telegram_customers", "chain_import_rows",
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
-                          "telegram_closing_confirmations", "telegram_full_sync_days", "operation_logs"):
+                          "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
+                          "scraped_reviews", "girl_praises", "operation_logs"):
                 c.execute(f"DELETE FROM {table}")
             for key, value in self.telegram_module.DEFAULT_SETTINGS.items():
                 c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES(?,?)
@@ -1150,6 +1151,73 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          "girl_photos")
         gallery_html = '<li class="acf-photo-gallery-mediabox acf-photo-gallery-mediabox-456"></li>'
         self.assertEqual(self.app_module._wordpress_photo_gallery_attachment_ids(gallery_html), [456])
+
+    def test_wordpress_visibility_privates_every_non_attending_model(self):
+        original_posts = self.app_module._wordpress_model_posts
+        original_update = self.app_module._wordpress_inline_model_status
+        changed = []
+        self.app_module._wordpress_model_posts = lambda _opener: ([
+            {'id':10,'title':'娜娜子','status':'private'},
+            {'id':9,'title':'娜娜子','status':'publish'},
+            {'id':8,'title':'官网旧女孩','status':'publish'},
+        ], 'nonce')
+        self.app_module._wordpress_inline_model_status = lambda _opener, post, status, _nonce: changed.append((post['id'],status))
+        try:
+            result = self.app_module.sync_alice_wordpress_girl_visibility(object(), ['娜娜子'], ['娜娜子'])
+        finally:
+            self.app_module._wordpress_model_posts = original_posts
+            self.app_module._wordpress_inline_model_status = original_update
+        self.assertIn((10,'publish'), changed)
+        self.assertIn((9,'private'), changed)
+        self.assertIn((8,'private'), changed)
+        self.assertTrue(result['synced'])
+
+    def test_points_audit_reports_legacy_wrong_points_and_manual_use_is_clamped(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('0888','积分审计客人')")
+            customer_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,customer_name,
+                         received_amount,points,points_used,order_status) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                      (self.day,'17:00-18:00',girl_id,'娜娜子',customer_id,'0888','积分审计客人',20000,1,0,'已结束'))
+            self.app_module.recalc_customer_points(c, customer_id, update_types=False)
+            self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'18:00-19:00','girl_id':girl_id,
+                'customer_raw':'0888','received_amount':10000,'points_used':999999,'order_status':'已结束'})
+            latest = c.execute('SELECT * FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 1',(customer_id,)).fetchone()
+        self.assertEqual(latest['points_used'], 1)
+        login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        result = self.client.get('/api/customers/points-audit',headers={'X-Alice-Session':login.json['session_token']})
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        self.assertTrue(any(item['kind']=='订单积分与规则不符' and item.get('customer_no')=='0888'
+                            for item in result.json['anomalies']))
+
+    def test_review_drafts_are_labeled_non_customer_quotes(self):
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)
+                         VALUES('https://example.com/reviews','https://example.com/reviews','娜娜子',
+                         '公开评论素材内容足够长，提到服务很温柔也非常细心。','温柔,服务细心','hash-review-1')""")
+        login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        result = self.client.post('/api/review_crawler',headers={'X-Alice-Session':login.json['session_token']},
+                                  json={'action':'drafts','date':self.day})
+        self.assertEqual(result.status_code,200,result.get_data(as_text=True))
+        nana = next(item for item in result.json['drafts'] if item['girl_name']=='娜娜子')
+        self.assertIn('非真实客评',nana['label'])
+        self.assertEqual(len(nana['short_drafts']),5)
+
+    def test_new_customer_midnight_digest_is_idempotent(self):
+        report_day = (self.app_module._tokyo_now().date()-timedelta(days=1)).isoformat()
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_settings SET setting_value='-30003' WHERE setting_key='default_review_chat_id'")
+            c.execute("INSERT INTO customers(customer_no,name,created_at) VALUES('0777','需要改编号的名字',?)",
+                      (report_day+' 10:00:00',))
+        login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
+        headers={'X-Alice-Session':login.json['session_token']}
+        first=self.client.post('/api/telegram/new-customer-digest/run',headers=headers,json={'date':report_day})
+        second=self.client.post('/api/telegram/new-customer-digest/run',headers=headers,json={'date':report_day})
+        self.assertTrue(first.json['sent'])
+        self.assertFalse(second.json['sent'])
+        self.assertEqual(second.json['reason'],'已发送')
+        self.assertTrue(any(method=='sendMessage' and '0777' in body for method,body in self.telegram_calls))
 
 
 if __name__ == "__main__":

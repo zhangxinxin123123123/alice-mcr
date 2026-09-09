@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata, socket, ipaddress, time
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -11,7 +11,12 @@ from pathlib import Path
 from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from urllib import robotparser
 from flask import Flask, request, jsonify, send_from_directory, Response
+try:
+    from bs4 import BeautifulSoup
+except Exception:
+    BeautifulSoup = None
 APP_DIR=Path(__file__).resolve().parent
 DB_PATH=Path(os.environ.get('ALICE_DB_PATH') or ('/var/data/alice_academy_mcr.db' if Path('/var/data').exists() else str(APP_DIR/'alice_academy_mcr.db')))
 BOSS_EMAIL=os.environ.get('ALICE_BOSS_EMAIL','xinxinzhang330@gmail.com')
@@ -28,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v113_shift_copy_and_overlap_import"
+APP_VERSION = "v114_praise_review_points_digest"
 
 @app.after_request
 def compress_large_json(response):
@@ -57,7 +62,7 @@ USERS = {
 }
 SYSTEM_MODULES = [
     'home','orders','customers','girls','settlement','quickLinks','importer','telegramBooking',
-    'chainReserve','pureShift','manual','advanceReserve','rooms','enums','stats','debug','loginAudit','operationAudit'
+    'chainReserve','pureShift','manual','advanceReserve','rooms','enums','reviewCrawler','stats','debug','loginAudit','operationAudit'
 ]
 ROLE_DEFAULT_PERMISSIONS = {
     'boss': SYSTEM_MODULES,
@@ -220,9 +225,16 @@ def _init_db_schema():
         c.execute("""CREATE TABLE IF NOT EXISTS girl_praises(
             id INTEGER PRIMARY KEY AUTOINCREMENT, girl_id INTEGER DEFAULT 0, girl_name TEXT NOT NULL,
             source_name TEXT DEFAULT '', image_path TEXT NOT NULL, image_mime TEXT DEFAULT 'image/png',
-            image_blob BLOB,
+            image_blob BLOB, publish_status TEXT DEFAULT '未上架', wp_post_id INTEGER DEFAULT 0,
+            wp_attachment_id INTEGER DEFAULT 0, published_at TEXT DEFAULT '', publish_error TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_girl_praises_girl ON girl_praises(girl_id, girl_name, created_at)")
+        c.execute("""CREATE TABLE IF NOT EXISTS scraped_reviews(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_url TEXT NOT NULL, source_page TEXT DEFAULT '',
+            girl_name TEXT DEFAULT '', review_text TEXT NOT NULL, rating REAL DEFAULT 0,
+            review_date TEXT DEFAULT '', tags TEXT DEFAULT '', review_hash TEXT NOT NULL UNIQUE,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_scraped_reviews_girl ON scraped_reviews(girl_name, created_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, line_name TEXT NOT NULL, phone TEXT NOT NULL,
             status TEXT DEFAULT '待审核', member_level TEXT DEFAULT 'svip', customer_id INTEGER DEFAULT 0,
@@ -287,6 +299,13 @@ def _init_db_schema():
             c.execute("ALTER TABLE girl_praises ADD COLUMN image_mime TEXT DEFAULT 'image/png'")
         if 'image_blob' not in praise_cols:
             c.execute("ALTER TABLE girl_praises ADD COLUMN image_blob BLOB")
+        for column, definition in (
+            ('publish_status', "TEXT DEFAULT '未上架'"), ('wp_post_id', 'INTEGER DEFAULT 0'),
+            ('wp_attachment_id', 'INTEGER DEFAULT 0'), ('published_at', "TEXT DEFAULT ''"),
+            ('publish_error', "TEXT DEFAULT ''")):
+            if column not in praise_cols:
+                c.execute(f"ALTER TABLE girl_praises ADD COLUMN {column} {definition}")
+        c.execute("UPDATE girl_praises SET publish_status='未上架' WHERE COALESCE(publish_status,'')='' ")
         c.execute("""UPDATE girl_praises
                      SET image_path='/girl_praises/' || substr(image_path, length('/static/girl_praises/') + 1),
                          updated_at=CURRENT_TIMESTAMP
@@ -351,6 +370,7 @@ def required_module_for_api(path):
         ('/api/pure_shifts', 'pureShift'), ('/api/schedules', 'pureShift'),
         ('/api/room', 'rooms'), ('/api/hotel_room', 'rooms'), ('/api/delete_room', 'rooms'),
         ('/api/enums', 'enums'), ('/api/quick_links', 'quickLinks'),
+        ('/api/review_crawler', 'reviewCrawler'),
         ('/api/customer_accounts', 'advanceReserve'), ('/api/customer_reservations', 'advanceReserve'),
     ]
     if path.startswith('/api/delete/'):
@@ -1245,25 +1265,26 @@ def _wordpress_rest_nonce(edit_html):
             return html_unescape(match.group(1)).replace('\\/', '/')
     return ''
 
-def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes, page_index=0, page_count=1):
+def _wordpress_rest_upload_image(opener, edit_html, edit_url, day, image_bytes, page_index=0, page_count=1,
+                                 filename='', content_type='image/png'):
     nonce = _wordpress_rest_nonce(edit_html)
     if not nonce:
         return 0
     suffix = f'-{page_index + 1}' if page_count > 1 else ''
-    filename = f'alice-attendance-{day}{suffix}.png'
+    filename = filename or f'alice-attendance-{day}{suffix}.png'
     req = Request(ALICE_BASE_URL + '/wp-json/wp/v2/media', data=image_bytes, method='POST', headers={
-        'Content-Type': 'image/png', 'Content-Disposition': f'attachment; filename="{filename}"',
+        'Content-Type': content_type, 'Content-Disposition': f'attachment; filename="{filename}"',
         'X-WP-Nonce': nonce, 'Referer': edit_url, 'Accept': 'application/json'})
     with opener.open(req, timeout=90) as response:
         payload = json.loads(response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace'))
     return int(payload.get('id') or 0)
 
-def _multipart_request(url, fields, filename, image_bytes, opener, referer):
+def _multipart_request(url, fields, filename, image_bytes, opener, referer, content_type='image/png'):
     boundary = 'AliceWpBoundary' + secrets.token_hex(12)
     parts = []
     for key, value in fields:
         parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode('utf-8'))
-    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="async-upload"; filename="{filename}"\r\nContent-Type: image/png\r\n\r\n'.encode('utf-8'))
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="async-upload"; filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode('utf-8'))
     parts.append(image_bytes)
     parts.append(f'\r\n--{boundary}--\r\n'.encode('utf-8'))
     req = Request(url, data=b''.join(parts), method='POST', headers={
@@ -1440,25 +1461,18 @@ def sync_alice_wordpress_girl_prices(opener, girl_prices):
 
 def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_names):
     attendance_keys = {_wordpress_girl_key(x) for x in (attendance_names or []) if _wordpress_girl_key(x)}
-    managed = {}
-    for name in all_girl_names or []:
-        key = _wordpress_girl_key(name)
-        if key:
-            managed.setdefault(key, str(name or '').strip())
     posts, nonce = _wordpress_model_posts(opener)
     matches = {}
     for post in posts:
         key = _wordpress_girl_key(post['title'])
-        if key in managed:
+        if key:
             matches.setdefault(key, []).append(post)
     result = {'synced': True, 'matched': 0, 'published': 0, 'privated': 0, 'unchanged': 0,
               'failed': [], 'unmatched_attendance': []}
-    for key, mcr_name in managed.items():
-        candidates = sorted(matches.get(key, []), key=lambda x: x['id'], reverse=True)
-        if not candidates:
-            if key in attendance_keys:
-                result['unmatched_attendance'].append(mcr_name)
-            continue
+    # 官网女孩管理里的全部 model 都由当天出勤控制：出勤者仅保留最新的一篇公开，
+    # 其余女孩及同名旧文章全部私密，避免 MCR 名单之外的旧资料继续公开。
+    for key, candidates in matches.items():
+        candidates = sorted(candidates, key=lambda x: x['id'], reverse=True)
         result['matched'] += 1
         for index, post in enumerate(candidates):
             desired = 'publish' if key in attendance_keys and index == 0 else 'private'
@@ -1472,8 +1486,225 @@ def sync_alice_wordpress_girl_visibility(opener, attendance_names, all_girl_name
                 else:
                     result['privated'] += 1
             except Exception as exc:
-                result['failed'].append({'girl': mcr_name, 'post_id': post['id'], 'error': str(exc)})
+                result['failed'].append({'girl': post.get('title') or key, 'post_id': post['id'], 'error': str(exc)})
+    for name in attendance_names or []:
+        if _wordpress_girl_key(name) not in matches:
+            result['unmatched_attendance'].append(str(name or '').strip())
     result['synced'] = not result['failed']
+    return result
+
+def publish_girl_praise_to_wordpress(praise_id):
+    user, pwd = alice_wordpress_credentials()
+    if not user or not pwd:
+        raise ValueError('Render 尚未设置官网账号密码')
+    with conn() as c:
+        praise = c.execute('SELECT * FROM girl_praises WHERE id=?', (int(praise_id),)).fetchone()
+    if not praise:
+        raise ValueError('好评图片不存在')
+    praise = dict(praise)
+    image_bytes = bytes(praise.get('image_blob') or b'')
+    if not image_bytes:
+        filename = Path(str(praise.get('image_path') or '')).name
+        for folder in (GIRL_PRAISE_DIR, LEGACY_GIRL_PRAISE_DIR):
+            candidate = folder / filename
+            if candidate.is_file():
+                image_bytes = candidate.read_bytes()
+                break
+    if not image_bytes:
+        raise ValueError('好评图片文件已丢失')
+    opener = alice_wordpress_login(user, pwd)
+    posts, _inline_nonce = _wordpress_model_posts(opener)
+    girl_key = _wordpress_girl_key(praise.get('girl_name'))
+    candidates = [post for post in posts if _wordpress_girl_key(post.get('title')) == girl_key]
+    if not candidates:
+        raise ValueError(f"官网女孩管理中找不到“{praise.get('girl_name')}”")
+    post = sorted(candidates, key=lambda item: item['id'], reverse=True)[0]
+    edit_url = f"{ALICE_BASE_URL}/wp-admin/post.php?post={post['id']}&action=edit"
+    edit_html, _ = opener_text(opener, edit_url, timeout=40)
+    gallery_key = _acf_gallery_field_key(edit_html)
+    gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key) if gallery_key else ''
+    if not gallery_key or not gallery_name:
+        raise ValueError('官网女孩页面找不到照片相册字段')
+    mime = str(praise.get('image_mime') or 'image/png')
+    extension = {'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif'}.get(mime, '.png')
+    upload_name = f"alice-praise-{post['id']}-{praise['id']}{extension}"
+    attachment_id = _wordpress_rest_upload_image(
+        opener, edit_html, edit_url, '', image_bytes, filename=upload_name, content_type=mime)
+    if not attachment_id:
+        media_html, _ = opener_text(opener, ALICE_BASE_URL + '/wp-admin/media-new.php', timeout=35)
+        nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)', media_html, re.I)
+        if not nonce_match:
+            raise ValueError('找不到官网图片上传授权码')
+        upload_raw = _multipart_request(ALICE_BASE_URL + '/wp-admin/async-upload.php', [
+            ('name', upload_name), ('action', 'upload-attachment'),
+            ('_wpnonce', html_unescape(nonce_match.group(1)))
+        ], upload_name, image_bytes, opener, edit_url, mime)
+        upload_data = json.loads(upload_raw)
+        attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
+        if not upload_data.get('success') or not attachment_id:
+            raise ValueError(((upload_data.get('data') or {}).get('message')) or '官网图片上传失败')
+    existing_ids = _wordpress_photo_gallery_attachment_ids(edit_html)
+    gallery_ids = list(dict.fromkeys(existing_ids + [attachment_id]))
+    pairs = _wordpress_form_pairs(edit_html)
+    replace_names = {f'acf[{gallery_key}]', gallery_name, gallery_name + '[]', 'action', 'post_ID'}
+    pairs = [(key, value) for key, value in pairs if key not in replace_names]
+    pairs.extend([('action', 'editpost'), ('post_ID', str(post['id']))])
+    pairs.extend((gallery_name + '[]', str(media_id)) for media_id in gallery_ids)
+    pairs.append(('save', '更新'))
+    req = Request(ALICE_BASE_URL + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
+                  method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded', 'Referer': edit_url})
+    with opener.open(req, timeout=60) as response:
+        response.read()
+    verify_html, _ = opener_text(opener, edit_url + '&alice_praise_verify=1', timeout=40)
+    if attachment_id not in _wordpress_photo_gallery_attachment_ids(verify_html):
+        raise ValueError('官网没有确认好评图片已加入女孩相册')
+    with conn() as c:
+        c.execute("""UPDATE girl_praises SET publish_status='已上架',wp_post_id=?,wp_attachment_id=?,
+                     published_at=CURRENT_TIMESTAMP,publish_error='',updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (post['id'], attachment_id, int(praise_id)))
+    return {'praise_id': int(praise_id), 'girl_name': praise.get('girl_name'),
+            'wp_post_id': int(post['id']), 'wp_attachment_id': int(attachment_id), 'status': '已上架'}
+
+REVIEW_FEATURE_WORDS = {
+    '温柔': ('温柔','温和','優しい','やさしい'), '聊天自然': ('聊天','健谈','会話','話しやす'),
+    '服务细心': ('细心','贴心','周到','丁寧','気遣い'), '可爱': ('可爱','可愛い','かわいい'),
+    '颜值出众': ('漂亮','美女','颜值','綺麗','美人'), '活泼': ('活泼','元气','明るい','元気'),
+    '放松感': ('放松','舒服','治愈','癒し','リラックス'), '按摩': ('按摩','マッサージ'),
+}
+
+def _safe_public_url(value):
+    url = str(value or '').strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http','https') or not parsed.hostname:
+        raise ValueError('请输入公开网站的 http/https 地址')
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80), type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError(f'网站地址无法解析：{exc}')
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise ValueError('只能采集公开网站，不能访问本机或内网地址')
+    return url
+
+def _review_tags(text):
+    return [label for label, words in REVIEW_FEATURE_WORDS.items() if any(word.lower() in text.lower() for word in words)]
+
+def crawl_public_reviews(start_url, max_pages=3):
+    if BeautifulSoup is None:
+        raise RuntimeError('服务器尚未安装评论采集解析组件，请等待本次部署完成')
+    start_url = _safe_public_url(start_url)
+    max_pages = min(10, max(1, int(max_pages or 3)))
+    root = urlparse(start_url)
+    robots_url = f'{root.scheme}://{root.netloc}/robots.txt'
+    rp = robotparser.RobotFileParser()
+    rp.set_url(robots_url)
+    try:
+        rp.read()
+        if not rp.can_fetch('AliceReviewResearchBot/1.0', start_url):
+            raise ValueError('该网站 robots.txt 不允许采集这个页面')
+    except ValueError:
+        raise
+    except Exception:
+        # robots.txt 不可用时仍保持低频、少页面，并在结果中说明。
+        pass
+    with conn() as c:
+        girl_rows = rows(c.execute("SELECT name,girl_alias,tags,remark,remark2 FROM girls ORDER BY id").fetchall())
+    queue = [start_url]
+    visited = set()
+    collected = []
+    while queue and len(visited) < max_pages:
+        page_url = queue.pop(0)
+        if page_url in visited:
+            continue
+        _safe_public_url(page_url)
+        req = Request(page_url, headers={'User-Agent':'AliceReviewResearchBot/1.0 (+public review research; low frequency)'})
+        with urlopen(req, timeout=20) as response:
+            final_url = _safe_public_url(response.geturl())
+            if urlparse(final_url).netloc.lower() != root.netloc.lower():
+                raise ValueError('页面跳转到了其他网站，已停止采集')
+            content_type = str(response.headers.get('Content-Type') or '')
+            if 'html' not in content_type.lower():
+                raise ValueError('目标地址不是 HTML 页面')
+            raw = response.read(2_000_001)
+            if len(raw) > 2_000_000:
+                raise ValueError('单页超过 2MB，已停止采集')
+        visited.add(page_url)
+        soup = BeautifulSoup(raw, 'html.parser')
+        for unwanted in soup(['script','style','nav','footer','header','form']):
+            unwanted.decompose()
+        candidates = soup.select('article,[class*="review" i],[class*="comment" i],[class*="kuchikomi" i],[class*="voice" i]')
+        seen_page = set()
+        for node in candidates[:250]:
+            text_value = re.sub(r'\s+', ' ', node.get_text(' ', strip=True)).strip()
+            if len(text_value) < 20 or len(text_value) > 2000 or text_value in seen_page:
+                continue
+            seen_page.add(text_value)
+            normalized = unicodedata.normalize('NFKC', text_value).lower().replace(' ', '')
+            girl_name = ''
+            for girl in girl_rows:
+                aliases = [girl.get('name'), girl.get('girl_alias')]
+                if any(_wordpress_girl_key(alias) and _wordpress_girl_key(alias) in normalized for alias in aliases):
+                    girl_name = girl.get('name') or ''
+                    break
+            digest = hashlib.sha256((final_url+'\n'+text_value).encode('utf-8')).hexdigest()
+            collected.append({'source_url':start_url,'source_page':final_url,'girl_name':girl_name,
+                              'review_text':text_value,'tags':','.join(_review_tags(text_value)),'review_hash':digest})
+        if len(visited) < max_pages:
+            links = []
+            for anchor in soup.select('a[href]'):
+                href = urljoin(final_url, anchor.get('href') or '')
+                parsed = urlparse(href)
+                hint = (href+' '+anchor.get_text(' ', strip=True)).lower()
+                if parsed.netloc.lower() == root.netloc.lower() and any(x in hint for x in ('review','comment','kuchikomi','口コミ','体験','お客様','声')):
+                    links.append(href.split('#')[0])
+            queue.extend(link for link in dict.fromkeys(links) if link not in visited and link not in queue)
+        time.sleep(.2)
+    inserted = updated = 0
+    with conn() as c:
+        for item in collected:
+            old = c.execute('SELECT id FROM scraped_reviews WHERE review_hash=?', (item['review_hash'],)).fetchone()
+            if old:
+                c.execute("UPDATE scraped_reviews SET girl_name=?,tags=?,source_page=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                          (item['girl_name'],item['tags'],item['source_page'],old['id']))
+                updated += 1
+            else:
+                c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)
+                             VALUES(?,?,?,?,?,?)""", (item['source_url'],item['source_page'],item['girl_name'],item['review_text'],item['tags'],item['review_hash']))
+                inserted += 1
+    return {'pages':len(visited),'found':len(collected),'inserted':inserted,'updated':updated}
+
+def review_marketing_drafts(day):
+    with conn() as c:
+        names = [r['girl_name'] for r in c.execute("SELECT girl_name FROM pure_shifts WHERE shift_date=? ORDER BY sort_order,id", (day,)).fetchall()]
+        girls = {r['name']:dict(r) for r in c.execute("SELECT name,tags,remark,remark2 FROM girls").fetchall()}
+        review_rows = rows(c.execute("SELECT girl_name,review_text,tags FROM scraped_reviews ORDER BY updated_at DESC,id DESC").fetchall())
+    result = []
+    for name in dict.fromkeys(names):
+        sources = [r for r in review_rows if _wordpress_girl_key(r.get('girl_name')) == _wordpress_girl_key(name)]
+        feature_counts = {}
+        for source in sources:
+            for tag in str(source.get('tags') or '').split(','):
+                if tag:
+                    feature_counts[tag] = feature_counts.get(tag,0)+1
+        girl = girls.get(name) or {}
+        if not feature_counts:
+            for tag in _review_tags(' '.join(str(girl.get(x) or '') for x in ('tags','remark','remark2'))):
+                feature_counts[tag] = 1
+        features = [x[0] for x in sorted(feature_counts.items(), key=lambda x:(-x[1],x[0]))[:4]] or ['自然亲切','轻松陪伴']
+        f1, f2 = features[0], features[min(1,len(features)-1)]
+        shorts = [
+            f'{name}今天出勤，{f1}又有{f2}，想放松一下可以来看看。',
+            f'想找{f1}系女孩？{name}今日可约，氛围自然不赶时间。',
+            f'{name}的关键词是{f1}、{f2}，适合想轻松相处的客人。',
+            f'今晚想要一点特别的陪伴，{name}会是值得留意的选择。',
+            f'今日推荐{name}：{f1}，相处舒服，预约前可先查询实时空档。'
+        ]
+        long_text = (f'{name}今天出勤。根据已采集的公开评论素材与后台资料，比较突出的印象是{f1}和{f2}。'
+                     f'她更适合希望过程自然、沟通轻松，也在意细节感受的客人。第一次见面不用担心尴尬，可以先把喜欢的相处方式、希望的节奏以及在意的服务细节告诉客服，我们会协助确认。'
+                     f'当天空档会随预约实时变化，请以爱丽丝系统显示为准；如果暂时没有合适时间，也可以联系人工客服询问调整。此段文字是根据公开素材整理的宣传草稿，并非某一位客人的真实原话，上架前请由客服再次核对女孩资料与实际服务内容。')
+        result.append({'girl_name':name,'features':features,'source_count':len(sources),'short_drafts':shorts,
+                       'long_draft':long_text,'label':'宣传文案草稿（非真实客评）'})
     return result
 
 def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_names=None, all_girl_names=None,
@@ -2288,6 +2519,51 @@ def recalc_customer_points(c, customer_id=None, update_types=True):
     if update_types:
         update_customer_type_by_history(c, None)
 
+def audit_customer_points(c):
+    """只检查、不改数据；定位历史积分和当前规则不一致的客户/订单。"""
+    anomalies = []
+    customers = c.execute("SELECT id,customer_no,name,COALESCE(points,0) points,COALESCE(total_points,0) total_points,COALESCE(total_spent,0) total_spent FROM customers ORDER BY id").fetchall()
+    for customer in customers:
+        cid = int(customer['id'])
+        calculated, total_points, total_spent, _last_day, expired = active_customer_points(c, cid)
+        if (int(customer['points'] or 0), int(customer['total_points'] or 0), int(customer['total_spent'] or 0)) != (calculated, total_points, total_spent):
+            anomalies.append({
+                'kind': '客户汇总不一致', 'customer_id': cid, 'customer_no': customer['customer_no'],
+                'customer_name': customer['name'], 'stored_points': int(customer['points'] or 0),
+                'calculated_points': calculated, 'stored_total_points': int(customer['total_points'] or 0),
+                'calculated_total_points': total_points, 'stored_total_spent': int(customer['total_spent'] or 0),
+                'calculated_total_spent': total_spent, 'expired': bool(expired)
+            })
+        order_rows = c.execute("""SELECT id,order_date,received_amount,points,points_used,remark,remark2,raw_text,order_status
+                                  FROM orders WHERE customer_id=? ORDER BY substr(order_date,1,10),id""", (cid,)).fetchall()
+        running = 0
+        last_day = None
+        for order in order_rows:
+            if '取消' in str(order['order_status'] or ''):
+                continue
+            day = parse_order_day(order['order_date'])
+            if day and last_day and (day-last_day).days >= 30:
+                running = 0
+            text = ' '.join(str(order[key] or '') for key in ('remark','remark2','raw_text'))
+            expected = 500 if '积分折扣' in text else max(0, math.floor(int(order['received_amount'] or 0)/20))
+            actual = int(order['points'] or 0)
+            used = int(order['points_used'] or 0)
+            if actual != expected:
+                anomalies.append({'kind':'订单积分与规则不符','customer_id':cid,'customer_no':customer['customer_no'],
+                                  'customer_name':customer['name'],'order_id':int(order['id']),
+                                  'order_date':order['order_date'],'stored_points':actual,'expected_points':expected})
+            if used < 0 or used > running:
+                anomalies.append({'kind':'积分使用超过当时余额','customer_id':cid,'customer_no':customer['customer_no'],
+                                  'customer_name':customer['name'],'order_id':int(order['id']),
+                                  'order_date':order['order_date'],'points_used':used,'available_before':running})
+            running = max(0, running + actual - max(0, used))
+            if day:
+                last_day = day
+    counts = {}
+    for item in anomalies:
+        counts[item['kind']] = counts.get(item['kind'], 0) + 1
+    return {'customers_checked': len(customers), 'anomaly_count': len(anomalies), 'counts': counts, 'anomalies': anomalies}
+
 
 def update_customer_type_by_history(c, customer_id=None):
     """自动维护客户类型：充值为 SVIP；月消费前5/30天高定价复购为 VIP。"""
@@ -2463,8 +2739,12 @@ def create_or_update_order(c,d):
         remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
         remark = f"{remark}｜积分抵扣金额：¥{discount_amount:,}"
     else:
-        pts = math.floor(rec/20)
-        points_used = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
+        pts = max(0, math.floor(rec/20))
+        requested_points = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
+        available = max(0, int(cust['points'] or 0))
+        if d.get('id') and old_customer_id == cust['id']:
+            available = max(0, available - old_order_points + old_points_used)
+        points_used = min(requested_points, available)
     auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
     payment_method = auto_payment or (d.get('payment_method') or '现金')
 
@@ -2556,7 +2836,8 @@ def all_data():
             'customer_reservations':rows(c.execute('SELECT * FROM customer_reservations ORDER BY reserve_date DESC, start_time DESC, id DESC').fetchall()),
             'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall()),
             'girl_praises':rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
-                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
+                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
@@ -2670,7 +2951,8 @@ def api_girl_praises():
                 g = c.execute('SELECT id,name FROM girls WHERE name=?', (girl_name,)).fetchone()
                 if g:
                     data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
-                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
+                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
@@ -2680,7 +2962,8 @@ def api_girl_praises():
                                           (g['id'], girl_name)).fetchall())
                 else:
                     data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
-                                                    gp.image_mime, gp.created_at, gp.updated_at,
+                                                    gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
+                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     gp.girl_name AS display_girl_name
                                              FROM girl_praises gp
@@ -2689,7 +2972,8 @@ def api_girl_praises():
                                           (girl_name,)).fetchall())
             else:
                 data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
-                                                gp.image_mime, gp.created_at, gp.updated_at,
+                                                gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
+                                                gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
                                                 CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                 COALESCE(g.name, gp.girl_name) AS display_girl_name
                                          FROM girl_praises gp
@@ -2698,6 +2982,15 @@ def api_girl_praises():
         return jsonify(ok=True, praises=data)
 
     d = request.json or {}
+    publish_id = d.get('publish_id')
+    if publish_id:
+        try:
+            return jsonify(ok=True, publication=publish_girl_praise_to_wordpress(int(publish_id)))
+        except Exception as exc:
+            with conn() as c:
+                c.execute("""UPDATE girl_praises SET publish_status='未上架',publish_error=?,
+                             updated_at=CURRENT_TIMESTAMP WHERE id=?""", (str(exc)[:1000], int(publish_id)))
+            return jsonify(ok=False, error=str(exc)), 502
     delete_id = d.get('delete_id')
     if delete_id:
         with conn() as c:
@@ -2751,7 +3044,8 @@ def api_girl_praises():
                            VALUES(?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)''',
                         (g['id'], g['name'], source_name or '客人好评', rel, mime, sqlite3.Binary(raw)))
         row = c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
-                                  gp.image_mime, gp.created_at, gp.updated_at,
+                                  gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
+                                  gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
                                   CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                   COALESCE(g.name, gp.girl_name) AS display_girl_name
                            FROM girl_praises gp
@@ -4028,6 +4322,30 @@ def api_customers_recalc_points():
     with conn() as c:
         recalc_customer_points(c, None, update_types=False)
     return jsonify(ok=True)
+
+@app.route('/api/customers/points-audit', methods=['GET'])
+def api_customers_points_audit():
+    init_db()
+    with conn() as c:
+        result = audit_customer_points(c)
+    return jsonify(ok=True, **result)
+
+@app.route('/api/review_crawler', methods=['GET', 'POST'])
+def api_review_crawler():
+    init_db()
+    if request.method == 'GET':
+        with conn() as c:
+            recent = rows(c.execute("""SELECT id,source_url,source_page,girl_name,review_text,tags,created_at,updated_at
+                                      FROM scraped_reviews ORDER BY updated_at DESC,id DESC LIMIT 100""").fetchall())
+            total = int(c.execute('SELECT COUNT(*) FROM scraped_reviews').fetchone()[0])
+        return jsonify(ok=True,total=total,reviews=recent)
+    d = request.json or {}
+    action = str(d.get('action') or 'crawl')
+    if action == 'drafts':
+        day = str(d.get('date') or tokyo_today_date().isoformat())[:10]
+        return jsonify(ok=True,date=day,drafts=review_marketing_drafts(day))
+    result = crawl_public_reviews(d.get('url'), d.get('max_pages') or 3)
+    return jsonify(ok=True, **result)
 
 
 NO_ROOM_HOTEL = '无房间'

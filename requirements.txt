@@ -3,3 +3,4 @@ gunicorn
 pandas
 openpyxl
 pillow>=10.0
+beautifulsoup4>=4.12

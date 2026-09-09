@@ -149,6 +149,9 @@ def register_telegram_booking(
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP, confirmed_at TEXT, completed_at TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(close_date,girl_name))""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_tg_closing_status ON telegram_closing_confirmations(close_date,status)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_digests(
+                digest_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
+                message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
                 sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -2516,6 +2519,47 @@ def register_telegram_booking(
     def telegram_chain_import_run_api():
         return jsonify(ok=True, **run_pending_chain_imports(force=True))
 
+    def send_new_customer_digest(report_day=None, force=False):
+        report_day = str(report_day or (tokyo_now().date() - timedelta(days=1)).isoformat())[:10]
+        cfg = settings()
+        chat_id = str(cfg.get('default_review_chat_id') or '')
+        if not valid_group_chat_id(chat_id):
+            return {'sent':False,'date':report_day,'count':0,'reason':'未绑定内部群'}
+        with conn() as c:
+            existing = c.execute('SELECT * FROM telegram_customer_digests WHERE digest_date=?', (report_day,)).fetchone()
+            if existing and not force:
+                return {'sent':False,'date':report_day,'count':int(existing['customer_count'] or 0),'reason':'已发送'}
+            customer_rows = c.execute("""SELECT customer_no,name,created_at FROM customers
+                                         WHERE date(datetime(created_at,'+9 hours'))=?
+                                         ORDER BY created_at,id""", (report_day,)).fetchall()
+        if not customer_rows:
+            with conn() as c:
+                c.execute("""INSERT INTO telegram_customer_digests(digest_date,customer_count,message_id,sent_at)
+                             VALUES(?,0,0,CURRENT_TIMESTAMP)
+                             ON CONFLICT(digest_date) DO UPDATE SET customer_count=0,sent_at=CURRENT_TIMESTAMP""", (report_day,))
+            return {'sent':False,'date':report_day,'count':0,'reason':'没有新客户'}
+        lines = [f"🐰 <b>{escape(report_day)} 新增客户：{len(customer_rows)} 人</b>"]
+        for row in customer_rows[:80]:
+            created = str(row['created_at'] or '')[11:16]
+            lines.append(f"• <b>{escape(row['customer_no'] or '未编号')}</b>｜{escape(row['name'] or '未填写')}｜{escape(created)}")
+        if len(customer_rows) > 80:
+            lines.append(f"• 其余 {len(customer_rows)-80} 人请在 MCR 客户表查看")
+        lines.extend(['', '请客服把 Telegram／通讯录里的客人名字改成客户编号，完成后再核对一次。'])
+        message = send_message(chat_id, '\n'.join(lines)[:3900], thread_id=int(cfg.get('default_review_thread_id') or 0))
+        message_id = int((message or {}).get('message_id') or 0)
+        with conn() as c:
+            c.execute("""INSERT INTO telegram_customer_digests(digest_date,customer_count,message_id,sent_at)
+                         VALUES(?,?,?,CURRENT_TIMESTAMP)
+                         ON CONFLICT(digest_date) DO UPDATE SET customer_count=excluded.customer_count,
+                         message_id=excluded.message_id,sent_at=CURRENT_TIMESTAMP""",
+                      (report_day,len(customer_rows),message_id))
+        return {'sent':True,'date':report_day,'count':len(customer_rows),'message_id':message_id}
+
+    @app.route("/api/telegram/new-customer-digest/run", methods=["POST"])
+    def telegram_new_customer_digest_run_api():
+        payload = request.get_json(silent=True) or {}
+        return jsonify(ok=True, **send_new_customer_digest(payload.get('date'), bool(payload.get('force'))))
+
     def auto_chain_import_loop():
         public_url = str(os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
         render_host = str(os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "").strip()
@@ -2532,6 +2576,7 @@ def register_telegram_booking(
             time.sleep(60)
             try:
                 expire_attendance_inquiries()
+                send_new_customer_digest()
                 run_pending_chain_imports(force=False)
             except Exception:
                 pass

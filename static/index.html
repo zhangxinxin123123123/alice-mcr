@@ -44,7 +44,7 @@ button{touch-action:manipulation}button.primary,button.soft,button.danger{min-he
 .permission-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0}.permission-check{display:flex;align-items:center;gap:8px;padding:9px 11px;border:2px solid var(--line);border-radius:14px;background:#fffafd;font-weight:800}.permission-check input{width:18px;height:18px}.account-disabled{opacity:.55}
 .manual-search{width:100%;margin:0 0 14px}.manual-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px}.manual-block{border:2px solid var(--line);border-radius:18px;background:#fffafd;overflow:hidden}.manual-block summary{padding:14px 16px;cursor:pointer;font-size:16px;font-weight:900;color:#d94f9f;list-style:none}.manual-block summary::-webkit-details-marker{display:none}.manual-block summary::after{content:'＋';float:right}.manual-block[open] summary::after{content:'－'}.manual-body{padding:0 16px 15px;line-height:1.75}.manual-body h4{margin:12px 0 4px;color:#7a5571}.manual-body ul,.manual-body ol{margin:5px 0;padding-left:22px}.manual-command{display:grid;grid-template-columns:minmax(125px,.7fr) 1.5fr;gap:6px 12px;padding:8px 0;border-bottom:1px dashed var(--line)}.manual-command code{font-weight:900;color:#d94f9f;overflow-wrap:anywhere}.log-filters{grid-template-columns:repeat(6,minmax(100px,1fr))}.log-ok{color:#11823b;font-weight:900}.log-fail{color:#d6003d;font-weight:900}.log-level{display:inline-block;min-width:58px;padding:4px 7px;border-radius:999px;text-align:center;font-size:11px;font-weight:900}.log-debug{background:#e9f2ff;color:#2563eb}.log-info{background:#e9fff2;color:#11823b}.log-warn{background:#fff4d6;color:#a66a00}.log-error{background:#ffe2e8;color:#d6003d}
 @media(max-width:700px){.manual-grid{grid-template-columns:1fr}.manual-command{grid-template-columns:1fr}.log-filters{grid-template-columns:1fr}}
-.telegram-report-capture{position:fixed;left:-10000px;top:0;width:960px;padding:38px;color:#fff;background:#090511;border:5px solid #ff2f9a;font-family:"Yu Gothic UI","Microsoft YaHei",sans-serif;font-size:21px;line-height:1.35;box-shadow:inset 0 0 34px #ff2f9a66}.telegram-report-capture h2{margin:0 0 22px;padding:18px;text-align:center;color:#fff;border:3px solid #21f7ff;background:#24102c;font-size:34px;line-height:1.2;text-shadow:1px 0 #21f7ff,-1px 0 #ff2f9a}.telegram-report-capture table{width:100%;min-width:0;table-layout:fixed;background:#0b1020;border:2px solid #ff2f9a}.telegram-report-capture th,.telegram-report-capture td{padding:17px 12px;border:2px solid #6b315f;font-size:21px;text-align:center;white-space:nowrap}.telegram-report-capture th{background:#240b28;color:#21f7ff;font-size:20px}.telegram-report-capture td{color:#fff;background:#0b1020}.telegram-report-capture tr:nth-child(even) td{background:#171025}.telegram-report-capture td:first-child{color:#ff9fd2;font-weight:900;font-size:23px}.telegram-report-capture td:last-child{color:#ffd447}.telegram-report-capture .report-total{margin-top:20px;padding:16px 18px;border:2px solid #ff2f9a;background:#1b0b20;text-align:right;color:#ffd447;font-size:27px;font-weight:900}
+.telegram-report-capture{position:fixed;left:-10000px;top:0;width:960px;padding:38px;color:#fff;background:#090511;border:5px solid #ff2f9a;font-family:"Yu Gothic UI","Microsoft YaHei",sans-serif;font-size:21px;line-height:1.35;box-shadow:inset 0 0 34px #ff2f9a66}.telegram-report-capture h2{margin:0 0 22px;padding:18px;text-align:center;color:#fff;border:3px solid #21f7ff;background:#24102c;font-size:34px;line-height:1.2;text-shadow:1px 0 #21f7ff,-1px 0 #ff2f9a}.telegram-report-capture table{width:100%;min-width:0;table-layout:fixed;background:#0b1020;border:2px solid #ff2f9a}.telegram-report-capture th,.telegram-report-capture td{padding:17px 10px;border:2px solid #6b315f;font-size:20px;text-align:center;white-space:nowrap}.telegram-report-capture th{background:#240b28;color:#21f7ff;font-size:19px}.telegram-report-capture td{color:#fff;background:#0b1020}.telegram-report-capture tr:nth-child(even) td{background:#171025}.telegram-report-capture td:first-child{color:#ff9fd2;font-weight:900;font-size:22px}.telegram-report-capture td:last-child{color:#ffd447}.telegram-report-capture .report-total{margin-top:20px;padding:16px 18px;border:2px solid #ff2f9a;background:#1b0b20;text-align:right;color:#ffd447;font-size:27px;font-weight:900}.telegram-report-capture .sign-status{display:inline-block;padding:7px 10px;border-radius:999px;font-size:18px;font-weight:900}.telegram-report-capture .sign-done{color:#8dffc1;border:2px solid #31d886;background:#0a2d22}.telegram-report-capture .sign-partial{color:#ffe58c;border:2px solid #e0aa2f;background:#33250a}.telegram-report-capture .sign-pending{color:#ff9fbd;border:2px solid #ff5b8f;background:#35101c}
 
 body.login-active{min-height:100vh;overflow:hidden;background:#fff2f8}
 body.login-active .app,body.login-active .modal{display:none!important}
@@ -154,6 +154,7 @@ body:not(.role-boss) .boss-only{display:none!important}
    <button data-module="advanceReserve" onclick="show('advanceReserve',this)">📅 提前预约表</button>
    <button data-module="rooms" onclick="show('rooms',this)">🏨 房间安排</button>
    <button data-module="enums" onclick="show('enums',this)">⚙️ 枚举类型</button>
+   <button data-module="reviewCrawler" onclick="show('reviewCrawler',this)">📝 评论素材与文案</button>
    <button data-module="pureShift" onclick="window.open('/tonight','_blank')">🌙 今晚可约临时页</button>
    <button data-module="pureShift" onclick="window.open('/static/neko_dona_shift.html','_blank')">🐱 喵喵多娜出勤表</button>
   </details>
@@ -181,7 +182,8 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="customers" class="panel"><div class="card"><h2>客户表</h2>
-  <div class="form"><input id="qCustomerNo" placeholder="客户ID"><input id="qCustomerName" placeholder="昵称"><select id="qCustomerType"><option value="">客户类型全部</option></select><input id="qCustomerRemark" placeholder="备注/来源/联系方式"><button class="soft" onclick="clearCustomerQuery()">清空筛选</button><button class="soft" onclick="recalcCustomerPoints()">按订单重算积分</button></div>
+  <div class="form"><input id="qCustomerNo" placeholder="客户ID"><input id="qCustomerName" placeholder="昵称"><select id="qCustomerType"><option value="">客户类型全部</option></select><input id="qCustomerRemark" placeholder="备注/来源/联系方式"><button class="soft" onclick="clearCustomerQuery()">清空筛选</button><button class="soft" onclick="auditCustomerPoints()">检查积分</button><button class="soft" onclick="recalcCustomerPoints()">按订单重算积分</button></div>
+  <div id="pointsAuditResult" class="note"></div>
   <div id="customersTable"></div></div>
  </section>
 
@@ -401,7 +403,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" data-search="订单 预约 编辑 删除 筛选 批量结算 积分折扣"><summary>🧾 订单 / 预约</summary><div class="manual-body"><ul><li>日期、女孩、客户、备注和结算状态均可组合筛选；“清空筛选”恢复全部。</li><li>点击一行的编辑按钮修改预约；删除后会同步影响客户消费、积分和接龙。</li><li><b>批量结算 / 批量未结算 / 批量删除：</b>先勾选左侧预约，再执行对应操作。</li><li>普通预约按客人实付金额每 ¥20 累计 1 积分；取消单不累计。</li><li>备注含“积分折扣”时自动使用此前可用积分，备注写入抵扣金额；客人实付仍由客服手工填写，本单赠送 500 积分，重复保存不会重复扣。</li></ul></div></details>
     <details class="manual-block" data-search="客户 编号 积分 充值 联系 重新计算"><summary>🐰 客户表</summary><div class="manual-body"><ul><li>按客户编号、昵称、类型和备注检索；点击客户编号可查看其订单。</li><li><b>按订单重算积分：</b>订单修正后重新汇总积分；30 天没有新订单时积分按现有规则失效。</li><li>客户联系方式、来源、标签和备注可在编辑中维护。</li></ul></div></details>
     <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 群绑定 好评"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
-    <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群。</li></ul></div></details>
+    <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群，图中会标明每位女孩已签收、部分签收或未签收。</li></ul></div></details>
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
     <details class="manual-block" data-search="接龙导入 微信 LINE 日期 女孩 客户编号 新客户"><summary>📥 接龙导入</summary><div class="manual-body"><ol><li>首行写日期和女孩，例如 <code>0908娜娜子</code>。</li><li>预约行写 <code>序号.时间/价格/客户</code>；首次预约写客户名，以后写四位客户编号。</li><li>纯数字客户名使用双斜线，例如 <code>8-9/10000//123</code>。</li><li>导入前会与旧接龙核对：不变的不重复新增，新增的写入，修改的同步修改。</li></ol></div></details>
     <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li></ol></div></details>
@@ -424,6 +426,16 @@ body:not(.role-boss) .boss-only{display:none!important}
      <details class="manual-block" data-search="数据诊断 登录检测 权限 管理日志 查询 插入"><summary>🩺 数据诊断与账号</summary><div class="manual-body"><ul><li><b>数据诊断：</b>服务器数据异常或页面内容不一致时点“重新读取”。</li><li><b>登录检测：</b>查看登录时间、IP、设备、在线状态，并可强制下线账号。</li><li><b>管理日志：</b>是左侧独立模块，记录按钮点击、筛选查询以及后台新增、修改、删除的具体字段；可按日期、账号、动作和关键词检索。</li><li>老板可分别勾选“登录检测”和“管理日志”权限，保存后立即生效。</li></ul></div></details>
    </div>
   </div>
+ </section>
+
+ <section id="reviewCrawler" class="panel">
+  <div class="card"><h2>评论素材采集与宣传草稿</h2>
+   <p class="note">低频采集公开网页中的评论素材，遵守网站 robots.txt；不会采集登录后内容。生成结果统一标注为“宣传文案草稿（非真实客评）”，客服核对后再使用。</p>
+   <div class="form"><input id="reviewSourceUrl" type="url" placeholder="粘贴东京夜游网的具体公开评论页网址"><input id="reviewMaxPages" type="number" min="1" max="10" value="3"><button class="primary" onclick="crawlReviewSource()">采集公开评论</button><input id="reviewDraftDate" type="date"><button class="soft" onclick="generateReviewDrafts()">生成当天女孩文案</button></div>
+   <div id="reviewCrawlerSummary" class="note">请先粘贴具体评论页网址。</div>
+  </div>
+  <div class="card"><h2>当天宣传草稿</h2><div id="reviewDraftResults" class="praise-folder-grid"></div></div>
+  <div class="card"><h2>已采集素材</h2><div id="reviewSourceResults"></div></div>
  </section>
 
  <section id="operationAudit" class="panel">
@@ -534,7 +546,7 @@ function armLoginCueFallback(){
   window.addEventListener('pointerdown',retry,{once:true});
   window.addEventListener('keydown',retry,{once:true});
 }
-const SYSTEM_MODULE_LABELS={home:'学院总览',orders:'订单/预约',customers:'客户表',girls:'女孩表',settlement:'金额结算',quickLinks:'链接跳转',importer:'接龙导入',telegramBooking:'TEL预约',chainReserve:'接龙预约',pureShift:'纯出勤表',manual:'系统使用说明',advanceReserve:'提前预约表',rooms:'房间安排',enums:'枚举类型',stats:'收益图表',debug:'数据诊断',loginAudit:'登录检测',operationAudit:'管理日志'};
+const SYSTEM_MODULE_LABELS={home:'学院总览',orders:'订单/预约',customers:'客户表',girls:'女孩表',settlement:'金额结算',quickLinks:'链接跳转',importer:'接龙导入',telegramBooking:'TEL预约',chainReserve:'接龙预约',pureShift:'纯出勤表',manual:'系统使用说明',advanceReserve:'提前预约表',rooms:'房间安排',enums:'枚举类型',reviewCrawler:'评论素材与文案',stats:'收益图表',debug:'数据诊断',loginAudit:'登录检测',operationAudit:'管理日志'};
 const ROLE_PERMISSION_PRESETS={boss:Object.keys(SYSTEM_MODULE_LABELS),admin:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','loginAudit','operationAudit'].includes(x)),user:Object.keys(SYSTEM_MODULE_LABELS).filter(x=>!['home','settlement','stats','loginAudit','operationAudit'].includes(x))};
 function canAccessModule(id){if(id==='girlPraiseFolder')id='girls';return !!auth&&(auth.role==='boss'||(auth.permissions||ROLE_PERMISSION_PRESETS[auth.role]||[]).includes(id));}
 function roleBlockedPage(id){return !canAccessModule(id);}
@@ -656,7 +668,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>loadOperationLogs().catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>loadOperationLogs().catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  beginBusy("正在读取管理系统数据…");
@@ -771,7 +783,9 @@ function renderGirlPraiseFolder(){
     const id=Number(p.id);
     const src=praiseUrl(p);
     const name=escHtml(p.source_name||p.display_girl_name||p.girl_name||"客人好评");
-    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span></div><div class="acts"><button class="primary" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button><button class="danger" onclick="deletePraiseImage(${id})">删除</button></div></div>`;
+    const published=String(p.publish_status||'未上架')==='已上架';
+    const statusTitle=p.publish_error?` title="${escHtml(p.publish_error)}"`:'';
+    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span><span class="${published?'log-ok':'log-warn'}"${statusTitle}>官网状态：${published?'已上架':'未上架'}</span></div><div class="acts"><button class="primary" onclick="publishPraiseImage(${id})" ${published?'disabled':''}>${published?'已上架':'一键上架官网'}</button><button class="soft" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button><button class="danger" onclick="deletePraiseImage(${id})">删除</button></div></div>`;
   }).join("");
 }
 async function copyImageFromUrl(url){
@@ -808,6 +822,14 @@ async function downloadPraiseImage(id){
   }
 }
 function currentPraiseRows(){return currentPraiseGirl?praiseRowsForGirl(currentPraiseGirl):[];}
+async function publishPraiseImage(id){
+ const p=findPraise(id);if(!p)return;
+ if(!confirm(`确认把“${p.display_girl_name||p.girl_name||''}”这张好评图加入官网对应女孩相册吗？`))return;
+ beginBusy('正在上传好评图到官网…');
+ try{await api('/api/girl_praises',{publish_id:id});await loadAll();renderGirlPraiseFolder();alert('官网上架成功');}
+ catch(e){console.error(e);await loadAll();renderGirlPraiseFolder();alert(e.message||'官网上架失败');}
+ finally{endBusy();}
+}
 async function copyLatestPraiseImage(){
   const rows=currentPraiseRows();
   if(!rows.length){alert("还没有可复制的好评图片");return;}
@@ -2085,6 +2107,40 @@ async function recalcCustomerPoints(){
   alert("客户积分已按订单重新统计");
 }
 
+async function auditCustomerPoints(){
+ beginBusy('正在逐单检查积分…');
+ try{
+  const r=await timedFetch('/api/customers/points-audit?v='+Date.now(),{cache:'no-store',headers:authHeaders()});
+  const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'积分检查失败');
+  const target=document.getElementById('pointsAuditResult');
+  if(!j.anomaly_count){target.innerHTML=`✅ 已检查 ${Number(j.customers_checked||0)} 位客户，暂未发现积分异常。`;return;}
+  const rows=(j.anomalies||[]).slice(0,200).map(x=>`<tr><td>${escHtml(x.kind)}</td><td>${escHtml(x.customer_no||'')}</td><td>${escHtml(x.customer_name||'')}</td><td>${x.order_id||'—'}</td><td>${escHtml(x.order_date||'—')}</td><td style="white-space:normal">${x.kind==='客户汇总不一致'?`当前 ${Number(x.stored_points||0)}／应为 ${Number(x.calculated_points||0)}`:`记录 ${Number(x.stored_points??x.points_used??0)}／应为 ${Number(x.expected_points??x.available_before??0)}`}</td></tr>`).join('');
+  target.innerHTML=`⚠️ 已检查 ${Number(j.customers_checked||0)} 位客户，发现 <b>${Number(j.anomaly_count||0)}</b> 项疑点。此检查不会自动改数据。<div class="table"><table><thead><tr><th>问题</th><th>编号</th><th>客户</th><th>订单</th><th>日期</th><th>对比</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+ }finally{endBusy();}
+}
+
+async function loadReviewCrawler(){
+ if(window.reviewDraftDate&&!reviewDraftDate.value)reviewDraftDate.value=todayStr;
+ const r=await timedFetch('/api/review_crawler?v='+Date.now(),{cache:'no-store',headers:authHeaders()});
+ const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'读取评论素材失败');
+ reviewCrawlerSummary.innerHTML=`已保存公开评论素材 <b>${Number(j.total||0)}</b> 条。`;
+ const items=j.reviews||[];
+ reviewSourceResults.innerHTML='<div class="table"><table><thead><tr><th>女孩</th><th>特征</th><th>素材摘录</th><th>来源页</th></tr></thead><tbody>'+((items.map(x=>`<tr><td>${escHtml(x.girl_name||'待匹配')}</td><td>${escHtml(x.tags||'—')}</td><td style="white-space:normal;max-width:520px">${escHtml(String(x.review_text||'').slice(0,260))}</td><td><a href="${escHtml(x.source_page||x.source_url)}" target="_blank" rel="noopener">打开</a></td></tr>`).join(''))||'<tr><td colspan="4">还没有采集素材</td></tr>')+'</tbody></table></div>';
+}
+async function crawlReviewSource(){
+ const url=String(reviewSourceUrl.value||'').trim();if(!url){alert('请先粘贴具体公开评论页网址');return;}
+ const j=await api('/api/review_crawler',{action:'crawl',url,max_pages:Number(reviewMaxPages.value||3)});
+ await loadReviewCrawler();alert(`采集完成：访问 ${Number(j.pages||0)} 页，新收录 ${Number(j.inserted||0)} 条，已存在 ${Number(j.updated||0)} 条。`);
+}
+async function copyReviewDraft(button){
+ const text=decodeURIComponent(button.dataset.text||'');try{await navigator.clipboard.writeText(text);button.textContent='已复制';setTimeout(()=>button.textContent='复制',1200);}catch(e){prompt('请手动复制：',text);}
+}
+async function generateReviewDrafts(){
+ const j=await api('/api/review_crawler',{action:'drafts',date:reviewDraftDate.value||todayStr});
+ const drafts=j.drafts||[];
+ reviewDraftResults.innerHTML=drafts.map(x=>{const shorts=(x.short_drafts||[]).map((s,i)=>`<li>${escHtml(s)} <button class="soft" data-text="${encodeURIComponent(s)}" onclick="copyReviewDraft(this)">复制</button></li>`).join('');return `<div class="praise-tile"><h3>${escHtml(x.girl_name)}</h3><p class="note">${escHtml(x.label)}｜参考素材 ${Number(x.source_count||0)} 条｜特征：${escHtml((x.features||[]).join('、'))}</p><ol>${shorts}</ol><p style="white-space:pre-wrap">${escHtml(x.long_draft||'')}</p><button class="primary" data-text="${encodeURIComponent(x.long_draft||'')}" onclick="copyReviewDraft(this)">复制长文</button></div>`}).join('')||'<p class="note">所选日期没有纯出勤表女孩。</p>';
+}
+
 function gotoGirlFromOrder(girlName){
   show("girls", [...document.querySelectorAll(".nav button")].find(b=>b.textContent.includes("女孩表")) || document.querySelectorAll(".nav button")[2]);
   setTimeout(()=>{
@@ -2333,11 +2389,12 @@ function clearSettlementPick(){settlementSelected.clear();renderSettlement();}
 async function bulkSettleSettlement(status){const ids=[...settlementSelected]; if(!ids.length){alert('请先勾选要结算的日期或女孩');return;} const r=await api('/api/orders/bulk_settle',{ids,settlement_status:status}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status=status}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert(`勾选${status}完成`);}
 async function settleAllSettlement(){const ids=[...new Set(settlementGroups().flatMap(g=>g.ids).map(Number).filter(Boolean))]; if(!ids.length){alert('已经全部结算');return;} if(!confirm(`确定结算所有未结算金额吗？共 ${ids.length} 单`))return; const r=await api('/api/orders/bulk_settle',{ids,settlement_status:'已结算'}); const changed=new Set((r.updated_ids&&r.updated_ids.length?r.updated_ids:ids).map(Number)); (data.orders||[]).forEach(o=>{if(changed.has(Number(o.id)))o.settlement_status='已结算'}); settlementSelected.clear(); renderSettlement(); await loadAll(); alert('全部结算完成');}
 async function sendSettlementReport(){
- const rows=(data.orders||[]).filter(o=>o.order_date===todayStr&&(o.settlement_status||'未结算')!=='已结算');
- if(!rows.length){alert('今天没有未结算记录');return;}
- const groups={};rows.forEach(o=>{const name=o.girl_name||'未填写女孩';const g=groups[name]||(groups[name]={name,count:0,total:0,nonCash:0});g.count++;g.total+=Number(o.store_profit||0);if(String(o.payment_method||'现金')!=='现金')g.nonCash+=Number(o.received_amount||0)});
+ const rows=(data.orders||[]).filter(o=>o.order_date===todayStr&&String(o.order_status||'')!=='取消');
+ if(!rows.length){alert('今天没有结算记录');return;}
+ const groups={};rows.forEach(o=>{const name=o.girl_name||'未填写女孩';const g=groups[name]||(groups[name]={name,count:0,total:0,nonCash:0,signed:0});g.count++;g.total+=Number(o.store_profit||0);if(String(o.payment_method||'现金')!=='现金')g.nonCash+=Number(o.received_amount||0);if(String(o.settlement_status||'未结算')==='已结算')g.signed++});
  const list=Object.values(groups).sort((a,b)=>b.total-a.total);const box=document.createElement('div');box.className='telegram-report-capture';
- box.innerHTML=`<h2>💴 ${todayStr} 今日金额结算</h2><table><thead><tr><th>女孩</th><th>单数</th><th>今日收益</th><th>非现金</th><th>应收金额</th></tr></thead><tbody>${list.map(g=>`<tr><td>${escHtml(g.name)}</td><td>${g.count}</td><td>${yen(g.total)}</td><td>${yen(g.nonCash)}</td><td><b>${yen(g.total-g.nonCash)}</b></td></tr>`).join('')}</tbody></table><div class="report-total">应收合计：${yen(list.reduce((s,g)=>s+g.total-g.nonCash,0))}</div>`;
+ const signInfo=g=>g.signed===g.count?{text:'已签收',cls:'sign-done'}:(g.signed>0?{text:`部分签收 ${g.signed}/${g.count}`,cls:'sign-partial'}:{text:'未签收',cls:'sign-pending'});
+ box.innerHTML=`<h2>💴 ${todayStr} 今日金额结算</h2><table><thead><tr><th>女孩</th><th>单数</th><th>今日收益</th><th>非现金</th><th>应收金额</th><th>签收状态</th></tr></thead><tbody>${list.map(g=>{const sign=signInfo(g);return `<tr><td>${escHtml(g.name)}</td><td>${g.count}</td><td>${yen(g.total)}</td><td>${yen(g.nonCash)}</td><td><b>${yen(g.total-g.nonCash)}</b></td><td><span class="sign-status ${sign.cls}">${sign.text}</span></td></tr>`}).join('')}</tbody></table><div class="report-total">应收合计：${yen(list.reduce((s,g)=>s+g.total-g.nonCash,0))} ｜ 已签收 ${list.filter(g=>g.signed===g.count).length}/${list.length} 人</div>`;
  document.body.appendChild(box);beginBusy('正在生成并发送结算截图…');
  try{if(document.fonts&&document.fonts.ready)await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const canvas=await html2canvas(box,{backgroundColor:'#090511',scale:2,useCORS:true,logging:false,width:box.scrollWidth,height:box.scrollHeight});const result=await api('/api/telegram/report-photo',{kind:'settlement',date:todayStr,image_data:canvas.toDataURL('image/png')});const closing=result.closing||{};alert(`高清原图已发送到 ${result.chat_title||'Alice内部群'}\n闭店确认新发送：${Number(closing.sent||0)} 人\n已发送过：${Number(closing.already_sent||0)} 人\n未绑定群跳过：${Number(closing.unbound||0)} 人`);}catch(e){console.error(e);alert(e.message||'结算截图发送失败');}finally{box.remove();endBusy();}
 }
