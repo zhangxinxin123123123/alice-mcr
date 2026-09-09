@@ -182,7 +182,7 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="customers" class="panel"><div class="card"><h2>客户表</h2>
-  <div class="form"><input id="qCustomerNo" placeholder="客户ID"><input id="qCustomerName" placeholder="昵称"><select id="qCustomerType"><option value="">客户类型全部</option></select><input id="qCustomerRemark" placeholder="备注/来源/联系方式"><button class="soft" onclick="clearCustomerQuery()">清空筛选</button><button class="soft" onclick="auditCustomerPoints()">检查积分</button><button class="soft" onclick="recalcCustomerPoints()">按订单重算积分</button></div>
+  <div class="form"><input id="qCustomerNo" placeholder="客户ID"><input id="qCustomerName" placeholder="昵称"><select id="qCustomerType"><option value="">客户类型全部</option></select><input id="qCustomerRemark" placeholder="备注/来源/联系方式"><button class="soft" onclick="clearCustomerQuery()">清空筛选</button><button class="soft" onclick="auditCustomerPoints()">检查积分备注</button></div>
   <div id="pointsAuditResult" class="note"></div>
   <div id="customersTable"></div></div>
  </section>
@@ -401,7 +401,7 @@ body:not(.role-boss) .boss-only{display:none!important}
    <div class="manual-grid" id="manualGrid">
     <details class="manual-block" open data-search="学院总览 收益 客户数 订单数 刷新"><summary>🏫 学院总览</summary><div class="manual-body"><ul><li>显示今日及本月收益、客户数、订单数、支付构成和女孩收益。</li><li><b>强制读取全部数据：</b>立即从服务器重新读取全部 MCR 数据；页面数据不一致时使用。</li><li>图表随订单、结算和筛选日期自动更新。</li></ul></div></details>
     <details class="manual-block" data-search="订单 预约 编辑 删除 筛选 批量结算 积分折扣"><summary>🧾 订单 / 预约</summary><div class="manual-body"><ul><li>日期、女孩、客户、备注和结算状态均可组合筛选；“清空筛选”恢复全部。</li><li>点击一行的编辑按钮修改预约；删除后会同步影响客户消费、积分和接龙。</li><li><b>批量结算 / 批量未结算 / 批量删除：</b>先勾选左侧预约，再执行对应操作。</li><li>普通预约按客人实付金额每 ¥20 累计 1 积分；取消单不累计。</li><li>备注含“积分折扣”时自动使用此前可用积分，备注写入抵扣金额；客人实付仍由客服手工填写，本单赠送 500 积分，重复保存不会重复扣。</li></ul></div></details>
-    <details class="manual-block" data-search="客户 编号 积分 充值 联系 重新计算"><summary>🐰 客户表</summary><div class="manual-body"><ul><li>按客户编号、昵称、类型和备注检索；点击客户编号可查看其订单。</li><li><b>按订单重算积分：</b>订单修正后重新汇总积分；30 天没有新订单时积分按现有规则失效。</li><li>客户联系方式、来源、标签和备注可在编辑中维护。</li></ul></div></details>
+    <details class="manual-block" data-search="客户 编号 积分 充值 联系"><summary>🐰 客户表</summary><div class="manual-body"><ul><li>按客户编号、昵称、类型和备注检索；点击客户编号可查看其订单。</li><li>积分只在新增订单时基于客户当前余额增量计算；编辑或删除旧订单不会从历史重新覆盖余额。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发积分使用，使用后本单赠送500积分。</li><li>客户联系方式、来源、标签和备注可在编辑中维护。</li></ul></div></details>
     <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 群绑定 好评"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
     <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群，图中会标明每位女孩已签收、部分签收或未签收。</li></ul></div></details>
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
@@ -2101,21 +2101,15 @@ async function bulkSettleOrders(status="已结算"){
 
 
 
-async function recalcCustomerPoints(){
-  await api("/api/customers/recalc_points",{});
-  await loadAll();
-  alert("客户积分已按订单重新统计");
-}
-
 async function auditCustomerPoints(){
  beginBusy('正在逐单检查积分…');
  try{
   const r=await timedFetch('/api/customers/points-audit?v='+Date.now(),{cache:'no-store',headers:authHeaders()});
   const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'积分检查失败');
   const target=document.getElementById('pointsAuditResult');
-  if(!j.anomaly_count){target.innerHTML=`✅ 已检查 ${Number(j.customers_checked||0)} 位客户，暂未发现积分异常。`;return;}
-  const rows=(j.anomalies||[]).slice(0,200).map(x=>`<tr><td>${escHtml(x.kind)}</td><td>${escHtml(x.customer_no||'')}</td><td>${escHtml(x.customer_name||'')}</td><td>${x.order_id||'—'}</td><td>${escHtml(x.order_date||'—')}</td><td style="white-space:normal">${x.kind==='客户汇总不一致'?`当前 ${Number(x.stored_points||0)}／应为 ${Number(x.calculated_points||0)}`:`记录 ${Number(x.stored_points??x.points_used??0)}／应为 ${Number(x.expected_points??x.available_before??0)}`}</td></tr>`).join('');
-  target.innerHTML=`⚠️ 已检查 ${Number(j.customers_checked||0)} 位客户，发现 <b>${Number(j.anomaly_count||0)}</b> 项疑点。此检查不会自动改数据。<div class="table"><table><thead><tr><th>问题</th><th>编号</th><th>客户</th><th>订单</th><th>日期</th><th>对比</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  if(!j.anomaly_count){target.innerHTML=`✅ 已检查 ${Number(j.orders_with_point_notes||0)} 笔积分备注，全部已有结构化使用记录。`;return;}
+  const rows=(j.anomalies||[]).slice(0,300).map(x=>`<tr><td>${escHtml(x.kind)}</td><td>${escHtml(x.customer_no||'')}</td><td>${escHtml(x.customer_name||'')}</td><td>${x.order_id||'—'}</td><td>${escHtml(x.order_date||'—')}</td><td>${Number(x.points_used||0)}</td><td style="white-space:normal">${escHtml(x.note||'')}</td></tr>`).join('');
+  target.innerHTML=`⚠️ 已检查 ${Number(j.orders_with_point_notes||0)} 笔积分备注，发现 <b>${Number(j.anomaly_count||0)}</b> 项需要人工核对。此检查只读，不会计算或覆盖客户当前余额。<div class="table"><table><thead><tr><th>问题</th><th>编号</th><th>客户</th><th>订单</th><th>日期</th><th>已登记使用</th><th>原备注</th></tr></thead><tbody>${rows}</tbody></table></div>`;
  }finally{endBusy();}
 }
 

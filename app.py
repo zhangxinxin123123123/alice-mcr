@@ -33,7 +33,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v114b_review_and_praise_release"
+APP_VERSION = "v115_incremental_points_only"
 
 @app.after_request
 def compress_large_json(response):
@@ -2449,152 +2449,55 @@ def tokyo_today_date():
             pass
     return (datetime.utcnow() + timedelta(hours=9)).date()
 
-def parse_order_day(value):
-    text = str(value or '').strip()[:10]
-    if not text:
-        return None
-    try:
-        return date.fromisoformat(text)
-    except Exception:
-        return None
-
-def active_customer_points(c, customer_id, today=None):
-    today = today or tokyo_today_date()
-    cancel_text = '\u53d6\u6d88'
-    order_rows = c.execute("""
-        SELECT order_date, COALESCE(points,0) AS points, COALESCE(points_used,0) AS points_used,
-               COALESCE(received_amount,0) AS received_amount, COALESCE(created_at,'') AS created_at
-        FROM orders
-        WHERE customer_id=?
-          AND COALESCE(order_date,'')<>''
-          AND COALESCE(order_status,'') NOT LIKE ?
-        ORDER BY substr(order_date,1,10), id
-    """, (customer_id, f"%{cancel_text}%")).fetchall()
-    active_points = 0
-    total_points = 0
-    total_spent = 0
-    last_day = None
-    first_cancel = c.execute("""SELECT created_at FROM telegram_customer_cancellations
-                                WHERE customer_id=? AND cancellation_no=1
-                                ORDER BY id LIMIT 1""", (customer_id,)).fetchone()
-    forfeited_through = str(first_cancel['created_at'] or '') if first_cancel else ''
-    for row in order_rows:
-        day = parse_order_day(row['order_date'])
-        if not day:
-            continue
-        if last_day and (day - last_day).days >= 30:
-            active_points = 0
-        pts = int(row['points'] or 0)
-        if not forfeited_through or str(row['created_at'] or '') > forfeited_through:
-            active_points = max(0, active_points + pts - int(row['points_used'] or 0))
-        total_points += pts
-        total_spent += int(row['received_amount'] or 0)
-        last_day = day
-    expired = bool(last_day and (today - last_day).days >= 30)
-    if expired:
-        active_points = 0
-    return active_points, total_points, total_spent, last_day, expired
-
-def expire_customer_points(c, customer_id=None):
+def refresh_customer_totals(c, customer_id=None, update_types=True):
+    """刷新消费/累计统计，绝不重算或覆盖当前积分余额。"""
     if customer_id:
         ids = [int(customer_id)]
     else:
-        ids = [int(r['id']) for r in c.execute("SELECT id FROM customers").fetchall()]
-    today = tokyo_today_date()
-    changed = 0
+        ids = [int(r["id"]) for r in c.execute("SELECT id FROM customers").fetchall()]
     for cid in ids:
-        current = c.execute("SELECT COALESCE(points,0) AS points FROM customers WHERE id=?", (cid,)).fetchone()
-        if not current:
-            continue
-        active_pts, total_pts, spent, _last_day, expired = active_customer_points(c, cid, today)
-        current_pts = int(current['points'] or 0)
-        if current_pts != active_pts and (expired or active_pts < current_pts):
-            c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (active_pts, total_pts, spent, cid))
-            changed += 1
-    return changed
-
-def recalc_customer_points(c, customer_id=None, update_types=True):
-    if customer_id:
-        ids = [customer_id]
-    else:
-        ids = [r["id"] for r in c.execute("SELECT id FROM customers").fetchall()]
-    for cid in ids:
-        pts, total_pts, spent, _last_day, _expired = active_customer_points(c, cid)
-        c.execute("UPDATE customers SET points=?, total_points=?, total_spent=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (pts, total_pts, spent, cid))
+        totals = c.execute("""SELECT COALESCE(SUM(points),0) AS total_points,
+                                     COALESCE(SUM(received_amount),0) AS total_spent
+                              FROM orders WHERE customer_id=? AND COALESCE(order_status,'') NOT LIKE '%取消%'""", (cid,)).fetchone()
+        c.execute("UPDATE customers SET total_points=?,total_spent=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                  (int(totals['total_points'] or 0), int(totals['total_spent'] or 0), cid))
     if update_types:
         update_customer_type_by_history(c, None)
 
 def audit_customer_points(c):
-    """只检查、不改数据；定位历史积分和当前规则不一致的客户/订单。"""
+    """只检查积分备注是否结构化入账，绝不从历史订单反推客户余额。"""
     anomalies = []
-    customers = rows(c.execute("SELECT id,customer_no,name,COALESCE(points,0) points,COALESCE(total_points,0) total_points,COALESCE(total_spent,0) total_spent FROM customers ORDER BY id").fetchall())
-    orders_by_customer = {}
-    for order in rows(c.execute("""SELECT id,customer_id,order_date,received_amount,points,points_used,remark,remark2,
-                                          raw_text,order_status,created_at FROM orders
-                                   WHERE customer_id IS NOT NULL ORDER BY customer_id,substr(order_date,1,10),id""").fetchall()):
-        orders_by_customer.setdefault(int(order['customer_id']), []).append(order)
-    cancellation_times = {int(row['customer_id']):str(row['created_at'] or '') for row in c.execute("""
-        SELECT customer_id,MIN(created_at) AS created_at FROM telegram_customer_cancellations
-        WHERE cancellation_no=1 AND customer_id IS NOT NULL GROUP BY customer_id""").fetchall()}
-    today = tokyo_today_date()
-    for customer in customers:
-        cid = int(customer['id'])
-        order_rows = orders_by_customer.get(cid, [])
-        active_balance = total_points = total_spent = 0
-        last_day = None
-        forfeited_through = cancellation_times.get(cid, '')
-        for order in order_rows:
-            if '取消' in str(order['order_status'] or ''):
-                continue
-            day = parse_order_day(order['order_date'])
-            if not day:
-                continue
-            if last_day and (day-last_day).days >= 30:
-                active_balance = 0
-            actual = int(order['points'] or 0)
-            used = max(0, int(order['points_used'] or 0))
-            if not forfeited_through or str(order['created_at'] or '') > forfeited_through:
-                active_balance = max(0, active_balance + actual - used)
-            total_points += actual
-            total_spent += int(order['received_amount'] or 0)
-            last_day = day
-        expired = bool(last_day and (today-last_day).days >= 30)
-        calculated = 0 if expired else active_balance
-        if (int(customer['points'] or 0), int(customer['total_points'] or 0), int(customer['total_spent'] or 0)) != (calculated, total_points, total_spent):
-            anomalies.append({
-                'kind': '客户汇总不一致', 'customer_id': cid, 'customer_no': customer['customer_no'],
-                'customer_name': customer['name'], 'stored_points': int(customer['points'] or 0),
-                'calculated_points': calculated, 'stored_total_points': int(customer['total_points'] or 0),
-                'calculated_total_points': total_points, 'stored_total_spent': int(customer['total_spent'] or 0),
-                'calculated_total_spent': total_spent, 'expired': bool(expired)
-            })
-        running = 0
-        last_day = None
-        for order in order_rows:
-            if '取消' in str(order['order_status'] or ''):
-                continue
-            day = parse_order_day(order['order_date'])
-            if day and last_day and (day-last_day).days >= 30:
-                running = 0
-            text = ' '.join(str(order[key] or '') for key in ('remark','remark2','raw_text'))
-            expected = 500 if '积分折扣' in text else max(0, math.floor(int(order['received_amount'] or 0)/20))
-            actual = int(order['points'] or 0)
-            used = int(order['points_used'] or 0)
-            if actual != expected:
-                anomalies.append({'kind':'订单积分与规则不符','customer_id':cid,'customer_no':customer['customer_no'],
-                                  'customer_name':customer['name'],'order_id':int(order['id']),
-                                  'order_date':order['order_date'],'stored_points':actual,'expected_points':expected})
-            if used < 0 or used > running:
-                anomalies.append({'kind':'积分使用超过当时余额','customer_id':cid,'customer_no':customer['customer_no'],
-                                  'customer_name':customer['name'],'order_id':int(order['id']),
-                                  'order_date':order['order_date'],'points_used':used,'available_before':running})
-            running = max(0, running + actual - max(0, used))
-            if day:
-                last_day = day
+    customers = {int(row['id']):dict(row) for row in c.execute("SELECT id,customer_no,name FROM customers").fetchall()}
+    checked = 0
+    order_rows = rows(c.execute("""SELECT id,customer_id,customer_no,customer_name,order_date,points,points_used,
+                                          remark,remark2,raw_text,order_status
+                                   FROM orders
+                                   WHERE (COALESCE(remark,'')||' '||COALESCE(remark2,'')||' '||COALESCE(raw_text,'')) LIKE '%积分%'
+                                   ORDER BY order_date,id""").fetchall())
+    for order in order_rows:
+        if '取消' in str(order.get('order_status') or ''):
+            continue
+        checked += 1
+        text = ' '.join(str(order.get(key) or '') for key in ('remark','remark2','raw_text'))
+        customer = customers.get(int(order.get('customer_id') or 0), {})
+        base = {'customer_id':int(order.get('customer_id') or 0),
+                'customer_no':order.get('customer_no') or customer.get('customer_no'),
+                'customer_name':order.get('customer_name') or customer.get('name'),
+                'order_id':int(order['id']),'order_date':order.get('order_date'),
+                'points':int(order.get('points') or 0),'points_used':int(order.get('points_used') or 0),
+                'note':str(order.get('remark') or order.get('remark2') or order.get('raw_text') or '')}
+        if point_use_note_triggered(text):
+            if int(order.get('points_used') or 0) <= 0:
+                anomalies.append({'kind':'积分使用备注未登记', **base})
+        else:
+            anomalies.append({'kind':'其他积分备注待确认', **base})
+        if int(order.get('points_used') or 0) < 0 or int(order.get('points') or 0) < 0:
+            anomalies.append({'kind':'积分字段出现负数', **base})
     counts = {}
     for item in anomalies:
         counts[item['kind']] = counts.get(item['kind'], 0) + 1
-    return {'customers_checked': len(customers), 'anomaly_count': len(anomalies), 'counts': counts, 'anomalies': anomalies}
+    return {'customers_checked': len(customers), 'orders_with_point_notes': checked,
+            'anomaly_count': len(anomalies), 'counts': counts, 'anomalies': anomalies}
 
 
 def update_customer_type_by_history(c, customer_id=None):
@@ -2711,6 +2614,10 @@ def detect_payment_method_from_note(*texts):
             return method
     return None
 
+def point_use_note_triggered(*texts):
+    text = re.sub(r'\s+', '', ' '.join(str(value or '') for value in texts))
+    return '积分' in text and any(word in text for word in ('减免','抵扣','折扣','全扣'))
+
 def create_or_update_order(c,d):
     old_customer_id = None
     old_points_used = 0
@@ -2753,29 +2660,21 @@ def create_or_update_order(c,d):
     prof = round_yen_1000_half_up(rec - th)
     cust = ensure_customer(c,d.get('customer_raw',''),d.get('remark',''))
     remark = str(d.get('remark') or '')
-    discount_requested = '积分折扣' in (remark + ' ' + str(d.get('remark2') or '') + ' ' + str(d.get('raw_text') or ''))
-    discount_already_applied = bool(
-        d.get('id') and old_customer_id == cust['id'] and '积分抵扣金额' in old_order_remark
-    )
-    if discount_requested:
+    discount_requested = point_use_note_triggered(remark, d.get('remark2'), d.get('raw_text'))
+    if d.get('id'):
+        # 编辑旧订单只改订单资料，不再触碰客户当前积分，也不重复赠送/扣除。
+        pts = old_order_points
+        points_used = old_points_used
+    elif discount_requested:
+        available = max(0, int(cust['points'] or 0))
         pts = 500
-        if discount_already_applied:
-            points_used = old_points_used
-            discount_amount = old_points_used
-        else:
-            available = max(0, int(cust['points'] or 0))
-            if d.get('id') and old_customer_id == cust['id']:
-                available = max(0, available - old_order_points + old_points_used)
-            points_used = available
-            discount_amount = available
+        points_used = available
         remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
-        remark = f"{remark}｜积分抵扣金额：¥{discount_amount:,}"
+        remark = f"{remark}｜积分抵扣金额：¥{available:,}"
     else:
         pts = max(0, math.floor(rec/20))
-        requested_points = max(0, int(d.get('points_used') if 'points_used' in d else old_points_used or 0))
+        requested_points = max(0, int(d.get('points_used') or 0))
         available = max(0, int(cust['points'] or 0))
-        if d.get('id') and old_customer_id == cust['id']:
-            available = max(0, available - old_order_points + old_points_used)
         points_used = min(requested_points, available)
     auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
     payment_method = auto_payment or (d.get('payment_method') or '现金')
@@ -2784,13 +2683,17 @@ def create_or_update_order(c,d):
         c.execute("""UPDATE orders SET order_date=?,service_time=?,hours=?,girl_id=?,girl_name=?,customer_id=?,customer_no=?,customer_name=?,received_amount=?,girl_take_home=?,store_profit=?,points=?,points_used=?,order_status=?,settlement_status=?,payment_method=?,remark=?,remark2=?,raw_text=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,remark,d.get('remark2',''),d.get('raw_text',old_raw_text),d.get('id')))
         if old_customer_id and old_customer_id != cust['id']:
-            recalc_customer_points(c, old_customer_id)
-        recalc_customer_points(c, cust['id'])
+            refresh_customer_totals(c, old_customer_id)
+        refresh_customer_totals(c, cust['id'])
     else:
-        c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,points_used,order_status,settlement_status,payment_method,remark,remark2,raw_text)
+        if '取消' in str(d.get('order_status') or ''):
+            pts = points_used = 0
+        cur = c.execute("""INSERT INTO orders(order_date,service_time,hours,girl_id,girl_name,customer_id,customer_no,customer_name,received_amount,girl_take_home,store_profit,points,points_used,order_status,settlement_status,payment_method,remark,remark2,raw_text)
                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (d.get('order_date'),d.get('service_time'),h,g['id'],g['name'],cust['id'],cust['customer_no'],cust['name'],rec,th,prof,pts,points_used,d.get('order_status','已结束'),d.get('settlement_status','未结算'),payment_method,remark,d.get('remark2',''),d.get('raw_text','')))
-        recalc_customer_points(c, cust['id'])
+        new_balance = max(0, int(cust['points'] or 0) + int(pts or 0) - int(points_used or 0))
+        c.execute("UPDATE customers SET points=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_balance,cust['id']))
+        refresh_customer_totals(c, cust['id'])
 
 
 @app.route('/')
@@ -2844,7 +2747,6 @@ def all_data():
         auto_finish_reservations(c)
         maintenance_day = today_for_mcr.isoformat()
         if LAST_FULL_MAINTENANCE_DAY != maintenance_day:
-            expire_customer_points(c, None)
             update_customer_type_by_history(c, None)
             LAST_FULL_MAINTENANCE_DAY = maintenance_day
         payload = {
@@ -3127,7 +3029,7 @@ def delete(table,item_id):
             c.execute('UPDATE customer_reservations SET order_id=0, updated_at=CURRENT_TIMESTAMP WHERE order_id=?', (item_id,))
         cur = c.execute(f'DELETE FROM {allowed[table]} WHERE id=?',(item_id,))
         if table == 'orders' and affected_customer_id:
-            recalc_customer_points(c, affected_customer_id, update_types=False)
+            refresh_customer_totals(c, affected_customer_id, update_types=False)
         elif table in ('customers', 'recharges', 'points'):
             update_customer_type_by_history(c, None)
         changed_customers = customer_refresh_rows(c, [affected_customer_id] if affected_customer_id else [])
@@ -4042,7 +3944,7 @@ def api_orders_bulk_delete():
             c.execute(f'UPDATE customer_reservations SET order_id=0, updated_at=CURRENT_TIMESTAMP WHERE order_id IN ({q})', batch)
             deleted += int(c.execute(f'DELETE FROM orders WHERE id IN ({q})', batch).rowcount or 0)
         for cid in affected_customer_ids_for_bulk_delete:
-            recalc_customer_points(c, cid, update_types=False)
+            refresh_customer_totals(c, cid, update_types=False)
         changed_customers = customer_refresh_rows(c, affected_customer_ids_for_bulk_delete)
     return jsonify(ok=True, deleted=deleted, customers=changed_customers)
 
@@ -4347,12 +4249,6 @@ def api_quick_links():
             c.execute('UPDATE quick_links SET group_name=?, title=?, content=?, sort_order=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', (group_name, title, content, sort_order, int(d['id'])))
         else:
             c.execute('INSERT INTO quick_links(group_name,title,content,sort_order) VALUES(?,?,?,?)', (group_name, title, content, sort_order))
-    return jsonify(ok=True)
-
-@app.route('/api/customers/recalc_points', methods=['POST'])
-def api_customers_recalc_points():
-    with conn() as c:
-        recalc_customer_points(c, None, update_types=False)
     return jsonify(ok=True)
 
 @app.route('/api/customers/points-audit', methods=['GET'])
@@ -5084,7 +4980,7 @@ register_telegram_booking(
     import_chain_text=import_chain_text,
     order_to_chain_line=order_to_chain_line,
     ensure_customer=ensure_customer,
-    recalc_customer_points=recalc_customer_points,
+    refresh_customer_totals=refresh_customer_totals,
     sync_wordpress_attendance=sync_alice_wordpress_attendance,
     parse_chain_header=parse_header,
 )

@@ -580,7 +580,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          received_amount,points,points_used,order_status) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                       (self.day, "18:00-19:00", girl_id, "娜娜子", customer_id, "0420", "积分测试客人",
                        30000, 1500, 0, "已结束"))
-            self.app_module.recalc_customer_points(c, customer_id, update_types=False)
+            c.execute("UPDATE customers SET points=1500 WHERE id=?", (customer_id,))
             self.app_module.create_or_update_order(c, {
                 "order_date": self.day, "service_time": "19:00-20:00", "girl_id": girl_id,
                 "received_amount": 12345, "customer_raw": "0420", "remark": "积分折扣",
@@ -808,7 +808,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.json["deleted"], 1)
         self.assertEqual(response.json["customers"][0]["total_orders"], 0)
-        self.assertEqual(response.json["customers"][0]["points"], 0)
+        self.assertEqual(response.json["customers"][0]["points"], 750)
         with self.app_module.conn() as c:
             self.assertIsNone(c.execute("SELECT 1 FROM orders WHERE id=?", (order_id,)).fetchone())
             self.assertIsNone(c.execute("SELECT 1 FROM chain_import_rows WHERE order_id=?", (order_id,)).fetchone())
@@ -1172,25 +1172,47 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertIn((8,'private'), changed)
         self.assertTrue(result['synced'])
 
-    def test_points_audit_reports_legacy_wrong_points_and_manual_use_is_clamped(self):
+    def test_points_audit_reports_unstructured_note_and_manual_use_is_clamped(self):
         with self.app_module.conn() as c:
             girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
-            c.execute("INSERT INTO customers(customer_no,name) VALUES('0888','积分审计客人')")
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('0888','积分审计客人',100)")
             customer_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
             c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,customer_name,
                          received_amount,points,points_used,order_status) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                       (self.day,'17:00-18:00',girl_id,'娜娜子',customer_id,'0888','积分审计客人',20000,1,0,'已结束'))
-            self.app_module.recalc_customer_points(c, customer_id, update_types=False)
             self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'18:00-19:00','girl_id':girl_id,
                 'customer_raw':'0888','received_amount':10000,'points_used':999999,'order_status':'已结束'})
             latest = c.execute('SELECT * FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 1',(customer_id,)).fetchone()
-        self.assertEqual(latest['points_used'], 1)
+            c.execute("""INSERT INTO orders(order_date,customer_id,customer_no,customer_name,points,points_used,remark,order_status)
+                         VALUES(?,?,?,?,1000,0,'积分减免0.2','已结束')""",
+                      (self.day,customer_id,'0888','积分审计客人'))
+        self.assertEqual(latest['points_used'], 100)
         login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
         result = self.client.get('/api/customers/points-audit',headers={'X-Alice-Session':login.json['session_token']})
         self.assertEqual(result.status_code,200,result.get_data(as_text=True))
-        self.assertTrue(any(item['kind']=='订单积分与规则不符' and item.get('customer_no')=='0888'
+        self.assertTrue(any(item['kind']=='积分使用备注未登记' and item.get('customer_no')=='0888'
                             for item in result.json['anomalies']))
 
+    def test_new_orders_increment_current_points_and_all_discount_words_trigger(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('0890','增量客人',100)")
+            customer_id = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+            self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'17:00-18:00',
+                'girl_id':girl_id,'customer_raw':'0890','received_amount':20000,'order_status':'已结束'})
+            customer = c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()
+            self.assertEqual(customer['points'],1100)
+            normal_id = c.execute("SELECT id FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 1",(customer_id,)).fetchone()['id']
+            self.app_module.create_or_update_order(c, {'id':normal_id,'order_date':self.day,'service_time':'17:30-18:30',
+                'girl_id':girl_id,'customer_raw':'0890','received_amount':40000,'order_status':'已结束'})
+            self.assertEqual(c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()['points'],1100)
+            for index, keyword in enumerate(('积分减免0.2','积分抵扣2000','积分折扣','积分全扣'),start=1):
+                c.execute('UPDATE customers SET points=1200 WHERE id=?',(customer_id,))
+                self.app_module.create_or_update_order(c, {'order_date':self.day,'service_time':'19:00-20:00',
+                    'girl_id':girl_id,'customer_raw':'0890','received_amount':18000,'remark':keyword,'order_status':'已结束'})
+                order = c.execute('SELECT points,points_used,remark FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 1',(customer_id,)).fetchone()
+                self.assertEqual((order['points'],order['points_used']),(500,1200),keyword)
+                self.assertEqual(c.execute('SELECT points FROM customers WHERE id=?',(customer_id,)).fetchone()['points'],500)
     def test_review_drafts_are_labeled_non_customer_quotes(self):
         with self.app_module.conn() as c:
             c.execute("""INSERT INTO scraped_reviews(source_url,source_page,girl_name,review_text,tags,review_hash)

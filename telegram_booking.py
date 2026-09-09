@@ -86,7 +86,7 @@ def register_telegram_booking(
     import_chain_text,
     order_to_chain_line,
     ensure_customer,
-    recalc_customer_points,
+    refresh_customer_totals,
     sync_wordpress_attendance=None,
     parse_chain_header=None,
 ):
@@ -957,7 +957,7 @@ def register_telegram_booking(
                                    'Telegram 首次取消预约', f'预约 #{rid} 首次取消，清空累计积分', order_id or None))
                 if cancellation_no >= 2:
                     c.execute("UPDATE customers SET customer_status='黑名单',updated_at=CURRENT_TIMESTAMP WHERE id=?", (customer_id,))
-                recalc_customer_points(c, customer_id, update_types=False)
+                refresh_customer_totals(c, customer_id, update_types=False)
 
         # 每位女孩每天只有一张接龙总表；取消时重建总表，不能删除共享消息。
         try:
@@ -1789,7 +1789,6 @@ def register_telegram_booking(
             with conn() as c:
                 customer = c.execute("SELECT * FROM customers WHERE customer_no=?", (customer_no,)).fetchone()
                 if customer:
-                    recalc_customer_points(c, int(customer["id"]), update_types=False)
                     customer = c.execute("SELECT * FROM customers WHERE id=?", (int(customer["id"]),)).fetchone()
             if not customer:
                 send_message(chat.get("id"), f"没有找到客户编号 <b>{escape(customer_no)}</b>。")
