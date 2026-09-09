@@ -1911,16 +1911,17 @@ def register_telegram_booking(
                              thread_id=int(cfg.get('default_review_thread_id') or 0))
         return {'sent': sent, 'already_sent': existing, 'unbound': unbound, 'failed': failed}
 
-    def start_closing_from_keyword(message):
+    def start_closing_from_keyword(message, keyword):
         chat, user = message.get('chat') or {}, message.get('from') or {}
         with conn() as c:
             binding = c.execute("""SELECT * FROM telegram_group_bindings WHERE chat_id=? AND enabled=1
                                    ORDER BY updated_at DESC LIMIT 1""", (str(chat.get('id')),)).fetchone()
-        if binding:
+        # “下班”只处理当前女孩专属群；“闭店”只允许在内部群批量发送。
+        if keyword == '下班' and binding:
             send_closing_prompt(binding['girl_name'], dict(binding), 'keyword', user=user)
             return True
         cfg = settings()
-        if str(chat.get('id')) == str(cfg.get('default_review_chat_id') or ''):
+        if keyword == '闭店' and str(chat.get('id')) == str(cfg.get('default_review_chat_id') or ''):
             if not (is_manager(user.get('id'), chat.get('id')) or is_chat_admin(chat.get('id'), user.get('id'))):
                 send_message(chat.get('id'), "❌ 只有店长、客服或群管理员可以执行闭店。")
                 return True
@@ -2037,8 +2038,9 @@ def register_telegram_booking(
         expire_attendance_inquiries()
         if not edited and handle_closing_attendance_reply(message):
             return
-        if not edited and re.fullmatch(r"/?闭店(?:@\w+)?", text.strip()):
-            if start_closing_from_keyword(message):
+        closing_match = None if edited else re.fullmatch(r"/?(下班|闭店)(?:@\w+)?", text.strip())
+        if closing_match:
+            if start_closing_from_keyword(message, closing_match.group(1)):
                 return
         # 编辑旧消息不触发导入；必须重新发送一张带当天 MMDD 标题的完整接龙。
         cached_chain = False if edited else cache_chain_message(message)

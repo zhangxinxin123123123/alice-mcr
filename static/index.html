@@ -414,7 +414,7 @@ body:not(.role-boss) .boss-only{display:none!important}
      <div class="manual-command"><code>自动导入开启 / 关闭 / 状态</code><span>内部群控制每 30 分钟扫描；“状态”同时显示下次检查时间。专属群重发当天接龙时，即使关闭也会即时检查。</span></div>
      <div class="manual-command"><code>文案生成</code><span>在内部群回复一条纯出勤文案发送，或在关键字下一行直接粘贴文案；Bot 会按日期、女孩、TAG、时间和价格生成高清出勤图，超过 6 人自动分图。</span></div>
      <div class="manual-command"><code>询问出勤</code><span>内部群触发；询问所有已绑定女孩，30 分钟未点击默认不出勤。女孩选择 12:00–24:00 后自动写出勤表。</span></div>
-     <div class="manual-command"><code>闭店</code><span>女孩专属群触发营业日结算确认：显示单数、女孩到手、店铺收益和应交金额；东京时间 00:00–03:59 发送时归前一天，04:00 起归当天。女孩确认线上转账或线下现金，再回复下次出勤；女孩类型包含“全职”时不询问。内部群发送“闭店”可补发所有未确认女孩。“发送今日结算截图”只发送截图，不触发闭店。</span></div>
+     <div class="manual-command"><code>下班 / 闭店</code><span>女孩专属群发送“下班”，只给该女孩发送营业日结算确认；内部群发送“闭店”，给当天所有有账目且已绑定群的女孩发送。东京时间 00:00–03:59 归前一天，04:00 起归当天。女孩确认线上转账或线下现金，再回复下次出勤；女孩类型包含“全职”时不询问。“发送今日结算截图”只发送截图，不触发下班或闭店。</span></div>
      <div class="manual-command"><code>积分查询+0016</code><span>内部群按客户编号查询当前积分。</span></div>
      <div class="manual-command"><code>编号查询+客户名</code><span>内部群按客户名查询客户编号，支持部分名字。</span></div>
      <div class="manual-command"><code>/绑定审核群</code><span>把当前群设为内部审核群，仅店长、客服或群管理员操作。</span></div>

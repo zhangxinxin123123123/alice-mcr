@@ -1009,10 +1009,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
             c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '转账', '已结束'))
-        self.webhook({"message": {"message_id": 300, "chat": girl_chat, "from": girl, "text": "下班"}})
-        with self.app_module.conn() as c:
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_closing_confirmations").fetchone()[0], 0)
-        self.webhook({"message": {"message_id": 301, "chat": girl_chat, "from": girl, "text": "闭店"}})
+        self.webhook({"message": {"message_id": 301, "chat": girl_chat, "from": girl, "text": "下班"}})
         with self.app_module.conn() as c:
             closing = dict(c.execute("SELECT * FROM telegram_closing_confirmations").fetchone())
         self.assertEqual(closing['order_count'], 2)
@@ -1046,7 +1043,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
             c.execute("""INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,received_amount,payment_method,order_status)
                          VALUES(?,?,?,?,?,?,?)""", (today, '娜娜子', 10000, 5000, 15000, '现金', '已结束'))
-        self.webhook({"message": {"message_id": 311, "chat": girl_chat, "from": girl, "text": "闭店"}})
+        self.webhook({"message": {"message_id": 311, "chat": girl_chat, "from": girl, "text": "下班"}})
         with self.app_module.conn() as c:
             closing_id = int(c.execute("SELECT id FROM telegram_closing_confirmations").fetchone()[0])
         self.webhook({"callback_query": {"id": "fulltime-pay", "from": girl,
@@ -1056,6 +1053,28 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(closing['status'], 'completed')
         self.assertEqual(closing['attendance_prompt_message_id'], 0)
         self.assertEqual(closing['next_attendance_text'], '全职，无需填写下次出勤')
+
+    def test_internal_closing_keyword_sends_each_bound_girl_but_down_does_not(self):
+        today = self.telegram_module.closing_business_date(self.app_module._tokyo_now())
+        internal = {"id": -90000, "type": "supergroup", "title": "Alice内部群"}
+        manager = {"id": 9001, "first_name": "店长"}
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO telegram_settings(setting_key,setting_value) VALUES('default_review_chat_id','-90000')
+                         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""")
+            c.execute("INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled) VALUES('娜娜子','-53001','娜娜子专属群',1)")
+            c.execute("INSERT INTO telegram_group_bindings(girl_name,chat_id,chat_title,enabled) VALUES('有房女孩','-53002','有房女孩专属群',1)")
+            c.execute("INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,order_status) VALUES(?,?,?,?,?)",
+                      (today, '娜娜子', 10000, 5000, '已结束'))
+            c.execute("INSERT INTO orders(order_date,girl_name,girl_take_home,store_profit,order_status) VALUES(?,?,?,?,?)",
+                      (today, '有房女孩', 10000, 5000, '已结束'))
+        self.webhook({"message": {"message_id": 320, "chat": internal, "from": manager, "text": "下班"}})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_closing_confirmations").fetchone()[0], 0)
+        self.webhook({"message": {"message_id": 321, "chat": internal, "from": manager, "text": "闭店"}})
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM telegram_closing_confirmations").fetchone()[0], 2)
+        self.assertTrue(any(method == 'sendMessage' and 'chat_id=-53001' in body for method, body in self.telegram_calls))
+        self.assertTrue(any(method == 'sendMessage' and 'chat_id=-53002' in body for method, body in self.telegram_calls))
 
     def test_settlement_screenshot_only_sends_screenshot(self):
         today = self.app_module._tokyo_now().date().isoformat()
