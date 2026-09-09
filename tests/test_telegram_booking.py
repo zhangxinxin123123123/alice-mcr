@@ -1193,10 +1193,16 @@ class TelegramBookingFlowTest(unittest.TestCase):
         <label>服务(详细说明,可以写多行)</label>
         <textarea name="acf[field_service]">旧文案</textarea></div></form>'''
         self.assertEqual(self.app_module._wordpress_service_field_name(html), 'acf[field_service]')
+        self.assertEqual(self.app_module._wordpress_attendance_first_line(
+            '旧服务说明第一行\n第二行内容', '今日出勤：19:00-23:00'),
+            '今日出勤：19:00-23:00\n旧服务说明第一行\n第二行内容')
+        self.assertEqual(self.app_module._wordpress_attendance_first_line(
+            '今日出勤：18:00-22:00\n原有内容', '今日出勤：20:00-24:00'),
+            '今日出勤：20:00-24:00\n原有内容')
         page = (self.app_module.APP_DIR / 'static' / 'neko_dona_shift.html').read_text(encoding='utf-8')
         self.assertIn('const PAGE_SIZE=6', page)
-        self.assertIn('attendance_names:rows.map(r=>r.alias)', page)
-        self.assertIn('女孩表中已经填写“马甲”', page)
+        self.assertIn('name:r.alias,start:r.start,end:r.end', page)
+        self.assertIn('不再修改官网“今日出勤”汇总页', page)
 
     def test_neko_attendance_sync_reports_missing_render_credentials(self):
         login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
@@ -1207,8 +1213,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         try:
             response = self.client.post('/api/neko/attendance-sync', headers=headers, json={
                 'date': self.day,
-                'image_data': 'data:image/png;base64,' + base64.b64encode(b'fake-png').decode(),
-                'service_text': '喵喵出勤', 'attendance_names':['喵马甲']
+                'attendance': [{'name':'喵马甲','start':'19:00','end':'23:00'}]
             })
         finally:
             for key, value in old.items():
@@ -1217,6 +1222,44 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 502, response.get_data(as_text=True))
         self.assertFalse(response.json['configured'])
         self.assertIn('ALICE_NEKO_ADMIN_USER', response.json['warning'])
+
+    def test_neko_sync_updates_profiles_privates_absent_and_protects_nanami(self):
+        originals = (self.app_module.neko_admin_login, self.app_module._wordpress_model_posts,
+                     self.app_module._wordpress_update_attendance_line,
+                     self.app_module._wordpress_inline_model_status)
+        old_user = os.environ.get('ALICE_NEKO_ADMIN_USER')
+        old_password = os.environ.get('ALICE_NEKO_ADMIN_PASSWORD')
+        text_calls, status_calls = [], []
+        os.environ['ALICE_NEKO_ADMIN_USER'] = 'test-user'
+        os.environ['ALICE_NEKO_ADMIN_PASSWORD'] = 'test-password'
+        self.app_module.neko_admin_login = lambda *_args: object()
+        self.app_module._wordpress_model_posts = lambda _opener, _base: ([
+            {'id':30,'title':'喵马甲A','status':'private'},
+            {'id':29,'title':'喵马甲B','status':'publish'},
+            {'id':28,'title':'七海莉莉','status':'publish'},
+            {'id':27,'title':'今日出勤','status':'publish'},
+        ], 'nonce')
+        self.app_module._wordpress_update_attendance_line = lambda _opener, post, line, _base: (
+            text_calls.append((post['id'], line)) or {'changed':True})
+        self.app_module._wordpress_inline_model_status = lambda _opener, post, status, _nonce, **_kw: (
+            status_calls.append((post['id'], status)))
+        try:
+            result = self.app_module.sync_neko_wordpress_attendance(
+                self.day, [{'name':'喵马甲A','start':'19:00','end':'23:00'}])
+        finally:
+            (self.app_module.neko_admin_login, self.app_module._wordpress_model_posts,
+             self.app_module._wordpress_update_attendance_line,
+             self.app_module._wordpress_inline_model_status) = originals
+            if old_user is None: os.environ.pop('ALICE_NEKO_ADMIN_USER', None)
+            else: os.environ['ALICE_NEKO_ADMIN_USER'] = old_user
+            if old_password is None: os.environ.pop('ALICE_NEKO_ADMIN_PASSWORD', None)
+            else: os.environ['ALICE_NEKO_ADMIN_PASSWORD'] = old_password
+        self.assertEqual(text_calls, [(30, '今日出勤：19:00-23:00')])
+        self.assertIn((30, 'publish'), status_calls)
+        self.assertIn((29, 'private'), status_calls)
+        self.assertFalse(any(post_id in (27,28) for post_id, _status in status_calls))
+        self.assertEqual(result['protected'], ['七海莉莉'])
+        self.assertTrue(result['synced'])
 
     def test_wordpress_visibility_privates_every_non_attending_model(self):
         original_posts = self.app_module._wordpress_model_posts

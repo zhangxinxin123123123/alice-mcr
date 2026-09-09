@@ -21,12 +21,12 @@ button,input,select{font:inherit}.shell{width:min(1120px,100%);margin:auto;backg
   <header class="hero">
     <div class="eyebrow">NEKO MIAOMIAO</div>
     <h1>喵喵出勤表</h1>
-    <p>素雅信纸版 · 从爱丽丝 MCR 当日出勤与女孩马甲自动生成</p>
+    <p>从爱丽丝 MCR 读取出勤，以马甲同步喵喵女孩页面</p>
   </header>
   <section class="toolbar">
     <input id="shiftDate" class="field" type="date">
     <button class="btn sage" type="button" onclick="loadMcrAttendance()">重新读取 MCR</button>
-    <button class="btn" type="button" onclick="generateImages(true)">生成信纸图</button>
+    <button class="btn" type="button" onclick="generateImages(true)">生成信纸图（仅本地）</button>
     <button class="btn" type="button" onclick="copyShiftText()">复制文案</button>
     <button id="syncBtn" class="btn primary" type="button" onclick="syncNekoAttendance()">全面同步</button>
     <span class="grow"></span>
@@ -34,7 +34,7 @@ button,input,select{font:inherit}.shell{width:min(1120px,100%);margin:auto;backg
     <div id="statusLine" class="status">准备读取今日出勤。</div>
   </section>
   <main class="content">
-    <div class="notice">这里只显示女孩表中已经填写“马甲”的当日出勤女孩。客用图片仅包含马甲名字、出勤时间和每小时价格，不显示爱丽丝名字、头像或 TAG。</div>
+    <div class="notice">“全面同步”会把出勤时间写到对应喵喵女孩文案第一行，并公开出勤女孩、私密未出勤女孩；不再修改官网“今日出勤”汇总页。七海莉莉属于保护名单，文案和状态都不会改。信纸图只在本页生成、复制或下载。</div>
     <div id="shiftList" class="list"></div>
   </main>
   <section id="previewWrap" class="preview-wrap" hidden>
@@ -70,7 +70,7 @@ button,input,select{font:inherit}.shell{width:min(1120px,100%);margin:auto;backg
   window.downloadImage=function(i){const p=imagePages[i];if(!p)return;const a=document.createElement("a");a.href=p.url;a.download=p.filename;a.click()}
   function buildText(){const d=shiftDate.value||today;return `${d} 喵喵出勤\n\n`+rows.map(r=>`${r.alias}　${r.start}-${r.end}　${r.price?yen(r.price)+"/h":"价格咨询"}`).join("\n")}
   window.copyShiftText=async function(){if(!rows.length){alert("当天没有喵喵出勤");return}try{await navigator.clipboard.writeText(buildText());setStatus("喵喵出勤文案已复制。","good")}catch(e){prompt("请手动复制",buildText())}}
-  window.syncNekoAttendance=async function(){if(!rows.length){alert("当天没有可同步的喵喵出勤女孩");return}busy(true,"正在同步喵喵官网图片、文案和公开状态…");try{if(!imagePages.length)await generateImages(false);busy(true,"正在同步喵喵官网图片、文案和公开状态…");const image_data_list=[];for(const p of imagePages)image_data_list.push(await dataUrl(p.blob));const response=await fetch("/api/neko/attendance-sync",{method:"POST",headers:authHeaders(true),body:JSON.stringify({date:shiftDate.value||today,image_data_list,service_text:buildText(),attendance_names:rows.map(r=>r.alias)})});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.warning||result.error||"喵喵全面同步失败");const v=result.visibility||{},warnings=[];if(!v.synced)warnings.push(v.warning||"女孩公开状态部分失败");if((v.unmatched_attendance||[]).length)warnings.push(`官网未找到马甲：${v.unmatched_attendance.join("、")}`);setStatus(`全面同步完成：${imagePages.length} 张图，公开 ${v.published||0}，私密 ${v.privated||0}${warnings.length?`；${warnings.join("；")}`:""}`,warnings.length?"bad":"good")}catch(e){console.error(e);setStatus(e.message||"喵喵全面同步失败","bad");alert(e.message||"喵喵全面同步失败")}finally{busy(false)}}
+  window.syncNekoAttendance=async function(){if(!rows.length){alert("当天没有可同步的喵喵出勤女孩");return}busy(true,"正在同步每位喵喵女孩的出勤文案和公开状态…");try{const attendance=rows.map(r=>({name:r.alias,start:r.start,end:r.end}));const response=await fetch("/api/neko/attendance-sync",{method:"POST",headers:authHeaders(true),body:JSON.stringify({date:shiftDate.value||today,attendance})});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.warning||result.error||"喵喵全面同步失败");const warnings=[];if((result.unmatched_attendance||[]).length)warnings.push(`官网未找到马甲：${result.unmatched_attendance.join("、")}`);if((result.protected||[]).length)warnings.push(`保护未改：${result.protected.join("、")}`);setStatus(`全面同步完成：文案更新 ${result.text_updated||0}，公开 ${result.published||0}，私密 ${result.privated||0}${warnings.length?`；${warnings.join("；")}`:""}`,warnings.length?"bad":"good")}catch(e){console.error(e);setStatus(e.message||"喵喵全面同步失败","bad");alert(e.message||"喵喵全面同步失败")}finally{busy(false)}}
   shiftDate.value=today;shiftDate.addEventListener("change",loadMcrAttendance);window.addEventListener("DOMContentLoaded",loadMcrAttendance);
 })();
 </script>

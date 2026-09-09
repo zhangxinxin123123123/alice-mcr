@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v126_neko_stationery_sync"
+APP_VERSION = "v127_neko_profile_attendance_sync"
 
 @app.after_request
 def compress_large_json(response):
@@ -2296,8 +2296,60 @@ def sync_alice_wordpress_attendance(day, image_bytes, service_text, attendance_n
             warning = f'{stage}失败：{warning}'
         return {'configured': True, 'synced': False, 'stage': stage, 'warning': warning}
 
-def sync_neko_wordpress_attendance(day, image_bytes, service_text, attendance_names=None):
-    """Replace Neko's attendance gallery/text and publish only today's aliased girls."""
+def _wordpress_attendance_first_line(value, attendance_line, html_content=False):
+    value = str(value or '').replace('\r\n', '\n').replace('\r', '\n')
+    attendance_line = str(attendance_line or '').strip()
+    if html_content:
+        paragraph = f'<p>{attendance_line}</p>'
+        pattern = r'^\s*<p\b[^>]*>\s*今日出勤[\s\S]*?</p>\s*'
+        if re.search(pattern, value, re.I):
+            return re.sub(pattern, paragraph + '\n', value, count=1, flags=re.I)
+        return paragraph + ('\n' + value.lstrip() if value.strip() else '')
+    lines = value.split('\n')
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and re.match(r'^今日出勤(?:\s|[：:])', lines[0].strip()):
+        lines[0] = attendance_line
+    else:
+        lines.insert(0, attendance_line)
+    return '\n'.join(lines).rstrip()
+
+def _wordpress_update_attendance_line(opener, post, attendance_line, base_url):
+    base_url = base_url.rstrip('/')
+    edit_url = f'{base_url}/wp-admin/post.php?post={int(post["id"])}&action=edit'
+    edit_html, _ = opener_text(opener, edit_url, timeout=40)
+    service_field = str(os.environ.get('NEKO_WP_SERVICE_FIELD_NAME') or '').strip()
+    service_field = service_field or _wordpress_service_field_name(edit_html)
+    if not service_field:
+        raise ValueError('找不到“服务（详细说明，可以写多行）”字段')
+    pairs = _wordpress_form_pairs(edit_html)
+    old_value = next((value for key, value in pairs if key == service_field), '')
+    new_value = _wordpress_attendance_first_line(
+        old_value, attendance_line, html_content=(service_field == 'content'))
+    if new_value == old_value:
+        return {'changed': False, 'service_field': service_field}
+    pairs = [(key, value) for key, value in pairs
+             if key not in {service_field, 'action', 'post_ID'}]
+    pairs.extend([('action', 'editpost'), ('post_ID', str(int(post['id']))),
+                  (service_field, new_value), ('save', '更新')])
+    req = Request(base_url + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
+                  method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
+                                          'Referer': edit_url})
+    with opener.open(req, timeout=60) as response:
+        final_url = response.geturl()
+        result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
+    if 'post.php' not in final_url and 'post.php' not in result_html:
+        raise ValueError('官网没有确认女孩文案保存成功')
+    verify_html, _ = opener_text(opener, edit_url + '&neko_verify=1', timeout=40)
+    verify_pairs = _wordpress_form_pairs(verify_html)
+    verified_value = next((value for key, value in verify_pairs if key == service_field), '')
+    verified_text = strip_html_text(verified_value) if service_field == 'content' else verified_value.strip()
+    if not verified_text.startswith(attendance_line):
+        raise ValueError('官网返回成功，但女孩文案第一行没有更新')
+    return {'changed': True, 'service_field': service_field}
+
+def sync_neko_wordpress_attendance(day, attendance):
+    """Update each attending girl's first service line; never modify a daily attendance post."""
     user, pwd = neko_admin_credentials()
     if not user or not pwd:
         return {'configured': False, 'synced': False,
@@ -2306,130 +2358,93 @@ def sync_neko_wordpress_attendance(day, image_bytes, service_text, attendance_na
     stage = '登录喵喵官网后台'
     try:
         opener = neko_admin_login(user, pwd)
-        stage = '查找喵喵“今日出勤”页面'
-        posts, _unused_nonce = _wordpress_model_posts(opener, base_url)
-        post_id = int(os.environ.get('NEKO_WP_ATTENDANCE_POST_ID') or 0)
-        if not post_id:
-            attendance_posts = [post for post in posts
-                                if _wordpress_girl_key(post.get('title')) == _wordpress_girl_key('今日出勤')]
-            if not attendance_posts:
-                raise ValueError('女孩管理中找不到标题为“今日出勤”的页面')
-            post_id = max(attendance_posts, key=lambda item: int(item.get('id') or 0))['id']
-        stage = '读取喵喵“今日出勤”编辑页'
-        edit_url = f'{base_url}/wp-admin/post.php?post={post_id}&action=edit'
-        edit_html, _ = opener_text(opener, edit_url, timeout=40)
-        gallery_key = _acf_gallery_field_key(edit_html)
-        if not gallery_key:
-            raise ValueError('找不到“照片(可以添加多个照片)”字段')
-        gallery_name = _wordpress_photo_gallery_field_name(edit_html, gallery_key)
-        if not gallery_name:
-            raise ValueError('找不到旧版相册插件的图片字段名')
-        service_field = str(os.environ.get('NEKO_WP_SERVICE_FIELD_NAME') or '').strip()
-        service_field = service_field or _wordpress_service_field_name(edit_html)
-        if not service_field:
-            raise ValueError('找不到“服务（详细说明，可以写多行）”字段')
-        image_bytes_list = ([bytes(image_bytes)] if isinstance(image_bytes, (bytes, bytearray))
-                            else [bytes(item) for item in (image_bytes or []) if item])
-        if not image_bytes_list:
-            raise ValueError('没有可上传的喵喵出勤图片')
-        attachment_ids = []
-        stage = '上传喵喵今日出勤图片'
-        for page_index, page_bytes in enumerate(image_bytes_list):
-            filename = f'neko-attendance-{day}' + (f'-{page_index + 1}' if len(image_bytes_list) > 1 else '') + '.png'
-            try:
-                attachment_id = _wordpress_rest_upload_image(
-                    opener, edit_html, edit_url, day, page_bytes, page_index, len(image_bytes_list),
-                    filename=filename, base_url=base_url)
-            except HTTPError as exc:
-                detail = exc.read().decode('utf-8', 'replace').strip()[:300]
-                raise ValueError(f'喵喵官网图片上传失败（HTTP {exc.code}）' +
-                                 (f'：{strip_html_text(detail)}' if detail else '')) from exc
-            if not attachment_id:
-                stage = '读取喵喵媒体上传页'
-                media_html, _ = opener_text(opener, base_url + '/wp-admin/media-new.php', timeout=35)
-                nonce_match = re.search(r'<input\b[^>]*name=["\']_wpnonce["\'][^>]*value=["\']([^"\']+)',
-                                        media_html, re.I)
-                if not nonce_match:
-                    raise ValueError('找不到喵喵官网图片上传授权码')
-                stage = '上传喵喵今日出勤图片'
-                upload_raw = _multipart_request(base_url + '/wp-admin/async-upload.php', [
-                    ('name', filename), ('action', 'upload-attachment'),
-                    ('_wpnonce', html_unescape(nonce_match.group(1)))
-                ], filename, page_bytes, opener, edit_url)
-                upload_data = json.loads(upload_raw)
-                attachment_id = int(((upload_data.get('data') or {}).get('id')) or 0)
-                if not upload_data.get('success') or not attachment_id:
-                    raise ValueError(((upload_data.get('data') or {}).get('message')) or '喵喵官网图片上传失败')
-            attachment_ids.append(int(attachment_id))
-
-        stage = '保存喵喵“今日出勤”图片和文案'
-        pairs = _wordpress_form_pairs(edit_html)
-        replace_names = {f'acf[{gallery_key}]', gallery_name, gallery_name + '[]', service_field,
-                         'action', 'post_ID'}
-        pairs = [(key, value) for key, value in pairs if key not in replace_names]
-        pairs.extend([('action', 'editpost'), ('post_ID', str(post_id)),
-                      (service_field, str(service_text or '').strip())])
-        pairs.extend((gallery_name + '[]', str(attachment_id)) for attachment_id in attachment_ids)
-        pairs.append(('save', '更新'))
-        req = Request(base_url + '/wp-admin/post.php', data=urlencode(pairs, doseq=True).encode('utf-8'),
-                      method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded',
-                                              'Referer': edit_url})
-        try:
-            with opener.open(req, timeout=60) as response:
-                final_url = response.geturl()
-                result_html = response.read().decode(response.headers.get_content_charset() or 'utf-8', 'replace')
-        except HTTPError as exc:
-            detail = exc.read().decode('utf-8', 'replace').strip()[:300]
-            raise ValueError(f'喵喵“今日出勤”保存失败（HTTP {exc.code}）' +
-                             (f'：{strip_html_text(detail)}' if detail else '')) from exc
-        if 'post.php' not in final_url and 'post.php' not in result_html:
-            raise ValueError('喵喵官网没有确认保存成功')
-        stage = '确认喵喵“今日出勤”相册已替换'
-        verify_html, _ = opener_text(opener, edit_url + '&neko_verify=1', timeout=40)
-        verified_ids = _wordpress_photo_gallery_attachment_ids(verify_html)
-        if verified_ids != attachment_ids:
-            raise ValueError(f'喵喵相册没有保存新图片（期望 {attachment_ids}，实际 {verified_ids or "空"}）')
-        stage = '同步喵喵女孩公开/私密状态'
-        try:
-            visibility = sync_alice_wordpress_girl_visibility(
-                opener, attendance_names or [], attendance_names or [], base_url=base_url)
-        except Exception as exc:
-            visibility = {'synced': False, 'warning': str(exc), 'matched': 0,
-                          'published': 0, 'privated': 0, 'unmatched_attendance': list(attendance_names or [])}
-        return {'configured': True, 'synced': True, 'post_id': int(post_id),
-                'attachment_id': attachment_ids[0], 'attachment_ids': attachment_ids,
-                'service_field': service_field, 'visibility': visibility}
+        stage = '读取喵喵女孩列表'
+        posts, nonce = _wordpress_model_posts(opener, base_url)
+        attendance_by_key = {}
+        for item in attendance or []:
+            name = str((item or {}).get('name') or '').strip()
+            key = _wordpress_girl_key(name)
+            if key:
+                attendance_by_key[key] = {'name': name, 'start': str((item or {}).get('start') or '').strip(),
+                                          'end': str((item or {}).get('end') or '').strip()}
+        protected_names = ['七海莉莉']
+        protected_names.extend(re.split(r'[,，、\n]+', str(os.environ.get('NEKO_PROTECTED_GIRLS') or '')))
+        protected_keys = {_wordpress_girl_key(name) for name in protected_names if _wordpress_girl_key(name)}
+        grouped = {}
+        for post in posts:
+            key = _wordpress_girl_key(post.get('title'))
+            if key:
+                grouped.setdefault(key, []).append(post)
+        result = {'configured': True, 'synced': True, 'date': day, 'matched': 0,
+                  'text_updated': 0, 'text_unchanged': 0, 'published': 0, 'privated': 0,
+                  'status_unchanged': 0, 'protected': [], 'failed': [], 'unmatched_attendance': []}
+        stage = '逐个同步喵喵女孩文案和状态'
+        for key, candidates in grouped.items():
+            candidates = sorted(candidates, key=lambda item: int(item.get('id') or 0), reverse=True)
+            if any(_wordpress_model_title_is_protected(post.get('title')) for post in candidates):
+                continue
+            if key in protected_keys:
+                title = str(candidates[0].get('title') or '').strip()
+                if title and title not in result['protected']:
+                    result['protected'].append(title)
+                continue
+            shift = attendance_by_key.get(key)
+            if shift:
+                result['matched'] += 1
+                line = f'今日出勤：{shift["start"]}-{shift["end"]}'
+                try:
+                    update = _wordpress_update_attendance_line(opener, candidates[0], line, base_url)
+                    result['text_updated' if update.get('changed') else 'text_unchanged'] += 1
+                except Exception as exc:
+                    result['failed'].append({'girl': shift['name'], 'post_id': candidates[0]['id'],
+                                             'operation': '更新文案', 'error': str(exc)})
+                for index, post in enumerate(candidates):
+                    desired = 'publish' if index == 0 else 'private'
+                    if post.get('status') == desired:
+                        result['status_unchanged'] += 1
+                        continue
+                    try:
+                        _wordpress_inline_model_status(opener, post, desired, nonce, base_url=base_url)
+                        result['published' if desired == 'publish' else 'privated'] += 1
+                    except Exception as exc:
+                        result['failed'].append({'girl': shift['name'], 'post_id': post['id'],
+                                                 'operation': '更新公开状态', 'error': str(exc)})
+            else:
+                for post in candidates:
+                    if post.get('status') == 'private':
+                        result['status_unchanged'] += 1
+                        continue
+                    try:
+                        _wordpress_inline_model_status(opener, post, 'private', nonce, base_url=base_url)
+                        result['privated'] += 1
+                    except Exception as exc:
+                        result['failed'].append({'girl': post.get('title') or '', 'post_id': post['id'],
+                                                 'operation': '设为私密', 'error': str(exc)})
+        for item in attendance_by_key.values():
+            if _wordpress_girl_key(item['name']) not in grouped:
+                result['unmatched_attendance'].append(item['name'])
+        result['synced'] = not result['failed']
+        return result
     except Exception as exc:
-        warning = str(exc)
-        if not warning.startswith(('喵喵官网图片上传失败', '喵喵“今日出勤”保存失败')):
-            warning = f'{stage}失败：{warning}'
-        return {'configured': True, 'synced': False, 'stage': stage, 'warning': warning}
+        return {'configured': True, 'synced': False, 'stage': stage, 'warning': f'{stage}失败：{exc}'}
 
 @app.route('/api/neko/attendance-sync', methods=['POST'])
 def api_neko_attendance_sync():
     data = request.get_json(silent=True) or {}
     day = str(data.get('date') or '').strip()
-    raw_items = data.get('image_data_list') or [data.get('image_data')]
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', day):
         return jsonify(ok=False, error='日期格式不正确'), 400
-    if not isinstance(raw_items, list):
-        raw_items = [raw_items]
-    if not raw_items or len(raw_items) > 6 or any(
-            not str(raw or '').startswith('data:image/png;base64,') for raw in raw_items):
-        return jsonify(ok=False, error='请先生成 PNG 出勤图'), 400
-    try:
-        image_bytes_list = [base64.b64decode(str(raw).split(',', 1)[1], validate=True) for raw in raw_items]
-    except Exception:
-        return jsonify(ok=False, error='图片数据损坏，请重新生成'), 400
-    if any(not image_bytes or len(image_bytes) > 10 * 1024 * 1024 for image_bytes in image_bytes_list):
-        return jsonify(ok=False, error='图片为空或单张超过10MB'), 400
-    attendance_names = []
-    for name in data.get('attendance_names') or []:
-        name = str(name or '').strip()
-        if name and name not in attendance_names:
-            attendance_names.append(name)
-    result = sync_neko_wordpress_attendance(
-        day, image_bytes_list, str(data.get('service_text') or ''), attendance_names)
+    attendance = []
+    for raw in data.get('attendance') or []:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get('name') or '').strip()
+        start = str(raw.get('start') or '').strip()
+        end = str(raw.get('end') or '').strip()
+        if not name or not re.fullmatch(r'(?:[01]?\d|2\d):[0-5]\d', start) or not re.fullmatch(r'(?:[01]?\d|2\d):[0-5]\d', end):
+            return jsonify(ok=False, error=f'女孩名或出勤时间不正确：{name or "未命名"}'), 400
+        attendance.append({'name': name, 'start': start, 'end': end})
+    result = sync_neko_wordpress_attendance(day, attendance)
     return jsonify(ok=bool(result.get('synced')), **result), (200 if result.get('synced') else 502)
 
 @app.route('/api/wordpress/diagnose', methods=['GET'])
