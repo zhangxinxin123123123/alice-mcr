@@ -64,6 +64,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
                           "telegram_point_alert_digests", "telegram_point_expiry_events", "telegram_point_maintenance_runs", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
+                          "customer_recharge_bonus_lots",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
                           "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs"):
@@ -89,6 +90,55 @@ class TelegramBookingFlowTest(unittest.TestCase):
         response = self.client.post("/telegram/webhook", json=payload)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response
+
+    def test_fixed_recharge_tiers_are_idempotent_and_price_restricted(self):
+        login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
+        headers = {'X-Alice-Session':login.json['session_token']}
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO customers(customer_no,name,points) VALUES('1888','充值测试',800)")
+            customer_id = int(c.execute('SELECT last_insert_rowid()').fetchone()[0])
+        payload = {'customer_id':customer_id,'recharge_amount':30000,'payment_method':'PayPay',
+                   'reason':'测试固定档','request_id':'test-recharge-1888'}
+        first = self.client.post('/api/customer_ledger/recharge-tier', headers=headers, json=payload)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        duplicate = self.client.post('/api/customer_ledger/recharge-tier', headers=headers, json=payload)
+        self.assertTrue(duplicate.json['duplicate'])
+        with self.app_module.conn() as c:
+            customer = c.execute('SELECT * FROM customers WHERE id=?',(customer_id,)).fetchone()
+            self.assertEqual(int(customer['recharge_balance']),30000)
+            self.assertEqual(int(customer['points']),1300)
+            self.assertEqual(self.app_module.eligible_customer_points(c,customer,22000),800)
+            self.assertEqual(self.app_module.eligible_customer_points(c,customer,20000),1300)
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM customer_recharge_bonus_lots').fetchone()[0],1)
+
+    def test_200k_recharge_requires_vip_or_svip(self):
+        login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
+        headers = {'X-Alice-Session':login.json['session_token']}
+        with self.app_module.conn() as c:
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('1889','普通客户')")
+            customer_id = int(c.execute('SELECT last_insert_rowid()').fetchone()[0])
+        denied = self.client.post('/api/customer_ledger/recharge-tier', headers=headers, json={
+            'customer_id':customer_id,'recharge_amount':200000,'request_id':'test-recharge-denied'})
+        self.assertEqual(denied.status_code,403)
+        with self.app_module.conn() as c:
+            c.execute('UPDATE customers SET vip_active=1 WHERE id=?',(customer_id,))
+        accepted = self.client.post('/api/customer_ledger/recharge-tier', headers=headers, json={
+            'customer_id':customer_id,'recharge_amount':200000,'request_id':'test-recharge-vip'})
+        self.assertEqual(accepted.status_code,200,accepted.get_data(as_text=True))
+        self.assertEqual(accepted.json['tier']['bonus_points'],15000)
+
+    def test_four_percent_floor_for_new_orders(self):
+        with self.app_module.conn() as c:
+            c.execute("UPDATE financial_settings SET setting_value='400' WHERE setting_key='point_rate_bps'")
+            girl_id = int(c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0])
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('1890','返点测试')")
+            order_id = self.app_module.create_or_update_order(c,{
+                'order_date':self.day,'service_time':'19:00-20:00','girl_id':girl_id,
+                'received_amount':12345,'customer_raw':'1890','remark':'测试首单'})
+            order = c.execute('SELECT points,remark FROM orders WHERE id=?',(order_id,)).fetchone()
+            customer = c.execute("SELECT points FROM customers WHERE customer_no='1890'").fetchone()
+        self.assertEqual(int(order['points']),493)
+        self.assertEqual(int(customer['points']),493)
 
     def test_closing_business_date_uses_previous_day_until_four(self):
         closing_day = self.telegram_module.closing_business_date
@@ -1655,7 +1705,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             c.execute("""INSERT INTO orders(order_date,customer_id,customer_no,customer_name,points,points_used,remark,order_status)
                          VALUES(?,?,?,?,1000,0,'积分减免0.2','已结束')""",
                       (self.day,customer_id,'0888','积分审计客人'))
-        self.assertEqual(latest['points_used'], 100)
+        self.assertEqual(latest['points_used'], 0)
         login = self.client.post('/api/login',json={'username':'admin','password':'admin123'})
         result = self.client.get('/api/customers/points-audit',headers={'X-Alice-Session':login.json['session_token']})
         self.assertEqual(result.status_code,200,result.get_data(as_text=True))

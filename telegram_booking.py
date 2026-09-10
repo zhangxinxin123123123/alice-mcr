@@ -118,6 +118,7 @@ def register_telegram_booking(
     order_to_chain_line,
     ensure_customer,
     refresh_customer_totals,
+    eligible_customer_points=None,
     sync_wordpress_attendance=None,
     parse_chain_header=None,
 ):
@@ -1549,11 +1550,15 @@ def register_telegram_booking(
                 send_message(chat_id, "这笔预约已经完成积分确认。")
                 return
             customer = link_telegram_customer(c, row)
-            available = max(0, min(int(row.get("points_available") or 0), int(customer["points"] or 0)))
+            girl_row = c.execute("SELECT id,list_price FROM girls WHERE name=?", (row["girl_name"],)).fetchone()
+            eligible_now = (eligible_customer_points(c, customer, int(girl_row["list_price"] or 0))
+                            if callable(eligible_customer_points) else int(customer["points"] or 0))
+            if eligible_now < 1000:
+                eligible_now = 0
+            available = max(0, min(int(row.get("points_available") or eligible_now), int(eligible_now)))
             max_usable = min(available, int(row["price"] or 0) // rate)
             used = max(0, min(int(requested_points or 0), max_usable))
             actual = max(0, int(row["price"] or 0) - used * rate)
-            girl_row = c.execute("SELECT id FROM girls WHERE name=?", (row["girl_name"],)).fetchone()
             order_id = int(create_or_update_order(c, {
                 "order_date": row["reserve_date"], "girl_id": int(girl_row["id"]) if girl_row else 0,
                 "girl_name": row["girl_name"], "service_time": f"{row['start_time']}-{row['end_time']}",
@@ -1604,7 +1609,11 @@ def register_telegram_booking(
                 return
             new_status = "已确认" if approve else "已拒绝"
             customer = link_telegram_customer(c, row) if approve else None
-            available_points = int(customer["points"] or 0) if customer else 0
+            girl = c.execute("SELECT list_price FROM girls WHERE name=?", (row.get('girl_name') or '',)).fetchone()
+            available_points = (eligible_customer_points(c, customer, int(girl['list_price'] or 0))
+                                if customer and callable(eligible_customer_points) else int(customer["points"] or 0) if customer else 0)
+            if available_points < 1000:
+                available_points = 0
             customer_id = int(customer["id"]) if customer else int(row.get("customer_id") or 0)
             c.execute("""UPDATE customer_reservations SET status=?,customer_id=?,points_available=?,
                          updated_at=CURRENT_TIMESTAMP WHERE id=?""",
@@ -3672,7 +3681,9 @@ def register_telegram_booking(
                                       c.total_recharge,c.recharge_balance,
                                       MAX(CASE WHEN COALESCE(o.points,0)>0 AND COALESCE(o.order_status,'') NOT LIKE '%取消%'
                                                THEN o.order_date ELSE NULL END) AS last_point_date,
-                                      EXISTS(SELECT 1 FROM recharge_records r WHERE r.customer_id=c.id AND COALESCE(r.amount,0)>0) AS has_recharge
+                                      EXISTS(SELECT 1 FROM recharge_records r WHERE r.customer_id=c.id AND COALESCE(r.amount,0)>0) AS has_recharge,
+                                      COALESCE((SELECT SUM(b.remaining_points) FROM customer_recharge_bonus_lots b
+                                                WHERE b.customer_id=c.id),0) AS permanent_bonus_points
                                FROM customers c
                                LEFT JOIN orders o ON o.customer_id=c.id
                                WHERE COALESCE(c.points,0)>1000
@@ -3680,10 +3691,12 @@ def register_telegram_booking(
         alerts = []
         for row in candidates:
             item = dict(row)
-            # 充值客户的赠送积分永久有效，不参与任何到期警报。
-            permanent = (int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
-                         or int(item.get('recharge_balance') or 0)>0)
-            if permanent or not item.get('last_point_date'):
+            permanent_bonus = min(max(0, int(item.get('points') or 0)), max(0, int(item.get('permanent_bonus_points') or 0)))
+            ordinary_points = max(0, int(item.get('points') or 0) - permanent_bonus)
+            # 历史充值没有分桶，继续保护原数据；新固定档充值已分桶，只保护赠送部分。
+            legacy_recharge = bool((int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
+                                    or int(item.get('recharge_balance') or 0)>0) and permanent_bonus == 0)
+            if legacy_recharge or ordinary_points <= 1000 or not item.get('last_point_date'):
                 continue
             try:
                 expiry = datetime.strptime(str(item['last_point_date'])[:10], '%Y-%m-%d').date() + timedelta(days=30)
@@ -3693,6 +3706,7 @@ def register_telegram_booking(
             if 1 <= days_left <= 5:
                 item['days_left'] = days_left
                 item['expiry_date'] = expiry.isoformat()
+                item['points'] = ordinary_points
                 alerts.append(item)
         return alerts
 
@@ -3708,6 +3722,8 @@ def register_telegram_booking(
                 MAX(CASE WHEN COALESCE(o.points,0)>0 AND COALESCE(o.order_status,'') NOT LIKE '%取消%'
                          THEN o.order_date ELSE NULL END) AS last_point_date,
                 EXISTS(SELECT 1 FROM recharge_records r WHERE r.customer_id=c.id AND COALESCE(r.amount,0)>0) AS has_recharge,
+                COALESCE((SELECT SUM(b.remaining_points) FROM customer_recharge_bonus_lots b
+                          WHERE b.customer_id=c.id),0) AS permanent_bonus_points,
                 (SELECT balance_after FROM customer_ledger l WHERE l.customer_id=c.id AND l.account_type='points'
                  ORDER BY l.id DESC LIMIT 1) AS ledger_balance
                 FROM customers c LEFT JOIN orders o ON o.customer_id=c.id
@@ -3715,15 +3731,17 @@ def register_telegram_booking(
             for source in candidates:
                 item = dict(source)
                 points = int(item.get('points') or 0)
-                permanent_legacy = (int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
-                                    or int(item.get('recharge_balance') or 0)>0)
+                permanent_bonus = min(max(0, points), max(0, int(item.get('permanent_bonus_points') or 0)))
+                ordinary_points = max(0, points - permanent_bonus)
+                permanent_legacy = bool((int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
+                                         or int(item.get('recharge_balance') or 0)>0) and permanent_bonus == 0)
                 expiry = None
                 if item.get('last_point_date'):
                     try:
                         expiry = datetime.strptime(str(item['last_point_date'])[:10], '%Y-%m-%d').date() + timedelta(days=30)
                     except Exception:
                         expiry = None
-                if points > 0 and expiry and expiry <= day and not permanent_legacy:
+                if ordinary_points > 0 and expiry and expiry <= day and not permanent_legacy:
                     expiry_text = expiry.isoformat()
                     existing = c.execute("SELECT 1 FROM telegram_point_expiry_events WHERE customer_id=? AND expiry_date=?",
                                          (int(item['id']), expiry_text)).fetchone()
@@ -3731,19 +3749,19 @@ def register_telegram_booking(
                         key = f"expiry:{int(item['id'])}:{expiry_text}"
                         c.execute("""INSERT OR IGNORE INTO customer_ledger(
                             customer_id,customer_no,account_type,transaction_type,amount,balance_after,
-                            reason,idempotency_key,actor_name) VALUES(?,?,'points','到期清空',?,0,?,?, 'system')""",
-                                  (int(item['id']), str(item.get('customer_no') or ''), -points,
+                            reason,idempotency_key,actor_name) VALUES(?,?,'points','到期清空',?,?,?,?, 'system')""",
+                                  (int(item['id']), str(item.get('customer_no') or ''), -ordinary_points, permanent_bonus,
                                    f'普通积分超过30天自动清空（到期日 {expiry_text}）', key))
                         c.execute("""INSERT INTO points_records(customer_id,customer_no,change_points,reason,remark)
                             VALUES(?,?,?,'到期清空',?)""",
-                                  (int(item['id']), str(item.get('customer_no') or ''), -points,
+                                  (int(item['id']), str(item.get('customer_no') or ''), -ordinary_points,
                                    f'普通积分超过30天，到期日 {expiry_text}'))
-                        c.execute("UPDATE customers SET points=0,updated_at=CURRENT_TIMESTAMP WHERE id=?", (int(item['id']),))
+                        c.execute("UPDATE customers SET points=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (permanent_bonus, int(item['id'])))
                         c.execute("""INSERT INTO telegram_point_expiry_events(
                             customer_id,customer_no,expiry_date,points_cleared,balance_before,reason)
                             VALUES(?,?,?,?,?,'普通积分超过30天自动清空')""",
-                                  (int(item['id']), str(item.get('customer_no') or ''), expiry_text, points, points))
-                        item.update(points_cleared=points, expiry_date=expiry_text)
+                                  (int(item['id']), str(item.get('customer_no') or ''), expiry_text, ordinary_points, points))
+                        item.update(points_cleared=ordinary_points, expiry_date=expiry_text, points=permanent_bonus)
                         cleared.append(item)
                     continue
                 reasons = []

@@ -228,13 +228,29 @@ def _init_db_schema():
             idempotency_key TEXT NOT NULL UNIQUE, actor_name TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer ON customer_ledger(customer_id,account_type,id)")
+        c.execute("""CREATE TABLE IF NOT EXISTS customer_recharge_bonus_lots(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, customer_no TEXT DEFAULT '',
+            recharge_amount INTEGER NOT NULL, granted_points INTEGER NOT NULL, remaining_points INTEGER NOT NULL,
+            max_girl_hourly_price INTEGER DEFAULT 0, vip_only INTEGER DEFAULT 0,
+            recharge_ledger_id INTEGER DEFAULT 0, point_ledger_id INTEGER DEFAULT 0,
+            request_id TEXT DEFAULT '', created_by TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        recharge_bonus_cols = [r[1] for r in c.execute('PRAGMA table_info(customer_recharge_bonus_lots)').fetchall()]
+        if 'request_id' not in recharge_bonus_cols:
+            c.execute("ALTER TABLE customer_recharge_bonus_lots ADD COLUMN request_id TEXT DEFAULT ''")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_recharge_bonus_customer ON customer_recharge_bonus_lots(customer_id,remaining_points,id)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_recharge_bonus_request ON customer_recharge_bonus_lots(request_id) WHERE request_id<>''")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_membership_history(
             id INTEGER PRIMARY KEY AUTOINCREMENT,customer_id INTEGER NOT NULL,membership_type TEXT NOT NULL,
             action TEXT NOT NULL,period TEXT DEFAULT '',reason TEXT DEFAULT '',actor_name TEXT DEFAULT '',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(customer_id,membership_type,action,period))""")
         c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('ledger_enabled','1')")
-        c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('point_rate_bps','500')")
+        c.execute("INSERT OR IGNORE INTO financial_settings(setting_key,setting_value) VALUES('point_rate_bps','400')")
+        # 2026-09 新规则：仅把仍为旧系统默认 5% 的环境迁移为 4%；人工设置过的其他比例不覆盖。
+        if not c.execute("SELECT 1 FROM financial_settings WHERE setting_key='loyalty_4pct_migrated'").fetchone():
+            c.execute("UPDATE financial_settings SET setting_value='400',updated_by='system',updated_at=CURRENT_TIMESTAMP WHERE setting_key='point_rate_bps' AND setting_value='500'")
+            c.execute("INSERT INTO financial_settings(setting_key,setting_value,updated_by) VALUES('loyalty_4pct_migrated','1','system')")
         c.execute("""CREATE TABLE IF NOT EXISTS enum_values(id INTEGER PRIMARY KEY AUTOINCREMENT, enum_type TEXT NOT NULL, value TEXT NOT NULL, sort_order INTEGER DEFAULT 0, UNIQUE(enum_type,value))""")
         c.execute("""CREATE TABLE IF NOT EXISTS girl_schedules(id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_date TEXT, girl_id INTEGER, girl_name TEXT, start_time TEXT, end_time TEXT, price INTEGER DEFAULT 0, status TEXT DEFAULT '出勤', note TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("""CREATE TABLE IF NOT EXISTS hotel_rooms(
@@ -3496,9 +3512,74 @@ def ledger_enabled(c):
 
 def point_rate_bps(c):
     try:
-        return min(2000, max(0, int(financial_setting(c, 'point_rate_bps', '500'))))
+        return min(2000, max(0, int(financial_setting(c, 'point_rate_bps', '400'))))
     except Exception:
-        return 500
+        return 400
+
+RECHARGE_TIERS = {
+    30000: {'bonus_points': 500, 'max_girl_hourly_price': 20000, 'vip_only': False},
+    50000: {'bonus_points': 1500, 'max_girl_hourly_price': 20000, 'vip_only': False},
+    100000: {'bonus_points': 5000, 'max_girl_hourly_price': 20000, 'vip_only': False},
+    150000: {'bonus_points': 8000, 'max_girl_hourly_price': 0, 'vip_only': False},
+    200000: {'bonus_points': 15000, 'max_girl_hourly_price': 0, 'vip_only': True},
+}
+
+def recharge_tier_payload():
+    return [dict(recharge_amount=amount, **rule) for amount, rule in RECHARGE_TIERS.items()]
+
+def customer_is_vip(customer):
+    text = str(customer.get('customer_type') if hasattr(customer, 'get') else customer['customer_type'] or '').upper()
+    return ('VIP' in text or int(customer['vip_active'] or 0) != 0
+            or int(customer['svip_active'] or 0) != 0
+            or int(customer['vip_current'] or 0) != 0 or int(customer['svip_current'] or 0) != 0)
+
+def recharge_bonus_totals(c, customer_id, girl_hourly_price=0):
+    """Return permanent recharge bonus totals without rewriting legacy point balances."""
+    lots = c.execute("""SELECT * FROM customer_recharge_bonus_lots
+                        WHERE customer_id=? AND remaining_points>0 ORDER BY id""",
+                     (int(customer_id),)).fetchall()
+    total = sum(max(0, int(row['remaining_points'] or 0)) for row in lots)
+    price = max(0, int(girl_hourly_price or 0))
+    eligible = sum(max(0, int(row['remaining_points'] or 0)) for row in lots
+                   if not int(row['max_girl_hourly_price'] or 0)
+                   or price <= int(row['max_girl_hourly_price'] or 0))
+    return total, eligible
+
+def eligible_customer_points(c, customer, girl_hourly_price=0):
+    """Ordinary points are unrestricted; only fixed-tier recharge bonuses carry girl-price limits."""
+    current = max(0, int(customer['points'] or 0))
+    bonus_total, eligible_bonus = recharge_bonus_totals(c, customer['id'], girl_hourly_price)
+    ordinary = max(0, current - bonus_total)
+    return min(current, ordinary + eligible_bonus)
+
+def consume_recharge_bonus_lots(c, customer_id, points_to_use, girl_hourly_price=0):
+    """Consume eligible permanent bonus lots only after ordinary points have been used first."""
+    total_bonus, eligible_bonus = recharge_bonus_totals(c, customer_id, girl_hourly_price)
+    customer = c.execute('SELECT points FROM customers WHERE id=?', (int(customer_id),)).fetchone()
+    current = max(0, int(customer['points'] or 0)) if customer else 0
+    ordinary = max(0, current - total_bonus)
+    remaining = max(0, int(points_to_use or 0) - ordinary)
+    if not remaining:
+        return 0
+    used = 0
+    lots = c.execute("""SELECT * FROM customer_recharge_bonus_lots
+                        WHERE customer_id=? AND remaining_points>0 ORDER BY id""",
+                     (int(customer_id),)).fetchall()
+    for lot in lots:
+        cap = int(lot['max_girl_hourly_price'] or 0)
+        if cap and int(girl_hourly_price or 0) > cap:
+            continue
+        take = min(remaining, max(0, int(lot['remaining_points'] or 0)))
+        if not take:
+            continue
+        c.execute("""UPDATE customer_recharge_bonus_lots
+                     SET remaining_points=remaining_points-?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (take, int(lot['id'])))
+        remaining -= take
+        used += take
+        if not remaining:
+            break
+    return used
 
 def ensure_customer_ledger_opening(c, customer, account_type):
     cid = int(customer['id'])
@@ -3581,22 +3662,31 @@ def create_or_update_order(c,d):
     prof = round_yen_1000_half_up(rec - th)
     cust = ensure_customer(c,d.get('customer_raw',''),d.get('remark',''))
     remark = str(d.get('remark') or '')
+    girl_hourly_price = max(0, int(g['list_price'] or 0))
     discount_requested = point_use_note_triggered(remark, d.get('remark2'), d.get('raw_text'))
     if d.get('id'):
         # 编辑旧订单只改订单资料，不再触碰客户当前积分，也不重复赠送/扣除。
         pts = old_order_points
         points_used = old_points_used
     elif discount_requested:
-        available = max(0, int(cust['points'] or 0))
-        pts = 500
-        points_used = available
-        remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
-        remark = f"{remark}｜积分抵扣金额：¥{available:,}"
+        available = eligible_customer_points(c, cust, girl_hourly_price)
+        if available >= 1000:
+            pts = 500
+            points_used = available
+            remark = re.sub(r'\s*[｜|]?\s*积分抵扣金额[：:]\s*¥?[\d,]+', '', remark).strip()
+            remark = f"{remark}｜积分抵扣金额：¥{available:,}"
+        else:
+            rate_bps = point_rate_bps(c) if ledger_enabled(c) else 500
+            pts = max(0, math.floor(rec * rate_bps / 10000))
+            points_used = 0
+            remark = f"{remark}｜可用积分不足1000，本单未抵扣"
     else:
         rate_bps = point_rate_bps(c) if ledger_enabled(c) else 500
         pts = max(0, math.floor(rec * rate_bps / 10000))
         requested_points = max(0, int(d.get('points_used') or 0))
-        available = max(0, int(cust['points'] or 0))
+        available = eligible_customer_points(c, cust, girl_hourly_price)
+        if available < 1000:
+            available = 0
         points_used = min(requested_points, available)
     auto_payment = detect_payment_method_from_note(d.get('remark',''), d.get('remark2',''), d.get('raw_text',''))
     payment_method = auto_payment or (d.get('payment_method') or '现金')
@@ -3619,6 +3709,7 @@ def create_or_update_order(c,d):
                                    f'订单 #{predicted_order_id} 自动累计积分', predicted_order_id,
                                    f'order:{predicted_order_id}:points:earn', 'system')
         if points_used:
+            consume_recharge_bonus_lots(c, cust['id'], points_used, girl_hourly_price)
             append_customer_ledger(c, cust, 'points', '订单抵扣', -int(points_used),
                                    f'订单 #{predicted_order_id} 使用积分', predicted_order_id,
                                    f'order:{predicted_order_id}:points:redeem', 'system')
@@ -3804,7 +3895,9 @@ def api_customer_ledger():
             return jsonify(ok=True, customer=dict(customer), entries=entries,
                            membership_history=membership_history,
                            settings={'enabled': ledger_enabled(c), 'point_rate_bps': point_rate_bps(c),
-                                     'point_rate_percent': point_rate_bps(c) / 100})
+                                     'point_rate_percent': point_rate_bps(c) / 100},
+                           recharge_tiers=recharge_tier_payload(),
+                           permanent_bonus_points=recharge_bonus_totals(c, customer_id)[0])
 
     d = request.get_json(silent=True) or {}
     customer_id = int(d.get('customer_id') or 0)
@@ -3837,6 +3930,8 @@ def api_customer_ledger():
         if entry is None:
             return jsonify(ok=False, error='新账本已关闭，请由老板开启后再操作'), 409
         new_balance = int(entry['balance_after'])
+        if account_type == 'points' and delta < 0:
+            consume_recharge_bonus_lots(c, customer_id, amount, 0)
         c.execute(f'UPDATE customers SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
                   (new_balance, customer_id))
         if account_type == 'points':
@@ -3852,6 +3947,69 @@ def api_customer_ledger():
                           (amount, customer_id))
         updated = dict(c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone())
     return jsonify(ok=True, customer=updated, entry=entry)
+
+
+@app.route('/api/customer_ledger/recharge-tier', methods=['POST'])
+def api_customer_recharge_tier():
+    """Apply one fixed recharge package atomically; retries with the same request_id are idempotent."""
+    d = request.get_json(silent=True) or {}
+    customer_id = int(d.get('customer_id') or 0)
+    recharge_amount = int(d.get('recharge_amount') or 0)
+    payment_method = str(d.get('payment_method') or '现金').strip()
+    reason = str(d.get('reason') or '').strip() or f'固定档充值 ¥{recharge_amount:,}'
+    request_id = str(d.get('request_id') or '').strip()
+    tier = RECHARGE_TIERS.get(recharge_amount)
+    if not customer_id or not tier:
+        return jsonify(ok=False, error='请选择系统提供的固定充值档位'), 400
+    if not request_id:
+        return jsonify(ok=False, error='缺少请求编号，请刷新后重试'), 400
+    with conn() as c:
+        existing = c.execute('SELECT * FROM customer_recharge_bonus_lots WHERE request_id=?',
+                             (request_id,)).fetchone()
+        if existing:
+            customer = dict(c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone())
+            return jsonify(ok=True, duplicate=True, customer=customer, bonus_lot=dict(existing))
+        customer = c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
+        if not customer:
+            return jsonify(ok=False, error='客户不存在'), 404
+        if tier['vip_only'] and not customer_is_vip(customer):
+            return jsonify(ok=False, error='¥200,000档仅限VIP或SVIP客户使用'), 403
+        actor = str(current_session_info().get('username') or '')
+        ensure_customer_ledger_opening(c, customer, 'recharge')
+        ensure_customer_ledger_opening(c, customer, 'points')
+        recharge_entry = append_customer_ledger(
+            c, customer, 'recharge', '充值', recharge_amount, reason, 0,
+            f'{request_id}:recharge', actor)
+        point_entry = append_customer_ledger(
+            c, customer, 'points', '充值永久赠送', int(tier['bonus_points']),
+            f"充值 ¥{recharge_amount:,} 永久赠送 {int(tier['bonus_points']):,} 积分", 0,
+            f'{request_id}:bonus', actor)
+        if recharge_entry is None or point_entry is None:
+            return jsonify(ok=False, error='积分账本未开启，固定档充值没有执行'), 409
+        new_balance = max(0, int(customer['recharge_balance'] or 0) + recharge_amount)
+        new_points = max(0, int(customer['points'] or 0) + int(tier['bonus_points']))
+        c.execute("""UPDATE customers SET recharge_balance=?,points=?,
+                     total_recharge=COALESCE(total_recharge,0)+?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (new_balance, new_points, recharge_amount, customer_id))
+        c.execute("""INSERT INTO recharge_records(customer_id,customer_no,amount,payment_method,remark)
+                     VALUES(?,?,?,?,?)""",
+                  (customer_id, customer['customer_no'], recharge_amount, payment_method, reason))
+        c.execute("""INSERT INTO points_records(customer_id,customer_no,change_points,reason,remark)
+                     VALUES(?,?,?,?,?)""",
+                  (customer_id, customer['customer_no'], int(tier['bonus_points']), '充值永久赠送', reason))
+        cur = c.execute("""INSERT INTO customer_recharge_bonus_lots(
+            customer_id,customer_no,recharge_amount,granted_points,remaining_points,
+            max_girl_hourly_price,vip_only,recharge_ledger_id,point_ledger_id,request_id,created_by)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            (customer_id, customer['customer_no'], recharge_amount, int(tier['bonus_points']),
+             int(tier['bonus_points']), int(tier['max_girl_hourly_price']),
+             1 if tier['vip_only'] else 0, int(recharge_entry['id']), int(point_entry['id']),
+             request_id, actor))
+        updated = dict(c.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone())
+        lot = dict(c.execute('SELECT * FROM customer_recharge_bonus_lots WHERE id=?',
+                             (cur.lastrowid,)).fetchone())
+    return jsonify(ok=True, duplicate=False, customer=updated, bonus_lot=lot,
+                   tier=dict(recharge_amount=recharge_amount, **tier))
 
 
 @app.route('/api/customer_membership', methods=['POST'])
@@ -6189,6 +6347,7 @@ register_telegram_booking(
     order_to_chain_line=order_to_chain_line,
     ensure_customer=ensure_customer,
     refresh_customer_totals=refresh_customer_totals,
+    eligible_customer_points=eligible_customer_points,
     sync_wordpress_attendance=sync_alice_wordpress_attendance,
     parse_chain_header=parse_header,
 )
