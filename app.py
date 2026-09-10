@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v143_table_scroll_and_point_cleanup"
+APP_VERSION = "v144_floating_table_scrollbar"
 
 @app.after_request
 def compress_large_json(response):
