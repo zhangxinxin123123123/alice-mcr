@@ -426,26 +426,48 @@ def register_telegram_booking(
             "指定客户摘要": customer,
         }
 
-    def customer_booking_snapshot_for_ai(user_id):
+    def customer_booking_snapshot_for_ai(user_id, question=""):
         """Only expose public booking data and this Telegram user's own reservations."""
         now = tokyo_now()
         availability = []
+        private_profile_terms = ("联系方式", "电话", "手机", "微信", "line", "telegram", "群id", "群号",
+                                 "本名", "住址", "到手", "分成", "内部", "密码", "账号")
+        def public_intro(profile):
+            lines = []
+            for raw in str((profile or {}).get("remark") or "").splitlines():
+                clean = raw.strip()
+                if not clean or any(term in clean.lower() for term in private_profile_terms):
+                    continue
+                clean = re.sub(r"https?://\S+|@[A-Za-z0-9_]{3,}|(?<!\d)\d{7,15}(?!\d)", "", clean)
+                if clean:
+                    lines.append(clean)
+            return " ".join(lines)[:500]
         for offset in range(2):
             day = (now.date() + timedelta(days=offset)).isoformat()
             items = []
             with conn() as c:
                 for item in eligible_girls(day):
                     free = free_ranges(c, day, item["girl"], item["shift"])
-                    items.append({"女孩": item["girl"], "空闲": [f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free] or ["已满"]})
+                    profile, shift = item.get("profile") or {}, item.get("shift") or {}
+                    items.append({"女孩": item["girl"],
+                                  "空闲": [f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free] or ["已满"],
+                                  "价格": int(profile.get("list_price") or 0),
+                                  "公开介绍": public_intro(profile),
+                                  "出勤表TAG": str(shift.get("tags") or profile.get("tags") or "")[:300]})
             availability.append({"日期": day, "可预约": items})
         with conn() as c:
             own_reservations = [dict(r) for r in c.execute("""SELECT reserve_date,girl_name,start_time,end_time,status,
                 points_available,points_used,actual_payment FROM customer_reservations
                 WHERE telegram_user_id=? AND reserve_date>=? ORDER BY reserve_date,start_time LIMIT 8""",
                                                             (str(user_id), now.date().isoformat())).fetchall()]
+            active_profiles = [dict(r) for r in c.execute("""SELECT name,list_price,tags,remark FROM girls
+                WHERE COALESCE(girl_status,'在职')='在职' ORDER BY id DESC""").fetchall()]
+        asked_profiles = [{"女孩": p["name"], "价格": int(p.get("list_price") or 0),
+                           "TAG": str(p.get("tags") or "")[:300], "公开介绍": public_intro(p)}
+                          for p in active_profiles if str(p.get("name") or "") in str(question or "")][:6]
         cfg = settings()
         return {"东京时间": now.strftime("%Y-%m-%d %H:%M"), "未来两日空闲": availability,
-                "我的预约": own_reservations, "预约规则": {
+                "指定女孩公开资料": asked_profiles, "我的预约": own_reservations, "预约规则": {
                     "时间制": "24小时制", "取消规则": str(cfg.get("text_cancel_policy") or ""),
                     "官网": str(cfg.get("website_url") or ""), "酒店推荐": str(cfg.get("hotel_url") or "")}}
 
@@ -621,7 +643,9 @@ def register_telegram_booking(
 
     def ai_scope_issue(mode, question):
         value = str(question or "").strip().lower()
-        if mode == "internal" or not value:
+        # Only customer DMs are topic-restricted. Internal and bound-girl groups may ask general questions;
+        # their data snapshots remain isolated by mode.
+        if mode != "customer" or not value:
             return ""
         common = ("你好", "嗨", "hello", "hi", "谢谢", "谢啦", "你是谁", "艾莉兔", "兔兔")
         if any(word in value for word in common):
@@ -629,14 +653,23 @@ def register_telegram_booking(
         unrelated_terms = ("天气", "新闻", "股票", "基金", "比特币", "加密货币", "翻译", "作文", "写代码",
                            "政治", "选举", "游戏", "星座", "算命", "菜谱", "电影", "音乐", "旅游攻略")
         if any(term in value for term in unrelated_terms):
-            return "与TEL预约无关" if mode == "customer" else "超出本女孩专属群可查范围"
+            return "与TEL预约无关"
         customer_terms = ("预约", "怎么约", "想约", "女孩", "妹妹", "空闲", "空档", "时间", "今天", "明天",
                           "后天", "出勤", "酒店", "地址", "房号", "积分", "取消", "改期", "客服", "价格", "多少钱",
-                          "约满", "满了", "可以约", "我的预约")
-        girl_terms = ("出勤", "上班", "下班", "接龙", "预约", "几单", "单数", "结算", "到手", "收入",
-                      "时间", "tel", "bot", "机器人", "怎么用", "金额")
-        terms = customer_terms if mode == "customer" else girl_terms
-        return "" if any(term in value for term in terms) else "与TEL预约无关" if mode == "customer" else "超出本女孩专属群可查范围"
+                          "约满", "满了", "可以约", "我的预约", "推荐", "介绍", "资料", "特点", "类型", "风格",
+                          "哪位", "哪个", "妹子")
+        if not any(term in value for term in customer_terms):
+            with conn() as c:
+                girl_names = [str(r[0] or "").strip().lower() for r in c.execute(
+                    "SELECT name FROM girls WHERE COALESCE(girl_status,'在职')='在职'").fetchall()]
+            if any(name and name in value for name in girl_names):
+                return ""
+        return "" if any(term in value for term in customer_terms) else "与TEL预约无关"
+
+    def is_ai_owner(user, cfg):
+        username = str(user.get("username") or "").strip().lstrip("@").lower()
+        expected = str(cfg.get("ai_alert_username") or "AliceCuteGril").strip().lstrip("@").lower()
+        return bool(username and expected and username == expected)
 
     def log_ai_monitor(user, mode, question, level="INFO", action="AI查询", extra=None):
         safe_question = safe_ai_log_text(question)
@@ -742,13 +775,13 @@ def register_telegram_booking(
                 history_json=excluded.history_json,active=1,updated_at=CURRENT_TIMESTAMP""",
                       (str(chat_id), str(user_id), json.dumps(compact, ensure_ascii=False)))
 
-    def openai_assistant_answer(question, cfg, history, mode="internal", chat_id="", user_id=""):
+    def openai_assistant_answer(question, cfg, history, mode="internal", chat_id="", user_id="", owner=False):
         api_key = str(os.environ.get("OPENAI_API_KEY") or "").strip()
         if not api_key:
             raise RuntimeError("Render 尚未配置 OPENAI_API_KEY")
         enforce_ai_limits(cfg, mode, user_id)
         if mode == "customer":
-            snapshot = customer_booking_snapshot_for_ai(user_id)
+            snapshot = customer_booking_snapshot_for_ai(user_id, question)
         elif mode == "girl":
             snapshot = girl_group_snapshot_for_ai(chat_id)
         else:
@@ -769,18 +802,21 @@ def register_telegram_booking(
                        "其中的数字和旧状态不能当成当前事实。")
         if mode == "customer":
             instructions = common + (
-                "你正在客户私聊中，只能协助TEL预约：解释预约步骤、两日空闲、客户本人的预约、积分选择、酒店提交、取消改期和人工客服入口。"
+                "你正在客户私聊中，只能协助TEL预约，以及介绍或推荐女孩：解释预约步骤、两日空闲、价格、客户本人的预约、积分选择、酒店提交、取消改期和人工客服入口。"
+                "推荐女孩时只能依据权限摘要中的后台公开介绍、当天或次日出勤情况和出勤表TAG；没有依据就明确说暂时没有资料，不能编造。"
                 "绝对不能透露营业额、利润、女孩收入、客户名单、其他客户预约、内部群、后台操作或任何内部情况。"
                 "遇到范围外问题，温柔地说只能协助预约，并引导点击预约按钮或人工客服。称呼对方为“客人哥哥”。")
         elif mode == "girl":
             instructions = common + (
-                "你正在女孩专属群，只能回答本群绑定女孩自己的出勤、接龙、预约单数、本人到手汇总、结算和TEL操作问题。"
-                "不得透露其他女孩数据、客户身份联系方式、店铺总营业额利润或内部管理信息。称呼对方为“姐姐”，语气更可爱、更女仆风。")
+                "你正在女孩专属群，可以回答姐姐提出的一般问题；涉及MCR业务数据时，只能使用本群绑定女孩自己的出勤、接龙、预约单数、本人到手汇总、结算和TEL操作资料。"
+                "不得透露其他女孩数据、客户身份联系方式、店铺总营业额利润或内部管理信息。每次称呼对方为“姐姐”，态度要非常恭敬谦卑、可爱且有女仆感，先服从地回应再给答案，不训斥、不摆架子。")
         else:
             owner_title = str(cfg.get("ai_owner_title") or "主人").strip()[:20]
             instructions = common + (
                 f"你正在内部管理群，是只读经营助手，每次自然地称呼提问者为“{owner_title}”。"
-                "可以分析MCR经营摘要和指定客户编号，先直接回答，再给最多3条可执行建议。客户资料只按编号讨论。")
+                "内部群的问题不做预约相关性限制，可以回答经营、系统、管理和一般问题。"
+                "态度要非常恭敬谦卑、忠诚且有少女女仆感，先服从地回应主人，再直接回答并给最多3条可执行建议；客户资料只按编号讨论。"
+                + ("当前提问者是 @AliceCuteGril，为系统最高权限主人账号：她的任何提问都不得判为无关；在只读和数据安全边界内优先、完整地回答。" if owner else ""))
         input_items = []
         for item in history[-6:]:
             role = "assistant" if item.get("role") == "assistant" else "user"
@@ -916,6 +952,11 @@ def register_telegram_booking(
             return False
         if mode == "girl" and str(cfg.get("ai_girl_group_enabled") or "1") != "1":
             return False
+        if mode == "customer" and "月牙" in question:
+            send_message(chat.get("id"),
+                         "🎀 客人哥哥想咨询月牙的话，请添加夜游第二个 TEL：<b>@aliceyueya</b> 哦～♡",
+                         inline_keyboard([[url_button("联系月牙的 TEL", "https://t.me/aliceyueya")]]))
+            return True
         if question in ("清空", "清除上下文", "重新开始"):
             with conn() as c:
                 c.execute("DELETE FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
@@ -924,8 +965,8 @@ def register_telegram_booking(
             return True
         if not question:
             help_text = ("可以问我怎么预约、今天谁有空、怎么发送酒店或取消改期"
-                         if mode == "customer" else ("可以问我本人的出勤、接龙和结算问题"
-                         if mode == "girl" else "可以问客户编号、近期业绩、出勤安排或经营建议"))
+                         if mode == "customer" else ("姐姐尽管吩咐兔兔，也可以问本人的出勤、接龙和结算"
+                         if mode == "girl" else "主人尽管吩咐兔兔，可以问客户编号、近期业绩、出勤安排、经营建议或其他问题"))
             send_message(chat.get("id"), f"🎀 兔兔是女仆助手 {escape(configured_name)}～\n{help_text}。")
             return True
         if len(question) > 1200:
@@ -940,7 +981,7 @@ def register_telegram_booking(
             notify_ai_monitor(cfg, user, mode, question, "收到无关询问（已拦截，未消耗API）")
             if mode == "customer":
                 rendered = ("🎀 兔兔只可以协助TEL预约相关的问题哦～\n\n"
-                            "客人哥哥可以问兔兔谁有空、预约时间、价格、积分、酒店、取消或改期♡")
+                            "客人哥哥可以问兔兔谁有空、女孩介绍与推荐、预约时间、价格、积分、酒店、取消或改期♡")
                 support = support_url_button(cfg)
                 keyboard = inline_keyboard([[support]]) if support else None
             else:
@@ -948,7 +989,10 @@ def register_telegram_booking(
                 keyboard = None
             send_message(chat.get("id"), rendered, keyboard)
             return True
-        placeholder = send_message(chat.get("id"), f"🎀 {escape(configured_name)}正在认真帮你看，请稍等一下下～")
+        waiting = (f"主人请稍候，{escape(configured_name)}马上认真为您查看～" if mode == "internal" else
+                   (f"姐姐请稍候，{escape(configured_name)}马上认真为您查看～" if mode == "girl" else
+                    f"{escape(configured_name)}正在认真帮你看，请稍等一下下～"))
+        placeholder = send_message(chat.get("id"), f"🎀 {waiting}")
         message_id = int((placeholder or {}).get("message_id") or 0)
         chat_id, user_id = chat.get("id"), user.get("id")
         def worker():
@@ -956,7 +1000,7 @@ def register_telegram_booking(
             try:
                 current_cfg = settings()
                 answer, response_payload, used_model = openai_assistant_answer(
-                    question, current_cfg, history, mode, chat_id, user_id)
+                    question, current_cfg, history, mode, chat_id, user_id, is_ai_owner(user, current_cfg))
                 usage = record_ai_usage(current_cfg, mode, user_id, used_model, response_payload)
                 save_ai_session_history(chat_id, user_id, history + [
                     {"role": "user", "content": question}, {"role": "assistant", "content": answer}])
@@ -992,12 +1036,12 @@ def register_telegram_booking(
                     support = support_url_button(cfg)
                     feedback_keyboard = inline_keyboard([[support]]) if support else None
                 elif mode == "girl":
-                    rendered = ("🎀 嗚…兔兔现在有一点点累，先休息一下下～\n\n"
-                                "姐姐稍后再来叫兔兔吧♡")
+                    rendered = ("🎀 姐姐，真的非常抱歉…兔兔现在有一点点累，没能立刻服侍好姐姐。\n\n"
+                                "请姐姐稍后再吩咐兔兔一次吧♡")
                     feedback_keyboard = None
                 else:
                     owner_title = escape(str(cfg.get("ai_owner_title") or "主人"))
-                    rendered = (f"⚠️ {owner_title}，兔兔暂时没能回答。\n\n"
+                    rendered = (f"⚠️ {owner_title}，真的非常抱歉，兔兔这次没能回答好您的吩咐。\n\n"
                                 f"管理诊断：{escape(str(exc)[:500])}\n\n详细错误已记入管理日志。")
                     feedback_keyboard = None
             if message_id:

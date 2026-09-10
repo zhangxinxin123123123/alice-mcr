@@ -164,6 +164,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
                                   "text": "/绑定审核群"}})
         self.webhook({"message": {"message_id": 2, "chat": girl_chat, "from": manager,
                                   "text": "/绑定女孩 娜娜子"}})
+        with self.app_module.conn() as c:
+            c.execute("UPDATE girls SET remark='温柔爱聊天',tags='服务系' WHERE name='娜娜子'")
+            c.execute("UPDATE pure_shifts SET tags='新人 服务系' WHERE girl_name='娜娜子' AND shift_date=?", (self.day,))
         captured = []
         old_urlopen = self.telegram_module.urlopen
 
@@ -190,10 +193,49 @@ class TelegramBookingFlowTest(unittest.TestCase):
         customer_body, girl_body = captured
         self.assertIn("客人哥哥", customer_body["instructions"])
         self.assertIn("只能协助TEL预约", customer_body["instructions"])
+        self.assertIn("推荐女孩时只能依据", customer_body["instructions"])
+        self.assertIn("温柔爱聊天", customer_body["input"][-1]["content"])
+        self.assertIn("新人 服务系", customer_body["input"][-1]["content"])
         self.assertNotIn("店铺收益", customer_body["input"][-1]["content"])
         self.assertIn("称呼对方为“姐姐”", girl_body["instructions"])
         self.assertIn("本群绑定女孩", girl_body["input"][-1]["content"])
         self.assertNotIn("客户身份", girl_body["input"][-1]["content"])
+
+    def test_owner_and_girl_general_questions_are_not_treated_as_out_of_scope(self):
+        internal = {"id": -90135, "type": "supergroup", "title": "Alice内部群"}
+        girl_chat = {"id": -90136, "type": "supergroup", "title": "娜娜子群"}
+        owner = {"id": 9135, "first_name": "主人", "username": "AliceCuteGril"}
+        girl = {"id": 9136, "first_name": "娜娜子"}
+        self.webhook({"message": {"message_id": 1, "chat": internal, "from": owner, "text": "/绑定审核群"}})
+        self.webhook({"message": {"message_id": 2, "chat": girl_chat, "from": owner, "text": "/绑定女孩 娜娜子"}})
+        captured = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_ai(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                captured.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output_text": "谨遵吩咐～"})
+            return old_urlopen(req, timeout=timeout)
+
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai
+        try:
+            self.webhook({"message": {"message_id": 3, "chat": internal, "from": owner,
+                                      "text": "兔兔 帮我写一首诗"}})
+            self.webhook({"message": {"message_id": 4, "chat": girl_chat, "from": girl,
+                                      "text": "兔兔 推荐一部电影"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        self.assertEqual(len(captured), 2)
+        self.assertIn("系统最高权限主人账号", captured[0]["instructions"])
+        self.assertIn("任何提问都不得判为无关", captured[0]["instructions"])
+        self.assertIn("非常恭敬谦卑", captured[0]["instructions"])
+        self.assertIn("可以回答姐姐提出的一般问题", captured[1]["instructions"])
+        self.assertIn("非常恭敬谦卑", captured[1]["instructions"])
 
     def test_alice_ai_feedback_teaching_usage_and_customer_continuation(self):
         internal = {"id": -90126, "type": "supergroup", "title": "Alice内部群"}
@@ -286,6 +328,13 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", edits[-1])
         self.assertNotIn("Render", edits[-1])
         self.assertNotIn("AI+%E6%B2%A1%E6%9C%89%E8%BF%94%E5%9B%9E", edits[-1])
+
+    def test_customer_asking_about_yueya_gets_second_tel_contact(self):
+        customer = {"id": 9137, "first_name": "客人"}
+        self.webhook({"message": {"message_id": 1, "chat": {"id": 9137, "type": "private"},
+                                  "from": customer, "text": "我想问月牙"}})
+        bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertTrue(any("aliceyueya" in body and "https%3A%2F%2Ft.me%2Faliceyueya" in body for body in bodies))
 
     def test_out_of_scope_ai_question_is_logged_alerted_and_costs_no_api_call(self):
         internal = {"id": -90131, "type": "supergroup", "title": "Alice内部群"}
