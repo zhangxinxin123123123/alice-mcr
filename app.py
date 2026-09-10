@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v139_ai_monitoring"
+APP_VERSION = "v141_separate_ai_audit"
 
 @app.after_request
 def compress_large_json(response):
@@ -168,6 +168,14 @@ def _init_db_schema():
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_created ON operation_logs(created_at,id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_actor ON operation_logs(actor_name,created_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_operation_logs_level ON operation_logs(log_level,created_at)")
+        c.execute("""CREATE TABLE IF NOT EXISTS telegram_ai_audit_logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_operation_log_id INTEGER UNIQUE,
+            actor_name TEXT DEFAULT '', user_id TEXT DEFAULT '', username TEXT DEFAULT '', mode TEXT DEFAULT '',
+            question TEXT DEFAULT '', action_name TEXT DEFAULT '', detail TEXT DEFAULT '',
+            response_status INTEGER DEFAULT 0, log_level TEXT DEFAULT 'INFO',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ai_audit_created ON telegram_ai_audit_logs(created_at,id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_ai_audit_mode_level ON telegram_ai_audit_logs(mode,log_level,created_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS customer_cleanup_archives(
             id INTEGER PRIMARY KEY AUTOINCREMENT, batch_id TEXT NOT NULL UNIQUE,
             actor_name TEXT DEFAULT '', reason TEXT DEFAULT '', customer_count INTEGER DEFAULT 0,
@@ -432,7 +440,8 @@ def required_module_for_api(path):
     if path == '/api/operation_logs/frontend':
         return None
     rules = [
-        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'operationAudit'), ('/api/telegram/', 'telegramBooking'),
+        ('/api/system/users', 'loginAudit'), ('/api/login_audit', 'loginAudit'), ('/api/operation_logs', 'operationAudit'),
+        ('/api/telegram/ai-audit-logs', 'operationAudit'), ('/api/telegram/', 'telegramBooking'),
         ('/api/settlements', 'settlement'), ('/api/orders/bulk_settle', 'settlement'),
         ('/api/customers', 'customers'), ('/api/girls', 'girls'), ('/api/girl_', 'girls'),
         ('/api/customer_ledger', 'customers'), ('/api/customer_membership', 'customers'),
@@ -619,6 +628,37 @@ def api_operation_logs():
         bps = point_rate_bps(c)
         loyalty = {'enabled': ledger_enabled(c), 'point_rate_bps': bps, 'point_rate_percent': bps / 100}
     return jsonify(ok=True, date=selected_date, logs=items, loyalty_settings=loyalty)
+
+
+@app.route('/api/telegram/ai-audit-logs', methods=['GET'])
+def api_telegram_ai_audit_logs():
+    session = current_session_info()
+    if current_role() != 'boss' and 'operationAudit' not in set(session.get('permissions') or []):
+        return jsonify(ok=False, error='当前账号没有管理日志权限'), 403
+    init_db()
+    selected_date = str(request.args.get('date') or tokyo_today_date())[:10]
+    limit = min(500, max(20, int(request.args.get('limit') or 200)))
+    mode = str(request.args.get('mode') or '').strip().lower()
+    level = str(request.args.get('level') or '').strip().upper()
+    query = str(request.args.get('q') or '').strip()
+    conditions = ["date(datetime(created_at,'+9 hours'))=?"]
+    values = [selected_date]
+    if mode in ('customer', 'girl', 'internal'):
+        conditions.append('mode=?')
+        values.append(mode)
+    if level in ('INFO', 'WARN', 'ERROR'):
+        conditions.append('log_level=?')
+        values.append(level)
+    if query:
+        conditions.append('(actor_name LIKE ? OR username LIKE ? OR question LIKE ? OR action_name LIKE ? OR detail LIKE ?)')
+        values.extend([f'%{query}%'] * 5)
+    values.append(limit)
+    with conn() as c:
+        items = rows(c.execute(f"""SELECT id,actor_name,user_id,username,mode,question,action_name,detail,
+            response_status,COALESCE(log_level,'INFO') AS log_level,
+            datetime(created_at,'+9 hours') AS created_at
+            FROM telegram_ai_audit_logs WHERE {' AND '.join(conditions)} ORDER BY id DESC LIMIT ?""", values).fetchall())
+    return jsonify(ok=True, date=selected_date, logs=items)
 
 
 @app.route('/api/operation_logs/frontend', methods=['POST'])

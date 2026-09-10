@@ -66,7 +66,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
-                          "telegram_ai_usage", "telegram_ai_budget_alerts"):
+                          "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -293,6 +293,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
         customer = {"id": 9132, "first_name": "客人"}
         self.webhook({"message": {"message_id": 1, "chat": internal, "from": manager,
                                   "text": "/绑定审核群"}})
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_settings SET setting_value='9199' WHERE setting_key='ai_alert_chat_id'")
         api_calls = []
         old_urlopen = self.telegram_module.urlopen
 
@@ -317,14 +319,24 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertEqual(api_calls, [])
         self.assertTrue(any(method == "sendMessage" and "%E5%85%94%E5%85%94" in body
                             for method, body in self.telegram_calls))
-        self.assertTrue(any(method == "sendMessage" and "-90131" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
+        self.assertTrue(any(method == "sendMessage" and "9199" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
                             for method, body in self.telegram_calls))
+        self.assertFalse(any(method == "sendMessage" and "-90131" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
+                             for method, body in self.telegram_calls))
         with self.app_module.conn() as c:
-            row = dict(c.execute("SELECT * FROM operation_logs ORDER BY id DESC LIMIT 1").fetchone())
+            row = dict(c.execute("SELECT * FROM telegram_ai_audit_logs ORDER BY id DESC LIMIT 1").fetchone())
+            mixed = c.execute("SELECT COUNT(*) FROM operation_logs WHERE target='alice_ai_assistant'").fetchone()[0]
         self.assertEqual(row["action_name"], "AI无关询问")
         self.assertEqual(row["log_level"], "WARN")
         self.assertIn("东京天气怎么样", row["detail"])
         self.assertIn('"openai_called": false', row["detail"])
+        self.assertEqual(mixed, 0)
+        boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
+        headers = {"X-Alice-Role": "boss", "X-Alice-Session": boss.json["session_token"], "X-Alice-User": "Star"}
+        listing = self.client.get("/api/telegram/ai-audit-logs", headers=headers,
+                                  query_string={"date": self.app_module.tokyo_today_date(), "mode": "customer"})
+        self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
+        self.assertTrue(any(x["question"] == "东京天气怎么样" for x in listing.json["logs"]))
 
     def test_tutu_alias_works_in_bound_girl_group(self):
         internal = {"id": -90133, "type": "supergroup", "title": "Alice内部群"}
@@ -355,6 +367,14 @@ class TelegramBookingFlowTest(unittest.TestCase):
             os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
         self.assertEqual(len(calls), 1)
         self.assertIn("称呼对方为“姐姐”", calls[0]["instructions"])
+
+    def test_ai_alert_username_message_remembers_private_chat_id(self):
+        self.webhook({"message": {"message_id": 1, "chat": {"id": 9199, "type": "private"},
+                                  "from": {"id": 9199, "first_name": "Alice", "username": "AliceCuteGril"},
+                                  "text": "/start"}})
+        with self.app_module.conn() as c:
+            stored = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='ai_alert_chat_id'").fetchone()[0]
+        self.assertEqual(stored, "9199")
 
     def test_complete_booking_approval_and_hotel_photo_flow(self):
         self.webhook({"message": {

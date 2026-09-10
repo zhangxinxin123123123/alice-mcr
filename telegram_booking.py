@@ -70,6 +70,8 @@ DEFAULT_SETTINGS = {
     "ai_girl_daily_limit": "40",
     "ai_teacher_user_ids": "",
     "ai_abnormal_alerts_enabled": "1",
+    "ai_alert_username": "AliceCuteGril",
+    "ai_alert_chat_id": "",
     "ai_block_out_of_scope": "1",
     "ai_single_token_warning": "8000",
 }
@@ -228,6 +230,14 @@ def register_telegram_booking(
                 id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
                 last_result TEXT DEFAULT '')""")
             c.execute("INSERT OR IGNORE INTO telegram_chain_sync_state(id) VALUES(1)")
+            c.execute("""INSERT OR IGNORE INTO telegram_ai_audit_logs(
+                source_operation_log_id,actor_name,mode,question,action_name,detail,response_status,log_level,created_at)
+                SELECT id,actor_name,
+                    CASE WHEN json_valid(detail) THEN COALESCE(json_extract(detail,'$.mode'),'') ELSE '' END,
+                    CASE WHEN json_valid(detail) THEN COALESCE(json_extract(detail,'$.question'),'') ELSE '' END,
+                    COALESCE(action_name,'AI查询'),detail,response_status,COALESCE(log_level,'INFO'),created_at
+                FROM operation_logs WHERE target='alice_ai_assistant'""")
+            c.execute("DELETE FROM operation_logs WHERE target='alice_ai_assistant'")
             for key, value in DEFAULT_SETTINGS.items():
                 c.execute("INSERT OR IGNORE INTO telegram_settings(setting_key,setting_value) VALUES(?,?)", (key, value))
             c.execute("""UPDATE telegram_settings SET setting_value='兔兔',updated_at=CURRENT_TIMESTAMP
@@ -621,34 +631,57 @@ def register_telegram_booking(
         return "" if any(term in value for term in terms) else "与TEL预约无关" if mode == "customer" else "超出本女孩专属群可查范围"
 
     def log_ai_monitor(user, mode, question, level="INFO", action="AI查询", extra=None):
-        detail = {"action": action, "mode": mode, "question": safe_ai_log_text(question)}
+        safe_question = safe_ai_log_text(question)
+        detail = {"action": action, "mode": mode, "question": safe_question}
         if extra:
             detail.update(extra)
         try:
             with conn() as c:
-                c.execute("""INSERT INTO operation_logs(actor_name,actor_role,method,target,detail,
-                    response_status,log_level,action_name) VALUES(?,?,?,?,?,?,?,?)""",
-                          (display_name(user), "telegram_" + str(mode), "TELEGRAM", "alice_ai_assistant",
-                           json.dumps(detail, ensure_ascii=False), 200 if level != "ERROR" else 500,
-                           level, action))
+                c.execute("""INSERT INTO telegram_ai_audit_logs(
+                    actor_name,user_id,username,mode,question,action_name,detail,response_status,log_level)
+                    VALUES(?,?,?,?,?,?,?,?,?)""",
+                          (display_name(user), str(user.get("id") or ""), str(user.get("username") or ""),
+                           str(mode), safe_question, action, json.dumps(detail, ensure_ascii=False),
+                           200 if level != "ERROR" else 500, level))
         except Exception:
             pass
 
     def notify_ai_monitor(cfg, user, mode, question, reason, level="WARN"):
         if str(cfg.get("ai_abnormal_alerts_enabled") or "1") != "1":
             return
-        internal_id = str(cfg.get("default_review_chat_id") or "")
-        if not valid_group_chat_id(internal_id):
+        alert_chat_id = str(cfg.get("ai_alert_chat_id") or "").strip()
+        alert_username = str(cfg.get("ai_alert_username") or "AliceCuteGril").strip().lstrip("@")
+        if not alert_chat_id and alert_username:
+            with conn() as c:
+                target = c.execute("""SELECT user_id FROM telegram_managers
+                    WHERE lower(username)=lower(?) AND active=1 ORDER BY updated_at DESC LIMIT 1""",
+                                   (alert_username,)).fetchone()
+            alert_chat_id = str(target["user_id"] or "") if target else ""
+        try:
+            if not alert_chat_id or not int(alert_chat_id):
+                return
+        except (TypeError, ValueError):
             return
         try:
             icon = "⛔" if level == "ERROR" else "⚠️"
-            send_message(internal_id,
+            send_message(alert_chat_id,
                          f"{icon} <b>兔兔{escape(reason)}</b>\n"
                          f"场景：{escape(str(mode))}｜用户：{escape(display_name(user))}\n"
-                         f"询问：{escape(safe_ai_log_text(question))}",
-                         thread_id=int(cfg.get("default_review_thread_id") or 0))
+                         f"询问：{escape(safe_ai_log_text(question))}")
         except Exception:
             pass
+
+    def remember_ai_alert_target(user):
+        username = str(user.get("username") or "").strip().lstrip("@")
+        user_id = str(user.get("id") or "").strip()
+        cfg = settings()
+        expected = str(cfg.get("ai_alert_username") or "AliceCuteGril").strip().lstrip("@")
+        if not username or not user_id or username.lower() != expected.lower():
+            return
+        with conn() as c:
+            c.execute("""INSERT INTO telegram_settings(setting_key,setting_value,updated_at)
+                VALUES('ai_alert_chat_id',?,CURRENT_TIMESTAMP) ON CONFLICT(setting_key) DO UPDATE SET
+                setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP""", (user_id,))
 
     def ai_usage_anomaly(cfg, mode, user_id, usage):
         reasons = []
@@ -2762,6 +2795,8 @@ def register_telegram_booking(
     def handle_message(message, edited=False):
         chat, user = message.get("chat") or {}, message.get("from") or {}
         text = str(message.get("text") or "")
+        if not edited:
+            remember_ai_alert_target(user)
         expire_attendance_inquiries()
         if not edited and handle_customer_name_review_reply(message):
             return
@@ -3106,7 +3141,14 @@ def register_telegram_booking(
             if "ai_budget_action" in data and str(data.get("ai_budget_action") or "warn") not in ("warn", "block"):
                 return jsonify(ok=False, error="AI 费用策略无效"), 400
             allowed = set(DEFAULT_SETTINGS)
+            allowed.discard("ai_alert_chat_id")
             with conn() as c:
+                if "ai_alert_username" in data:
+                    old_target = c.execute("SELECT setting_value FROM telegram_settings WHERE setting_key='ai_alert_username'").fetchone()
+                    old_username = str(old_target[0] or "").strip().lstrip("@") if old_target else ""
+                    new_username = str(data.get("ai_alert_username") or "").strip().lstrip("@")
+                    if old_username.lower() != new_username.lower():
+                        c.execute("UPDATE telegram_settings SET setting_value='',updated_at=CURRENT_TIMESTAMP WHERE setting_key='ai_alert_chat_id'")
                 for key in allowed:
                     if key in data:
                         value = "1" if key == "booking_enabled" and bool(data[key]) else ("0" if key == "booking_enabled" else str(data[key] or ""))

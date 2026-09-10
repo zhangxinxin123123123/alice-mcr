@@ -476,7 +476,8 @@ body:not(.role-boss) .boss-only{display:none!important}
     <label class="small">每日费用预警（USD）<br><input id="tgAiDailyBudget" type="number" min="0" step="0.1"></label>
     <label class="small">每月费用预警（USD）<br><input id="tgAiMonthlyBudget" type="number" min="0" step="1"></label>
     <select id="tgAiBudgetAction"><option value="warn">达到后提醒，继续回答</option><option value="block">达到后提醒并暂停回答</option></select>
-    <select id="tgAiAbnormalAlerts"><option value="1">异常调用通知内部群</option><option value="0">异常调用只记日志</option></select>
+    <select id="tgAiAbnormalAlerts"><option value="1">异常调用私聊提醒</option><option value="0">异常调用只记日志</option></select>
+    <input id="tgAiAlertUsername" placeholder="提醒账号，例如 @AliceCuteGril">
     <select id="tgAiBlockOutOfScope"><option value="1">拦截无关问题（节省费用）</option><option value="0">无关问题也调用 AI</option></select>
     <label class="small">单次 Token 预警线<br><input id="tgAiSingleTokenWarning" type="number" min="1000" max="100000" step="500"></label>
     <input id="tgAiTeacherIds" placeholder="允许教学的 Telegram ID，逗号分隔；留空=群管理员">
@@ -494,6 +495,12 @@ body:not(.role-boss) .boss-only{display:none!important}
    <button class="primary" onclick="addAiTeaching()">保存教学</button>
    <div id="aiTeachingSummary" class="note"></div><div id="aiTeachingRecords"></div>
   </div>
+  <details class="card" id="aiAuditPanel" ontoggle="if(this.open)loadAiAuditLogs().catch(console.error)">
+   <summary><b>🐰 兔兔调用日志</b>（点击展开查询）</summary>
+   <p class="note">与普通管理日志分开保存。记录客户、女孩和内部群对兔兔的询问、是否调用模型、Token、估算费用和异常原因。</p>
+   <div class="form log-filters"><input id="aiLogDate" type="date" onchange="loadAiAuditLogs()"><select id="aiLogMode" onchange="loadAiAuditLogs()"><option value="">全部场景</option><option value="customer">客户私聊</option><option value="girl">女孩专属群</option><option value="internal">内部群</option></select><select id="aiLogLevel" onchange="loadAiAuditLogs()"><option value="">全部级别</option><option value="INFO">正常</option><option value="WARN">预警/无关</option><option value="ERROR">调用异常</option></select><input id="aiLogQuery" placeholder="客户、用户名、问题或异常原因" oninput="scheduleAiAuditLoad()"><button class="soft" onclick="aiLogDate.value=todayStr;aiLogMode.value='';aiLogLevel.value='';aiLogQuery.value='';loadAiAuditLogs()">今天 / 清空</button></div>
+   <div id="aiLogSummary" class="note"></div><div id="aiLogRecords"></div>
+  </details>
   <div class="card"><div class="card-title-row"><h2>管理日志</h2><button class="soft" onclick="loadOperationLogs()">刷新</button></div>
    <p class="note">记录谁在几点几分点击了什么按钮、做了什么筛选查询，以及向后台新增、修改或删除了哪些数据。密码、Token、图片内容及超长正文会自动隐藏。</p>
    <div class="ledger-settings"><b>全局积分规则（仅影响以后新增的订单）</b><div class="form"><label class="small">所有客户的新订单返积分比例<br><input id="opPointRatePercent" type="number" min="0" max="20" step="0.1"></label><label class="permission-check"><input id="opLedgerEnabled" type="checkbox">启用积分账本</label><button class="primary" type="button" onclick="saveGlobalLoyaltySettings()">保存全局积分规则</button></div><div class="note">比例一旦修改，会统一应用于所有客户之后的新订单；历史订单和现有积分不重算。修改人、旧值和新值会保留在下方日志。</div></div>
@@ -2599,6 +2606,18 @@ function scheduleOperationLogLoad(){clearTimeout(operationLogLoadTimer);operatio
 function operationDetailHtml(raw){
  try{const d=JSON.parse(raw||'{}');const parts=[];const pretty=v=>escHtml(typeof v==='object'&&v!==null?JSON.stringify(v,null,2):String(v));if(d.button)parts.push(`<b>按钮：</b>${escHtml(d.button)}`);if(d.module)parts.push(`<b>页面：</b>${escHtml(SYSTEM_MODULE_LABELS[d.module]||d.module)}`);if(d.handler)parts.push(`<b>处理：</b>${escHtml(d.handler)}`);Object.entries(d).forEach(([k,v])=>{if(!['button','module','handler','client_now'].includes(k)&&v!==''&&v!==null)parts.push(`<b>${escHtml(k)}：</b><span style="white-space:pre-wrap">${pretty(v)}</span>`)});return parts.join('<br>')||'—';}catch(e){return escHtml(raw||'—');}
 }
+let aiAuditLoadTimer=null;
+function scheduleAiAuditLoad(){clearTimeout(aiAuditLoadTimer);aiAuditLoadTimer=setTimeout(()=>loadAiAuditLogs().catch(console.error),350);}
+async function loadAiAuditLogs(){
+ if(!window.aiAuditPanel||!aiAuditPanel.open||!auth||!canAccessModule('operationAudit'))return;
+ if(!aiLogDate.value)aiLogDate.value=todayStr;
+ const url=`/api/telegram/ai-audit-logs?date=${encodeURIComponent(aiLogDate.value)}&mode=${encodeURIComponent(aiLogMode.value||'')}&level=${encodeURIComponent(aiLogLevel.value||'')}&q=${encodeURIComponent(aiLogQuery.value||'')}&limit=500&v=${Date.now()}`;
+ const r=await timedFetch(url,{cache:'no-store',headers:authHeaders()});const j=await r.json();
+ if(!r.ok||!j.ok)throw new Error(j.error||'读取兔兔日志失败');
+ const logs=j.logs||[],warnings=logs.filter(x=>['WARN','ERROR'].includes(x.log_level)).length,cost=logs.reduce((sum,x)=>{try{return sum+Number(JSON.parse(x.detail||'{}').estimated_cost_usd||0)}catch(e){return sum}},0);
+ aiLogSummary.innerHTML=`共 <b>${logs.length}</b> 条｜预警/异常 <b>${warnings}</b>｜当前结果估算费用 <b>$${cost.toFixed(4)}</b>`;
+ aiLogRecords.innerHTML='<div class="table"><table><thead><tr><th>时间</th><th>级别</th><th>场景</th><th>用户</th><th>询问</th><th>调用详情</th><th>结果</th></tr></thead><tbody>'+((logs.map(x=>{const ok=Number(x.response_status||0)<400,level=String(x.log_level||'INFO').toUpperCase(),mode={customer:'客户私聊',girl:'女孩专属群',internal:'内部群'}[x.mode]||x.mode||'-';return `<tr class="${ok?'':'settle-overdue'}"><td>${escHtml(x.created_at||'')}</td><td><span class="log-level log-${level.toLowerCase()}">${escHtml(level)}</span></td><td>${escHtml(mode)}</td><td><b>${escHtml(x.actor_name||'')}</b>${x.username?`<br><span class="small">@${escHtml(x.username)}</span>`:''}</td><td style="max-width:360px;white-space:normal">${escHtml(x.question||'—')}</td><td style="max-width:420px;white-space:normal"><b>${escHtml(x.action_name||'')}</b><br>${operationDetailHtml(x.detail)}</td><td class="${ok?'log-ok':'log-fail'}">${ok?'成功':'失败'} ${Number(x.response_status||0)}</td></tr>`}).join(''))||'<tr><td colspan="7">当前条件下没有兔兔调用记录</td></tr>')+'</tbody></table></div>';
+}
 async function loadOperationLogs(){
  if(!window.operationLogRecords||!auth||!canAccessModule('operationAudit'))return;if(!opLogDate.value)opLogDate.value=todayStr;
  const url=`/api/operation_logs?date=${encodeURIComponent(opLogDate.value)}&actor=${encodeURIComponent(opLogActor.value||'')}&level=${encodeURIComponent(opLogLevel.value||'')}&method=${encodeURIComponent(opLogMethod.value||'')}&q=${encodeURIComponent(opLogQuery.value||'')}&limit=500&v=${Date.now()}`;
@@ -2764,12 +2783,13 @@ async function loadTelegramSettings(){
   tgAiMonthlyBudget.value=s.ai_monthly_budget_usd||20;
   tgAiBudgetAction.value=s.ai_budget_action||'warn';
   tgAiAbnormalAlerts.value=String(s.ai_abnormal_alerts_enabled||'1');
+  tgAiAlertUsername.value='@'+String(s.ai_alert_username||'AliceCuteGril').replace(/^@/,'');
   tgAiBlockOutOfScope.value=String(s.ai_block_out_of_scope||'1');
   tgAiSingleTokenWarning.value=s.ai_single_token_warning||8000;
   tgAiTeacherIds.value=s.ai_teacher_user_ids||'';
   tgAiPersona.value=s.ai_assistant_persona||'';
   const rates=(telegramConfig.ai_model_pricing||{})[telegramConfig.ai_model]||{};
-  tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜单价备忘：输入 $${Number(rates.input||0).toFixed(2)} / 输出 $${Number(rates.output||0).toFixed(2)}（每百万 Token）｜内部群提问：<code>${escHtml(s.ai_assistant_name||'兔兔')} 今天经营怎么样？</code>`;
+  tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜异常私聊：<b>${s.ai_alert_chat_id?'已绑定':'等待该账号给 Bot 发消息'}</b>｜单价备忘：输入 $${Number(rates.input||0).toFixed(2)} / 输出 $${Number(rates.output||0).toFixed(2)}（每百万 Token）｜内部群提问：<code>${escHtml(s.ai_assistant_name||'兔兔')} 今天经营怎么样？</code>`;
   renderAiUsage(telegramConfig.ai_usage||{});
   telegramFlowDraft={...s};
   tgStatus.innerHTML=`Bot：<b>@${escHtml(telegramConfig.bot_username||'alice_booking_test_bot')}</b>｜Token：<b>${telegramConfig.token_configured?'已配置':'未配置'}</b>｜默认审核群：<b>${escHtml(s.default_review_chat_title||'未绑定')}</b>｜专属群：<b>${(telegramConfig.bindings||[]).filter(x=>Number(x.enabled)!==0).length}</b>`;
@@ -2892,6 +2912,7 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_monthly_budget_usd:Number(tgAiMonthlyBudget.value||0),
     ai_budget_action:tgAiBudgetAction.value,
     ai_abnormal_alerts_enabled:tgAiAbnormalAlerts.value==='1'?'1':'0',
+    ai_alert_username:tgAiAlertUsername.value.trim().replace(/^@/,''),
     ai_block_out_of_scope:tgAiBlockOutOfScope.value==='1'?'1':'0',
     ai_single_token_warning:Number(tgAiSingleTokenWarning.value||8000),
     ai_teacher_user_ids:tgAiTeacherIds.value.trim(),
