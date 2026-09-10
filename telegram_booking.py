@@ -223,6 +223,14 @@ def register_telegram_booking(
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_point_alert_digests(
                 alert_date TEXT PRIMARY KEY, customer_count INTEGER DEFAULT 0,
                 message_id INTEGER DEFAULT 0, sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_point_expiry_events(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, customer_no TEXT DEFAULT '',
+                expiry_date TEXT NOT NULL, points_cleared INTEGER DEFAULT 0, balance_before INTEGER DEFAULT 0,
+                reason TEXT DEFAULT '', created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(customer_id,expiry_date))""")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_point_maintenance_runs(
+                run_date TEXT PRIMARY KEY, cleared_count INTEGER DEFAULT 0, anomaly_count INTEGER DEFAULT 0,
+                completed_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
                 sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -3652,20 +3660,88 @@ def register_telegram_booking(
                 alerts.append(item)
         return alerts
 
+    def maintain_expired_points(alert_day, force=False):
+        """Clear traceable non-recharge points after 30 days and report suspicious balances without changing them."""
+        day = datetime.strptime(str(alert_day)[:10], '%Y-%m-%d').date()
+        cleared, anomalies = [], []
+        with conn() as c:
+            prior = c.execute("SELECT 1 FROM telegram_point_maintenance_runs WHERE run_date=?", (day.isoformat(),)).fetchone()
+            if prior and not force:
+                return cleared, anomalies
+            candidates = c.execute("""SELECT c.id,c.customer_no,c.name,c.points,c.total_recharge,c.recharge_balance,
+                MAX(CASE WHEN COALESCE(o.points,0)>0 AND COALESCE(o.order_status,'') NOT LIKE '%取消%'
+                         THEN o.order_date ELSE NULL END) AS last_point_date,
+                EXISTS(SELECT 1 FROM recharge_records r WHERE r.customer_id=c.id AND COALESCE(r.amount,0)>0) AS has_recharge,
+                (SELECT balance_after FROM customer_ledger l WHERE l.customer_id=c.id AND l.account_type='points'
+                 ORDER BY l.id DESC LIMIT 1) AS ledger_balance
+                FROM customers c LEFT JOIN orders o ON o.customer_id=c.id
+                WHERE COALESCE(c.points,0)<>0 GROUP BY c.id ORDER BY c.points DESC,c.id""").fetchall()
+            for source in candidates:
+                item = dict(source)
+                points = int(item.get('points') or 0)
+                permanent_legacy = (int(item.get('has_recharge') or 0) or int(item.get('total_recharge') or 0)>0
+                                    or int(item.get('recharge_balance') or 0)>0)
+                expiry = None
+                if item.get('last_point_date'):
+                    try:
+                        expiry = datetime.strptime(str(item['last_point_date'])[:10], '%Y-%m-%d').date() + timedelta(days=30)
+                    except Exception:
+                        expiry = None
+                if points > 0 and expiry and expiry <= day and not permanent_legacy:
+                    expiry_text = expiry.isoformat()
+                    existing = c.execute("SELECT 1 FROM telegram_point_expiry_events WHERE customer_id=? AND expiry_date=?",
+                                         (int(item['id']), expiry_text)).fetchone()
+                    if not existing:
+                        key = f"expiry:{int(item['id'])}:{expiry_text}"
+                        c.execute("""INSERT OR IGNORE INTO customer_ledger(
+                            customer_id,customer_no,account_type,transaction_type,amount,balance_after,
+                            reason,idempotency_key,actor_name) VALUES(?,?,'points','到期清空',?,0,?,?, 'system')""",
+                                  (int(item['id']), str(item.get('customer_no') or ''), -points,
+                                   f'普通积分超过30天自动清空（到期日 {expiry_text}）', key))
+                        c.execute("""INSERT INTO points_records(customer_id,customer_no,change_points,reason,remark)
+                            VALUES(?,?,?,'到期清空',?)""",
+                                  (int(item['id']), str(item.get('customer_no') or ''), -points,
+                                   f'普通积分超过30天，到期日 {expiry_text}'))
+                        c.execute("UPDATE customers SET points=0,updated_at=CURRENT_TIMESTAMP WHERE id=?", (int(item['id']),))
+                        c.execute("""INSERT INTO telegram_point_expiry_events(
+                            customer_id,customer_no,expiry_date,points_cleared,balance_before,reason)
+                            VALUES(?,?,?,?,?,'普通积分超过30天自动清空')""",
+                                  (int(item['id']), str(item.get('customer_no') or ''), expiry_text, points, points))
+                        item.update(points_cleared=points, expiry_date=expiry_text)
+                        cleared.append(item)
+                    continue
+                reasons = []
+                if points >= 5000:
+                    reasons.append(f'当前积分过大（{points:,}）')
+                if item.get('ledger_balance') is not None and int(item['ledger_balance'] or 0) != points:
+                    reasons.append(f"客户表 {points:,} / 账本 {int(item['ledger_balance'] or 0):,} 不一致")
+                if points >= 1000 and not item.get('last_point_date'):
+                    reasons.append('缺少可确认的积分产生日期，未自动清空')
+                if reasons:
+                    item['anomaly_reason'] = '；'.join(reasons)
+                    anomalies.append(item)
+            c.execute("""INSERT INTO telegram_point_maintenance_runs(run_date,cleared_count,anomaly_count,completed_at)
+                VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(run_date) DO UPDATE SET
+                cleared_count=excluded.cleared_count,anomaly_count=excluded.anomaly_count,
+                completed_at=CURRENT_TIMESTAMP""", (day.isoformat(), len(cleared), len(anomalies)))
+        return cleared, anomalies
+
     def send_point_expiry_alert(alert_day=None, force=False):
         alert_day = str(alert_day or tokyo_now().date().isoformat())[:10]
         cfg = settings()
+        cleared, anomalies = maintain_expired_points(alert_day, force)
         chat_id = str(cfg.get('default_review_chat_id') or '')
         if not valid_group_chat_id(chat_id):
-            return {'sent':False,'date':alert_day,'count':0,'reason':'未绑定内部群'}
+            return {'sent':False,'date':alert_day,'count':0,'cleared_count':len(cleared),
+                    'anomaly_count':len(anomalies),'reason':'已处理积分，但未绑定内部群，无法提醒'}
         with conn() as c:
             existing = c.execute('SELECT * FROM telegram_point_alert_digests WHERE alert_date=?', (alert_day,)).fetchone()
-            if existing and not force:
+            if existing and not force and not cleared and not anomalies:
                 return {'sent':False,'date':alert_day,'count':int(existing['customer_count'] or 0),'reason':'今日已检查'}
             previous_sent = c.execute("""SELECT alert_date FROM telegram_point_alert_digests
                                          WHERE COALESCE(customer_count,0)>0 AND COALESCE(message_id,0)>0
                                          ORDER BY alert_date DESC LIMIT 1""").fetchone()
-            if previous_sent and not force:
+            if previous_sent and not force and not cleared and not anomalies:
                 try:
                     last_day = datetime.strptime(str(previous_sent['alert_date'])[:10], '%Y-%m-%d').date()
                     this_day = datetime.strptime(alert_day, '%Y-%m-%d').date()
@@ -3674,21 +3750,30 @@ def register_telegram_booking(
                 except Exception:
                     pass
         alerts = point_expiry_alert_rows(alert_day)
-        if not alerts:
+        if not alerts and not cleared and not anomalies:
             with conn() as c:
                 c.execute("""INSERT INTO telegram_point_alert_digests(alert_date,customer_count,message_id,sent_at)
                              VALUES(?,0,0,CURRENT_TIMESTAMP)
                              ON CONFLICT(alert_date) DO UPDATE SET customer_count=0,sent_at=CURRENT_TIMESTAMP""", (alert_day,))
             return {'sent':False,'date':alert_day,'count':0,'reason':'没有需要提醒的客户'}
-        lines = [f"🔴 <b>{escape(alert_day)} 高积分到期提醒：{len(alerts)} 人</b>",
-                 "以下客户积分超过 1,000，且距离到期仅剩 1–5 天（隔日提醒）："]
+        lines = [f"🔴 <b>{escape(alert_day)} 积分检查</b>"]
+        if cleared:
+            lines.append(f"\n<b>已自动清空（超过30天）：{len(cleared)} 人</b>")
+            for row in cleared[:50]:
+                lines.append(f"• <b>{escape(row.get('customer_no') or '未编号')}</b>｜{escape(row.get('name') or '未填写')}｜清空 {int(row.get('points_cleared') or 0):,} pt｜到期 {escape(row.get('expiry_date') or '')}")
+        if alerts:
+            lines.append(f"\n<b>即将到期：{len(alerts)} 人</b>（最后1–5天，隔日提醒）")
         for row in alerts[:80]:
             left = int(row['days_left'])
             status = f'{left}天后到期'
             lines.append(f"• <b>{escape(row.get('customer_no') or '未编号')}</b>｜{escape(row.get('name') or '未填写')}｜{int(row.get('points') or 0):,} pt｜{escape(status)}")
         if len(alerts) > 80:
             lines.append(f"• 其余 {len(alerts)-80} 人请在 MCR 客户表查看")
-        lines.extend(['', '充值客户的赠送积分永久有效，已自动排除。请客服联系需要提醒的客户。'])
+        if anomalies:
+            lines.append(f"\n<b>积分异常待核对：{len(anomalies)} 人</b>（系统未自动修改）")
+            for row in anomalies[:50]:
+                lines.append(f"• <b>{escape(row.get('customer_no') or '未编号')}</b>｜{escape(row.get('name') or '未填写')}｜{escape(row.get('anomaly_reason') or '')}")
+        lines.extend(['', '有充值记录的历史客户已保护，不自动清空；请先核对其中哪些属于永久赠送积分。'])
         message = send_message(chat_id, '\n'.join(lines)[:3900], thread_id=int(cfg.get('default_review_thread_id') or 0))
         message_id = int((message or {}).get('message_id') or 0)
         with conn() as c:
@@ -3697,7 +3782,8 @@ def register_telegram_booking(
                          ON CONFLICT(alert_date) DO UPDATE SET customer_count=excluded.customer_count,
                          message_id=excluded.message_id,sent_at=CURRENT_TIMESTAMP""",
                       (alert_day,len(alerts),message_id))
-        return {'sent':True,'date':alert_day,'count':len(alerts),'message_id':message_id}
+        return {'sent':True,'date':alert_day,'count':len(alerts),'cleared_count':len(cleared),
+                'anomaly_count':len(anomalies),'message_id':message_id}
 
     @app.route("/api/telegram/point-expiry-alert/run", methods=["POST"])
     def telegram_point_expiry_alert_run_api():

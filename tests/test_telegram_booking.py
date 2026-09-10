@@ -63,7 +63,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
-                          "telegram_point_alert_digests", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
+                          "telegram_point_alert_digests", "telegram_point_expiry_events", "telegram_point_maintenance_runs", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
                           "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs"):
@@ -1734,6 +1734,42 @@ class TelegramBookingFlowTest(unittest.TestCase):
         third_day=(alert_day+timedelta(days=2)).isoformat()
         sent_again=self.client.post('/api/telegram/point-expiry-alert/run',headers=headers,json={'date':third_day}).json
         self.assertTrue(sent_again['sent']);self.assertEqual(sent_again['count'],2)
+
+    def test_expired_points_are_cleared_recharge_is_protected_and_large_balance_warns(self):
+        alert_day = datetime.strptime(self.day, '%Y-%m-%d').date()
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_settings SET setting_value='-90000' WHERE setting_key='default_review_chat_id'")
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            cases = [('1321','过期普通积分',1800,0,31), ('1322','充值永久保护',2200,50000,31),
+                     ('1323','异常大额积分',7200,0,1)]
+            ids = {}
+            for no,name,points,total_recharge,days_ago in cases:
+                c.execute("INSERT INTO customers(customer_no,name,points,total_recharge) VALUES(?,?,?,?)",
+                          (no,name,points,total_recharge))
+                cid = c.execute('SELECT last_insert_rowid()').fetchone()[0]
+                ids[no] = cid
+                c.execute("""INSERT INTO orders(order_date,service_time,girl_id,girl_name,customer_id,customer_no,
+                             customer_name,received_amount,points,order_status) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                          ((alert_day-timedelta(days=days_ago)).isoformat(),'18:00-19:00',girl_id,'娜娜子',cid,no,
+                           name,20000,1000,'已结束'))
+        login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
+        result = self.client.post('/api/telegram/point-expiry-alert/run',
+                                  headers={'X-Alice-Session':login.json['session_token']},
+                                  json={'date':self.day,'force':True})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        self.assertEqual(result.json['cleared_count'], 1)
+        self.assertGreaterEqual(result.json['anomaly_count'], 1)
+        with self.app_module.conn() as c:
+            values = {row['customer_no']: row['points'] for row in c.execute(
+                "SELECT customer_no,points FROM customers WHERE customer_no IN ('1321','1322','1323')")}
+            event = c.execute("SELECT * FROM telegram_point_expiry_events WHERE customer_id=?", (ids['1321'],)).fetchone()
+            ledger = c.execute("SELECT * FROM customer_ledger WHERE customer_id=? AND transaction_type='到期清空'", (ids['1321'],)).fetchone()
+        self.assertEqual(values, {'1321':0,'1322':2200,'1323':7200})
+        self.assertEqual(int(event['points_cleared']), 1800)
+        self.assertEqual(int(ledger['amount']), -1800)
+        bodies = [body for method,body in self.telegram_calls if method == 'sendMessage']
+        self.assertTrue(any('%E5%B7%B2%E8%87%AA%E5%8A%A8%E6%B8%85%E7%A9%BA' in body for body in bodies))
+        self.assertTrue(any('7%2C200' in body and '%E7%A7%AF%E5%88%86%E8%BF%87%E5%A4%A7' in body for body in bodies))
 
     def test_monthly_vip_and_svip_rankings_can_overlap_and_explain_reason(self):
         month_day = self.app_module._tokyo_now().date().replace(day=1).isoformat()

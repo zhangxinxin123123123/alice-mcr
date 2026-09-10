@@ -21,7 +21,7 @@
 .chart-head b{color:#e75ca2}.form{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:12px 0}
 input,select,textarea{max-width:100%;border:2px solid var(--line);border-radius:14px;padding:10px;background:white;color:var(--ink);outline:none}textarea{width:100%;min-height:150px}
 button{touch-action:manipulation}button.primary,button.soft,button.danger{min-height:42px;border-radius:15px;padding:10px 14px;border:0;font-weight:900;cursor:pointer}button.primary{background:linear-gradient(135deg,var(--pink),#ffb4d9);color:white}button.soft{background:white;border:2px solid var(--line);color:var(--ink)}button.danger{background:var(--danger);color:white}
-.table{width:100%;max-width:100%;overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:2px solid var(--line);border-radius:18px;background:white;scrollbar-color:#e75ca2 #fff0f7;scrollbar-width:auto}.table::-webkit-scrollbar{height:14px}.table::-webkit-scrollbar-track{background:#fff0f7;border-radius:999px}.table::-webkit-scrollbar-thumb{background:linear-gradient(90deg,#ff8fc7,#b99cff);border:3px solid #fff0f7;border-radius:999px}.table::-webkit-scrollbar-thumb:hover{background:#e75ca2}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
+.table{width:100%;max-width:100%;overflow-x:scroll;overflow-y:auto;scrollbar-gutter:stable;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch;border:2px solid var(--line);border-radius:18px;background:white;scrollbar-color:#e75ca2 #fff0f7;scrollbar-width:auto}.table::-webkit-scrollbar{height:14px}.table::-webkit-scrollbar-track{background:#fff0f7;border-radius:999px}.table::-webkit-scrollbar-thumb{background:linear-gradient(90deg,#ff8fc7,#b99cff);border:3px solid #fff0f7;border-radius:999px}.table::-webkit-scrollbar-thumb:hover{background:#e75ca2}.table-scrollbar-top{display:none;width:100%;height:18px;margin:0 0 5px;overflow-x:scroll;overflow-y:hidden;border:1px solid var(--line);border-radius:999px;background:#fff0f7;scrollbar-color:#e75ca2 #fff0f7;scrollbar-width:auto}.table-scrollbar-top.on{display:block}.table-scrollbar-top>div{height:1px}.table-scrollbar-top::-webkit-scrollbar{height:16px}.table-scrollbar-top::-webkit-scrollbar-track{background:#fff0f7;border-radius:999px}.table-scrollbar-top::-webkit-scrollbar-thumb{min-width:54px;background:linear-gradient(90deg,#ff8fc7,#b99cff);border:3px solid #fff0f7;border-radius:999px}.table-scrollbar-top::-webkit-scrollbar-thumb:hover{background:#e75ca2}table{border-collapse:collapse;width:100%;min-width:1100px}th,td{border:1px solid #f1cfe0;padding:8px;font-size:13px;white-space:nowrap}.quick-table{overflow:visible}.quick-table table{min-width:0;table-layout:fixed}.quick-table th,.quick-table td{white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top}.quick-content{max-width:100%;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}th{background:#fff0f7;cursor:pointer;user-select:none} th.sortable::after{content:' ⇅';opacity:.55;font-size:11px}tr:nth-child(even){background:#fffafd}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.split.vertical{grid-template-columns:1fr}.payment-chart canvas{max-height:320px}.month-date-card canvas{max-height:420px}.month-date-rows{display:grid;grid-template-columns:1fr;gap:10px;margin-top:12px}.month-date-row{display:grid;grid-template-columns:86px 70px 1fr 1fr 1fr;gap:8px;align-items:center;padding:10px 12px;border:2px solid var(--line);border-radius:16px;background:#fffafd;font-size:13px;font-weight:800}.month-date-row .date{color:#e75ca2;font-size:15px}.month-date-row .week{opacity:.82}.month-date-row .rev{color:#2563eb}.month-date-row .cost{color:#ef4444}.month-date-row .diff{color:var(--ink);font-weight:900}.month-date-row.negative .diff{color:#d6003d}.note{font-size:13px;opacity:.85;line-height:1.6}.small{font-size:12px}canvas{max-height:360px}.review-status{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:900;white-space:nowrap}.review-status.green{color:#087443;background:#dcfce7;border:1px solid #86efac}.review-status.orange{color:#9a4c00;background:#fff1d6;border:1px solid #fdba74}.review-status.red{color:#b42318;background:#fee4e2;border:1px solid #fda29b}.review-status.blue{color:#175cd3;background:#e8f1ff;border:1px solid #b2ccff}
 .modal{position:fixed;inset:0;background:#0006;display:none;align-items:center;justify-content:center;z-index:99}.modal.on{display:flex}.modal .box{background:white;border:3px solid var(--line);border-radius:24px;padding:20px;max-width:760px;width:92%;max-height:86vh;overflow:auto}
 
@@ -669,6 +669,35 @@ async function api(url,body){
  }finally{endBusy();}
 }
 
+function refreshTableScrollbar(wrap){
+ const top=wrap?.previousElementSibling;
+ if(!wrap||!top?.classList.contains('table-scrollbar-top'))return;
+ const content=wrap.querySelector('table');
+ const width=Math.max(content?.scrollWidth||0,wrap.scrollWidth||0);
+ top.firstElementChild.style.width=`${width}px`;
+ top.classList.toggle('on',wrap.clientWidth>0&&width>wrap.clientWidth+2);
+ if(top.scrollLeft!==wrap.scrollLeft)top.scrollLeft=wrap.scrollLeft;
+}
+function ensureTableScrollbars(root=document){
+ root.querySelectorAll?.('.table:not([data-scrollbar-ready])').forEach(wrap=>{
+  const top=document.createElement('div');
+  top.className='table-scrollbar-top';
+  top.setAttribute('aria-label','表格横向滚动条');
+  top.innerHTML='<div></div>';
+  wrap.before(top);
+  wrap.dataset.scrollbarReady='1';
+  let syncing=false;
+  top.addEventListener('scroll',()=>{if(syncing)return;syncing=true;wrap.scrollLeft=top.scrollLeft;syncing=false;},{passive:true});
+  wrap.addEventListener('scroll',()=>{if(syncing)return;syncing=true;top.scrollLeft=wrap.scrollLeft;syncing=false;},{passive:true});
+  if(window.ResizeObserver)new ResizeObserver(()=>refreshTableScrollbar(wrap)).observe(wrap);
+  requestAnimationFrame(()=>refreshTableScrollbar(wrap));
+ });
+ document.querySelectorAll('.table[data-scrollbar-ready]').forEach(refreshTableScrollbar);
+}
+const tableScrollbarObserver=new MutationObserver(()=>requestAnimationFrame(()=>ensureTableScrollbars()));
+tableScrollbarObserver.observe(document.body,{childList:true,subtree:true});
+window.addEventListener('resize',()=>requestAnimationFrame(()=>ensureTableScrollbars()),{passive:true});
+
 function applyRole(){
   if(!auth||!authVerified){setLoginActive(true);return;}
   restoreNavOrder();
@@ -740,7 +769,7 @@ function initNavLongPressSort(){
  nav.addEventListener('pointerup',finish);nav.addEventListener('pointercancel',cleanup);nav.addEventListener('pointerleave',()=>{if(!dragged){clearTimeout(timer);timer=null;activePointer=null;}});
  nav.addEventListener('click',e=>{if(Date.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation();}},{capture:true});
 }
-function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>Promise.all([loadOperationLogs(),loadTelegramSettings(),loadAiLearning()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
+function show(id,btn){if(roleBlockedPage(id)){alert("当前账号没有这个模块的权限");return;} const panel=document.getElementById(id); if(!panel){console.warn("panel not found",id);return;} document.querySelectorAll(".panel").forEach(x=>x.classList.remove("on"));panel.classList.add("on");document.querySelectorAll(".nav button").forEach(x=>x.classList.remove("on"));if(btn)btn.classList.add("on"); requestAnimationFrame(()=>ensureTableScrollbars(panel)); if(id==="pureShift"){ensurePureShiftFrame();} if(id==="chainReserve"){setTimeout(()=>loadChainPage().catch(console.error),50);} if(id==="advanceReserve"){setTimeout(()=>renderAdvanceReserve(),50);} if(id==="telegramBooking"){setTimeout(()=>loadTelegramSettings().catch(console.error),50);} if(id==="settlement"){setTimeout(()=>renderSettlement(),50);} if(id==="quickLinks"){setTimeout(()=>renderQuickLinks(),50);} if(id==="girlPraiseFolder"){renderGirlPraiseFolder();} if(id==="reviewCrawler"){setTimeout(()=>loadReviewCrawler().catch(console.error),30);} if(id==="loginAudit"){setTimeout(()=>Promise.all([loadSystemUsers(),loadLoginAuditRecords()]).catch(console.error),30);} if(id==="operationAudit"){setTimeout(()=>Promise.all([loadOperationLogs(),loadTelegramSettings(),loadAiLearning()]).catch(console.error),30);} if(innerWidth<=950){panel.scrollIntoView({block:"start",behavior:"auto"});}}
 async function loadAll(){
  if(!auth){clearAuthAndShowLogin();return false;}
  setLoginActive(false);
@@ -1035,10 +1064,9 @@ async function openCustomerLedger(customerId){
   const response=await timedFetch(`/api/customer_ledger?customer_id=${encodeURIComponent(customerId)}&v=${Date.now()}`,{cache:"no-store",headers:authHeaders()});
   const result=await response.json().catch(()=>({ok:false,error:"流水读取失败"}));
   if(!response.ok||!result.ok){alert(result.error||"流水读取失败");return;}
-  const c=result.customer||{}, entries=result.entries||[], membershipHistory=result.membership_history||[];
+  const c=result.customer||{}, membershipHistory=result.membership_history||[];
   currentEdit={table:"ledger",id:Number(customerId)};
   editTitle.textContent=`客户 ${c.customer_no||c.id}｜积分 / 充值`;
-  const history=entries.length?entries.map(e=>`<tr><td>${escHtml(e.created_at||"")}</td><td>${e.account_type==="points"?"积分":"充值余额"}</td><td>${escHtml(e.transaction_type||"")}</td><td class="${Number(e.amount)>=0?'ledger-plus':'ledger-minus'}">${Number(e.amount)>=0?'+':''}${Number(e.amount||0).toLocaleString()}</td><td>${Number(e.balance_after||0).toLocaleString()}</td><td>${escHtml(e.reason||"")}</td><td>${escHtml(e.actor_name||"")}</td></tr>`).join(""):`<tr><td colspan="7">暂无流水</td></tr>`;
   const reasons=[Number(c.vip_active)&&c.vip_reason?`<b>已保留 VIP：</b>${escHtml(c.vip_reason)}`:'',Number(c.svip_active)&&c.svip_reason?`<b>已保留 SVIP：</b>${escHtml(c.svip_reason)}`:'',c.vip_current_reason?`<b>本月动态 VIP：</b>${escHtml(c.vip_current_reason)}`:'',c.svip_current_reason?`<b>本月动态 SVIP：</b>${escHtml(c.svip_current_reason)}`:''].filter(Boolean).join('<br>')||'当前没有已保留会员，也未进入本月动态榜；基础类型按历史预约单数判断。';
   const membershipButtons=auth?.role==="boss"?`<div class="form"><button class="danger" type="button" onclick="changeCustomerMembership(${Number(customerId)},'VIP','cancel')">人工取消 VIP</button><button class="danger" type="button" onclick="changeCustomerMembership(${Number(customerId)},'SVIP','cancel')">人工取消 SVIP</button><button class="soft" type="button" onclick="changeCustomerMembership(${Number(customerId)},'VIP','restore')">恢复 VIP</button><button class="soft" type="button" onclick="changeCustomerMembership(${Number(customerId)},'SVIP','restore')">恢复 SVIP</button></div>`:"";
   const membershipRows=membershipHistory.length?membershipHistory.slice(0,20).map(x=>`<div>${escHtml(x.created_at||"")}｜${escHtml(x.membership_type||"")} ${escHtml(x.action||"")}｜${escHtml(x.reason||"")}｜${escHtml(x.actor_name||"")}</div>`).join(""):"暂无人工或月末会员记录";
@@ -1049,7 +1077,7 @@ async function openCustomerLedger(customerId){
    field("数量 / 金额",`<input id="m_ledger_amount" type="number" min="1" step="1" placeholder="请输入正数">`)+
    field("支付方式",paymentSelect("m_ledger_payment","现金"))+
    field("原因（必填）",`<input id="m_ledger_reason" placeholder="例：PayPay充值 / 活动补发">`)+
-   `<div class="ledger-help">客服只需选择项目、增加/扣除、填写金额和原因，再点下方“保存修改”。全局积分比例请到“管理日志”修改。</div><h3>最近流水</h3><div class="ledger-history"><table><thead><tr><th>时间</th><th>账户</th><th>类型</th><th>变动</th><th>变动后</th><th>原因</th><th>操作人</th></tr></thead><tbody>${history}</tbody></table></div>`;
+   `<div class="ledger-help">客服只需选择项目、增加/扣除、填写金额和原因，再点下方“保存修改”。全局积分比例请到“管理日志”修改。</div>`;
   editModal.classList.add("on");
  }finally{endBusy();}
 }
