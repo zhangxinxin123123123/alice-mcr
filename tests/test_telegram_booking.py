@@ -1051,7 +1051,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any(method == "sendMessage" and "%E4%B8%8B%E6%AC%A1%E8%87%AA%E5%8A%A8%E5%AF%BC%E5%85%A5" in body
                             for method, body in self.telegram_calls))
 
-    def test_bound_group_accepts_far_future_chain_and_keeps_one_bot_table(self):
+    def test_bound_group_accepts_far_future_chain_and_preserves_manual_messages(self):
         future = self.app_module._tokyo_now().date() + timedelta(days=45)
         future_day = future.isoformat()
         keyword = future.strftime("%m%d")
@@ -1078,16 +1078,16 @@ class TelegramBookingFlowTest(unittest.TestCase):
                 (future_day,)).fetchone()[0], 1)
         self.assertTrue(any(method == "sendMessage" and "chat_id=-39103" in body
                             for method, body in self.telegram_calls))
-        self.assertTrue(any(method == "deleteMessage" and "message_id=902" in body
-                            for method, body in self.telegram_calls))
+        self.assertFalse(any(method == "deleteMessage" and "message_id=902" in body
+                             for method, body in self.telegram_calls))
 
         self.telegram_calls.clear()
         self.webhook({"message": {"message_id": 903, "chat": girl_chat, "from": manager,
                                   "text": f"{keyword}\n1.18-19/15000/人工未来客人\n2.20-21/15000/新增未来客人"}})
         self.assertTrue(any(method == "editMessageText" and "chat_id=-39103" in body
                             for method, body in self.telegram_calls))
-        self.assertTrue(any(method == "deleteMessage" and "message_id=903" in body
-                            for method, body in self.telegram_calls))
+        self.assertFalse(any(method == "deleteMessage" and "message_id=903" in body
+                             for method, body in self.telegram_calls))
         with self.app_module.conn() as c:
             self.assertEqual(c.execute(
                 "SELECT COUNT(*) FROM telegram_daily_chain_messages WHERE booking_date=? AND girl_name='娜娜子'",

@@ -1491,21 +1491,13 @@ def register_telegram_booking(
         return sent_message_id
 
     def adopt_manual_chain_message(chat_id, message_id, day, girl_name, cfg):
-        """Turn a human-written chain into the group's single bot-maintained canonical chain."""
+        """Copy a human-written chain into the bot-maintained table while preserving the original message."""
         if not message_id or not valid_group_chat_id(chat_id):
             return 0
         row = {"reserve_date": day, "girl_name": girl_name, "telegram_group_chat_id": str(chat_id)}
         canonical_id = refresh_daily_chain(row, cfg)
-        if int(canonical_id or 0) != int(message_id or 0):
-            try:
-                tg("deleteMessage", {"chat_id": chat_id, "message_id": int(message_id)})
-            except Exception as exc:
-                internal_id = str(cfg.get("default_review_chat_id") or "")
-                if valid_group_chat_id(internal_id):
-                    send_message(internal_id,
-                                 "⚠️ 已合并接龙，但无法删除女孩群里的人工旧表。请把 Bot 设为管理员并开启“删除消息”权限。\n"
-                                 f"原因：{escape(str(exc))}",
-                                 thread_id=int(cfg.get("default_review_thread_id") or 0))
+        # Telegram bots cannot edit a user's message. Keep the human source as an archive and maintain
+        # subsequent automatic changes in the bot-owned canonical table; never delete the source.
         return canonical_id
 
     def send_approved_chain(row, order_row, cfg, review_chat_id):
