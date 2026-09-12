@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from html import escape
@@ -16,6 +17,11 @@ from urllib.request import Request, urlopen
 
 from flask import jsonify, request
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+
+
+_AI_MAX_WORKERS = max(1, min(4, int(os.environ.get("ALICE_AI_WORKERS", "2"))))
+_AI_EXECUTOR = ThreadPoolExecutor(max_workers=_AI_MAX_WORKERS, thread_name_prefix="alice-ai")
+_AI_QUEUE_SLOTS = threading.BoundedSemaphore(_AI_MAX_WORKERS * 2)
 
 
 DEFAULT_SETTINGS = {
@@ -1157,7 +1163,31 @@ def register_telegram_booking(
         if str(os.environ.get("ALICE_AI_ASSISTANT_SYNC") or "") == "1":
             worker()
         else:
-            threading.Thread(target=worker, name="alice-ai-assistant", daemon=True).start()
+            if not _AI_QUEUE_SLOTS.acquire(blocking=False):
+                log_ai_monitor(user, mode, question, "WARN", "AI并发已满",
+                               {"reason": "AI任务队列已满", "openai_called": False})
+                notify_ai_monitor(cfg, user, mode, question, "任务队列已满（未产生额外调用）")
+                if mode == "customer":
+                    busy_text = str(cfg.get("ai_customer_error_message") or DEFAULT_SETTINGS["ai_customer_error_message"])
+                elif mode == "girl":
+                    busy_text = "🎀 姐姐，兔兔正在认真处理其他吩咐，请稍等一下下再叫兔兔哦♡"
+                else:
+                    busy_text = "🎀 主人，兔兔正在处理前面的吩咐，请稍候片刻再问一次。"
+                try:
+                    edit_message_text(chat_id, message_id, busy_text)
+                except Exception:
+                    send_message(chat_id, busy_text)
+                return True
+            def queued_worker():
+                try:
+                    worker()
+                finally:
+                    _AI_QUEUE_SLOTS.release()
+            try:
+                _AI_EXECUTOR.submit(queued_worker)
+            except Exception:
+                _AI_QUEUE_SLOTS.release()
+                raise
         return True
 
     def edit_message_text(chat_id, message_id, text, keyboard=None):
@@ -2530,8 +2560,12 @@ def register_telegram_booking(
             if not payload:
                 with urlopen(Request(url, headers={"User-Agent": "Alice-MCR/1.0"}), timeout=12) as response:
                     payload = response.read(5 * 1024 * 1024)
-            image = Image.open(BytesIO(payload)).convert("RGB")
-            return ImageOps.fit(image, (size, size), method=Image.Resampling.LANCZOS)
+            with Image.open(BytesIO(payload)) as source:
+                image = source.convert("RGB")
+            try:
+                return ImageOps.fit(image, (size, size), method=Image.Resampling.LANCZOS)
+            finally:
+                image.close()
         except Exception:
             return None
 
@@ -2551,7 +2585,10 @@ def register_telegram_booking(
             glow_draw = ImageDraw.Draw(glow)
             glow_draw.rounded_rectangle((18, 18, width - 18, height - 18), 32, outline="#ff38a4", width=12)
             glow = glow.filter(ImageFilter.GaussianBlur(16))
-            base = Image.alpha_composite(base.convert("RGBA"), glow)
+            rgba_base = base.convert("RGBA")
+            composed = Image.alpha_composite(rgba_base, glow)
+            base.close(); rgba_base.close(); glow.close()
+            base = composed
             draw = ImageDraw.Draw(base)
             draw.rounded_rectangle((20, 20, width - 20, height - 20), 30, fill="#0b0712", outline="#ff55b4", width=4)
             title = f"{datetime.fromisoformat(day).strftime('%m%d')} {weekday} 出勤"
@@ -2567,6 +2604,7 @@ def register_telegram_booking(
                     mask = Image.new("L", avatar.size, 0)
                     ImageDraw.Draw(mask).ellipse((0, 0, avatar.width - 1, avatar.height - 1), fill=255)
                     base.paste(avatar, (74, y + 23), mask)
+                    mask.close(); avatar.close()
                     draw.ellipse((72, y + 21, 208, y + 157), outline="#ff80c6", width=5)
                 else:
                     draw.ellipse((72, y + 21, 208, y + 157), fill="#321337", outline="#ff80c6", width=5)
@@ -2583,8 +2621,10 @@ def register_telegram_booking(
             footer = f"ALICE ACADEMY  {page_index // 6 + 1}/{(len(entries) + 5) // 6}"
             draw.text((width // 2, height - 50), footer, font=report_font(24), fill="#ff8fc7", anchor="mm")
             output = BytesIO()
-            base.convert("RGB").save(output, format="PNG", optimize=True)
+            rgb_output = base.convert("RGB")
+            rgb_output.save(output, format="PNG", compress_level=3)
             pages.append(output.getvalue())
+            rgb_output.close(); output.close(); base.close()
         return pages
 
     def handle_shift_copy_generation(message):

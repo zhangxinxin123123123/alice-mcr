@@ -1,9 +1,27 @@
-"""Gunicorn startup hook for the Alice settlement patch.
+"""Memory-conscious Gunicorn settings and Alice settlement patch hook.
 
 Render usually starts this app through Gunicorn's console script, so Python does
 not always auto-import the repository-level sitecustomize.py. Loading it here
 makes the settlement update active in each worker after deploy.
 """
+
+import os
+
+# Render's smaller instances are much more stable with one process. Flask I/O
+# still has four request threads, while avoiding a full copy of pandas/Pillow,
+# the application module and in-memory response buffers in every worker.
+workers = max(1, min(2, int(os.environ.get("ALICE_WEB_CONCURRENCY", "1"))))
+worker_class = "gthread"
+threads = max(2, min(8, int(os.environ.get("ALICE_WEB_THREADS", "4"))))
+preload_app = False
+timeout = 120
+graceful_timeout = 30
+keepalive = 5
+
+# Recycle the sole worker periodically so native image/font allocations cannot
+# accumulate indefinitely. Jitter avoids a predictable restart boundary.
+max_requests = 400
+max_requests_jitter = 60
 
 
 def _patch(log=None):
@@ -23,10 +41,6 @@ def _patch(log=None):
             log.warning("Alice settlement patch failed: %s", exc)
         else:
             raise
-
-
-def when_ready(server):
-    _patch(getattr(server, "log", None))
 
 
 def post_worker_init(worker):

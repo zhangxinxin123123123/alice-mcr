@@ -1,5 +1,6 @@
 
 import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata, socket, ipaddress, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -34,7 +35,19 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v147_feedback_rank_and_mascot"
+app.config['MAX_CONTENT_LENGTH'] = 28 * 1024 * 1024
+APP_VERSION = "v148_memory_guardrails"
+_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="alice-praise-ocr")
+
+def process_rss_mb():
+    """Current Linux resident memory for Render diagnostics; zero when unavailable."""
+    try:
+        for line in Path('/proc/self/status').read_text(encoding='utf-8').splitlines():
+            if line.startswith('VmRSS:'):
+                return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    return 0.0
 
 @app.after_request
 def compress_large_json(response):
@@ -46,7 +59,7 @@ def compress_large_json(response):
     raw = response.get_data()
     if len(raw) < 1400:
         return response
-    packed = gzip.compress(raw, compresslevel=5)
+    packed = gzip.compress(raw, compresslevel=1)
     if len(packed) >= len(raw):
         return response
     response.set_data(packed)
@@ -4320,8 +4333,7 @@ def api_girl_praises():
                            LEFT JOIN girls g ON g.id=gp.girl_id
                            WHERE gp.id=?''', (cur.lastrowid,)).fetchone()
     praise = dict(row)
-    threading.Thread(target=extract_girl_praise_text_background, args=(int(praise['id']),),
-                     name=f"alice-praise-ocr-{int(praise['id'])}", daemon=True).start()
+    _OCR_EXECUTOR.submit(extract_girl_praise_text_background, int(praise['id']))
     return jsonify(ok=True, praise=praise, ocr_started=True)
 
 @app.route('/api/orders',methods=['POST'])
@@ -5199,6 +5211,8 @@ def api_db_info():
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
             "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
             "version": APP_VERSION,
+            "memory_rss_mb": process_rss_mb(),
+            "active_threads": threading.active_count(),
             "port": 5057,
         })
 
@@ -5222,7 +5236,9 @@ def api_health():
             "db_path": str(DB_PATH),
             "customers_count": c.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
             "girls_count": c.execute("SELECT COUNT(*) FROM girls").fetchone()[0],
-            "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+            "orders_count": c.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
+            "memory_rss_mb": process_rss_mb(),
+            "active_threads": threading.active_count()
         })
 
 
