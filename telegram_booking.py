@@ -464,7 +464,7 @@ def register_telegram_booking(
                 public_url = ("https://" + render_host) if render_host else ""
             if not public_url:
                 return None
-            data = {"chat_id": chat_id, "photo": f"{public_url}/static/tutu_stickers/{name}.png"}
+            data = {"chat_id": chat_id, "photo": f"{public_url}/static/tutu_stickers/{name}.jpg"}
             if int(thread_id or 0):
                 data["message_thread_id"] = int(thread_id)
             sent = tg("sendPhoto", data)
