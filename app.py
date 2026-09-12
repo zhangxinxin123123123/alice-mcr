@@ -1,5 +1,5 @@
 
-import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata, socket, ipaddress, time, gc, ctypes
+import re, math, sqlite3, webbrowser, threading, os, smtplib, json, hashlib, traceback, secrets, base64, gzip, unicodedata, socket, ipaddress, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 try:
@@ -36,12 +36,8 @@ app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/stati
 
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 28 * 1024 * 1024
-APP_VERSION = "v150_release_snapshot_memory"
+APP_VERSION = "v151_safe_memory_guardrails"
 _OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="alice-praise-ocr")
-try:
-    _LIBC_MALLOC_TRIM = ctypes.CDLL(None).malloc_trim if os.name == 'posix' else None
-except Exception:
-    _LIBC_MALLOC_TRIM = None
 
 def process_rss_mb():
     """Current Linux resident memory for Render diagnostics; zero when unavailable."""
@@ -53,15 +49,6 @@ def process_rss_mb():
         pass
     return 0.0
 
-def release_snapshot_memory():
-    """Return temporary /api/all JSON buffers to Render after delivery."""
-    gc.collect()
-    if _LIBC_MALLOC_TRIM is not None:
-        try:
-            _LIBC_MALLOC_TRIM(0)
-        except Exception:
-            pass
-
 @app.after_request
 def compress_large_json(response):
     """Reduce transfer time for the large MCR snapshot on mobile connections."""
@@ -69,8 +56,6 @@ def compress_large_json(response):
             or response.headers.get('Content-Encoding') or response.mimetype != 'application/json'
             or request.path == '/api/all'
             or 'gzip' not in request.headers.get('Accept-Encoding', '').lower()):
-        if request.path == '/api/all':
-            response.call_on_close(release_snapshot_memory)
         return response
     raw = response.get_data()
     if len(raw) < 1400:
