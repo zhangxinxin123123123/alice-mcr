@@ -24,6 +24,23 @@ _AI_EXECUTOR = ThreadPoolExecutor(max_workers=_AI_MAX_WORKERS, thread_name_prefi
 _AI_QUEUE_SLOTS = threading.BoundedSemaphore(_AI_MAX_WORKERS * 2)
 
 
+TUTU_STICKERS = {
+    "hello": ["daily_hello", "book_hello", "book_welcome"],
+    "thanks": ["daily_thanks", "book_thanks", "daily_hard_work"],
+    "waiting": ["daily_waiting", "book_checking", "book_confirm_again", "daily_working"],
+    "available": ["book_available", "book_check_space", "daily_wow"],
+    "reserved": ["book_reserved", "book_complete", "daily_congrats"],
+    "full": ["book_full", "daily_sorry", "daily_aggrieved"],
+    "sorry": ["book_sorry", "daily_sorry", "daily_aggrieved"],
+    "change": ["book_change_time", "book_change_or_cancel", "book_choose_date"],
+    "question": ["daily_question", "daily_confused", "book_more_questions", "book_any_needs"],
+    "goodnight": ["daily_goodnight", "book_goodnight", "daily_sleepy"],
+    "busy": ["daily_working", "daily_on_the_way", "daily_tired"],
+    "cute": ["daily_okay", "daily_hehe", "daily_like", "daily_heartbeat", "daily_hug"],
+}
+_TUTU_LAST_STICKER = {}
+
+
 DEFAULT_SETTINGS = {
     "bot_display_name": "爱丽丝预约 Bot",
     "welcome_text": "欢迎来到爱丽丝！\n\n点击下方按钮开始预约。",
@@ -90,6 +107,7 @@ DEFAULT_SETTINGS = {
     "ai_alert_chat_id": "",
     "ai_block_out_of_scope": "0",
     "ai_single_token_warning": "8000",
+    "ai_sticker_frequency": "85",
 }
 
 
@@ -406,6 +424,61 @@ def register_telegram_booking(
         if int(thread_id or 0):
             data["message_thread_id"] = int(thread_id)
         return tg("sendMessage", data)
+
+    def tutu_sticker_mood(text):
+        """Choose a visual reaction from the meaning of the reply, not at random alone."""
+        value = re.sub(r"<[^>]+>", "", str(text or ""))
+        checks = (
+            ("reserved", ("预约完成", "预约成功", "预约好", "留好", "恭喜")),
+            ("full", ("已经满", "满档", "没有空位", "不能约")),
+            ("change", ("换个时间", "修改时间", "改期", "取消预约")),
+            ("available", ("有空", "空位", "可预约")),
+            ("waiting", ("稍等", "稍候", "确认中", "正在查看", "认真帮您看")),
+            ("sorry", ("抱歉", "对不起", "没能", "失败", "不能告诉")),
+            ("thanks", ("谢谢", "感谢", "辛苦")),
+            ("goodnight", ("晚安", "睡觉", "休息")),
+            ("busy", ("忙", "处理中", "流量用完", "有一点点累")),
+            ("hello", ("你好", "您好", "欢迎", "早上好")),
+            ("question", ("问题", "需要", "告诉兔兔", "怎么")),
+        )
+        for mood, words in checks:
+            if any(word in value for word in words):
+                return mood
+        return "cute"
+
+    def send_tutu_expression(chat_id, reply_text="", mood="", thread_id=0, force=False):
+        """Send one project sticker after a Rabbit reply; failures never block the reply itself."""
+        try:
+            cfg = settings()
+            frequency = max(0, min(100, int(float(cfg.get("ai_sticker_frequency") or 85))))
+            if not force and secrets.randbelow(100) >= frequency:
+                return None
+            selected_mood = mood if mood in TUTU_STICKERS else tutu_sticker_mood(reply_text)
+            candidates = list(TUTU_STICKERS.get(selected_mood) or TUTU_STICKERS["cute"])
+            previous = _TUTU_LAST_STICKER.get(str(chat_id))
+            choices = [name for name in candidates if name != previous] or candidates
+            name = secrets.choice(choices)
+            public_url = str(os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+            if not public_url:
+                render_host = str(os.environ.get("RENDER_EXTERNAL_HOSTNAME") or "").strip()
+                public_url = ("https://" + render_host) if render_host else ""
+            if not public_url:
+                return None
+            data = {"chat_id": chat_id, "photo": f"{public_url}/static/tutu_stickers/{name}.png"}
+            if int(thread_id or 0):
+                data["message_thread_id"] = int(thread_id)
+            sent = tg("sendPhoto", data)
+            _TUTU_LAST_STICKER[str(chat_id)] = name
+            if len(_TUTU_LAST_STICKER) > 500:
+                _TUTU_LAST_STICKER.pop(next(iter(_TUTU_LAST_STICKER)), None)
+            return sent
+        except Exception:
+            return None
+
+    def send_tutu_message(chat_id, text, keyboard=None, thread_id=0, mood="", force_sticker=False):
+        sent = send_message(chat_id, text, keyboard, thread_id)
+        send_tutu_expression(chat_id, text, mood=mood, thread_id=thread_id, force=force_sticker)
+        return sent
 
     def business_snapshot_for_ai(question):
         """Return a compact, read-only MCR snapshot without contact details or credentials."""
@@ -1031,12 +1104,12 @@ def register_telegram_booking(
                 enabled = str(cfg.get("ai_assistant_enabled") or "1")
             configured = bool(str(os.environ.get("OPENAI_API_KEY") or "").strip())
             assistant_name = escape(str(cfg.get("ai_assistant_name") or "兔兔"))
-            send_message(chat.get("id"), f"🎀 爱丽丝的AI客服助手兼吉祥物：<b>{'已开启' if enabled == '1' else '已关闭'}</b>｜服务：<b>{'已配置' if configured else '未配置'}</b>\n提问格式：<code>{assistant_name} 今天经营怎么样？</code>")
+            send_tutu_message(chat.get("id"), f"🎀 爱丽丝的AI客服助手兼吉祥物：<b>{'已开启' if enabled == '1' else '已关闭'}</b>｜服务：<b>{'已配置' if configured else '未配置'}</b>\n提问格式：<code>{assistant_name} 今天经营怎么样？</code>", mood="cute")
             return True
         configured_name = str(cfg.get("ai_assistant_name") or "兔兔").strip()
         if mode == "customer" and text in ("退出艾莉兔", "继续预约", "结束对话"):
             set_ai_session_active(chat.get("id"), user.get("id"), False)
-            send_message(chat.get("id"), "🎀 主人，已经切回预约流程啦～请继续点击上方按钮，或发送 /start 重新开始♡")
+            send_tutu_message(chat.get("id"), "🎀 主人，已经切回预约流程啦～请继续点击上方按钮，或发送 /start 重新开始♡", mood="change")
             return True
         names = [r"/?alice(?:@\w+)?", "爱丽丝", "艾莉兔", "兔兔", re.escape(configured_name)]
         match = re.match(r"^(?:" + "|".join(dict.fromkeys(names)) + r")\s*[+＋:：,，]?\s*(.*)$", text, re.I)
@@ -1057,27 +1130,27 @@ def register_telegram_booking(
         if mode == "girl" and str(cfg.get("ai_girl_group_enabled") or "1") != "1":
             return False
         if mode == "customer" and "月牙" in question:
-            send_message(chat.get("id"),
-                         "🎀 主人想咨询月牙的话，请添加夜游第二个 TEL：<b>@aliceyueya</b> 哦～♡",
-                         inline_keyboard([[url_button("联系月牙的 TEL", "https://t.me/aliceyueya")]]))
+            send_tutu_message(chat.get("id"),
+                              "🎀 主人想咨询月牙的话，请添加夜游第二个 TEL：<b>@aliceyueya</b> 哦～♡",
+                              inline_keyboard([[url_button("联系月牙的 TEL", "https://t.me/aliceyueya")]]), mood="question")
             return True
         if question in ("清空", "清除上下文", "重新开始"):
             with conn() as c:
                 c.execute("DELETE FROM telegram_ai_sessions WHERE chat_id=? AND user_id=?",
                           (str(chat.get("id")), str(user.get("id"))))
             cleared = "✨ 主人，刚才的对话记忆已经清空啦～♡" if mode == "customer" else "✨ 好的，刚才的对话记忆已经清空啦～"
-            send_message(chat.get("id"), cleared)
+            send_tutu_message(chat.get("id"), cleared, mood="cute")
             return True
         if not question:
             help_text = ("主人可以和兔兔开心聊天，也可以问怎么预约、今天谁有空、怎么发送酒店或取消改期"
                          if mode == "customer" else ("姐姐尽管吩咐兔兔，也可以问本人的出勤、接龙和结算"
                          if mode == "girl" else "主人尽管吩咐兔兔，可以问客户编号、近期业绩、出勤安排、经营建议或其他问题"))
-            send_message(chat.get("id"), f"🎀 兔兔是爱丽丝的AI客服助手兼吉祥物～\n{help_text}。")
+            send_tutu_message(chat.get("id"), f"🎀 兔兔是爱丽丝的AI客服助手兼吉祥物～\n{help_text}。", mood="hello")
             return True
         if len(question) > 1200:
             log_ai_monitor(user, mode, question, "WARN", "AI异常询问", {"reason": "问题超过1200字", "openai_called": False})
             notify_ai_monitor(cfg, user, mode, question, "异常询问：问题超过1200字")
-            send_message(chat.get("id"), "问题有点太长啦，请缩短到 1200 字以内再问我～")
+            send_tutu_message(chat.get("id"), "问题有点太长啦，请缩短到 1200 字以内再问兔兔哦～", mood="sorry")
             return True
         scope_reason = ai_scope_issue(mode, question, cfg)
         if scope_reason:
@@ -1093,7 +1166,7 @@ def register_telegram_booking(
             else:
                 rendered = ("🎀 兔兔在这个专属群里，只可以回答姐姐自己的出勤、接龙、预约单数和结算问题哦～♡")
                 keyboard = None
-            send_message(chat.get("id"), rendered, keyboard)
+            send_tutu_message(chat.get("id"), rendered, keyboard, mood="sorry")
             return True
         waiting = (f"主人请稍候，{escape(configured_name)}马上认真为您查看～" if mode == "internal" else
                    (f"姐姐请稍候，{escape(configured_name)}马上认真为您查看～" if mode == "girl" else
@@ -1156,10 +1229,11 @@ def register_telegram_booking(
             if message_id:
                 try:
                     edit_message_text(chat_id, message_id, rendered, feedback_keyboard)
+                    send_tutu_expression(chat_id, rendered)
                     return
                 except Exception:
                     pass
-            send_message(chat_id, rendered)
+            send_tutu_message(chat_id, rendered)
         if str(os.environ.get("ALICE_AI_ASSISTANT_SYNC") or "") == "1":
             worker()
         else:
@@ -1175,8 +1249,9 @@ def register_telegram_booking(
                     busy_text = "🎀 主人，兔兔正在处理前面的吩咐，请稍候片刻再问一次。"
                 try:
                     edit_message_text(chat_id, message_id, busy_text)
+                    send_tutu_expression(chat_id, busy_text, mood="busy")
                 except Exception:
-                    send_message(chat_id, busy_text)
+                    send_tutu_message(chat_id, busy_text, mood="busy")
                 return True
             def queued_worker():
                 try:
@@ -1307,7 +1382,7 @@ def register_telegram_booking(
         welcome = cfg.get("welcome_text") or DEFAULT_SETTINGS["welcome_text"]
         if str(cfg.get("ai_assistant_enabled") or "1") == "1" and str(cfg.get("ai_customer_enabled") or "1") == "1":
             welcome += f"\n\n🎀 预约问题也可以直接问女仆助手：<code>{escape(str(cfg.get('ai_assistant_name') or '兔兔'))} 怎么预约？</code>"
-        send_message(chat_id, welcome, inline_keyboard(rows))
+        send_tutu_message(chat_id, welcome, inline_keyboard(rows), mood="hello")
 
     def flow_keyboard(back_data=None, back_text="⬅️ 返回上一层"):
         cfg = settings()
@@ -1351,7 +1426,7 @@ def register_telegram_booking(
         if support:
             buttons.append([support])
         set_session(user_id, chat_id, "choose_date", {})
-        send_message(chat_id, cfg.get("text_choose_date") or "请选择预约日期：", inline_keyboard(buttons))
+        send_tutu_message(chat_id, cfg.get("text_choose_date") or "请选择预约日期：", inline_keyboard(buttons), mood="change")
 
     def show_girls(chat_id, user_id, day):
         cfg = settings()
@@ -1362,8 +1437,8 @@ def register_telegram_booking(
                 free = free_ranges(c, day, item['girl'], item['shift'])
                 girl_rows.append((item, free))
         if not girl_rows:
-            send_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。",
-                         flow_keyboard("flow:dates", "⬅️ 重新选择日期"))
+            send_tutu_message(chat_id, "这一天暂时没有开放 Bot 预约的女孩。",
+                              flow_keyboard("flow:dates", "⬅️ 重新选择日期"), mood="sorry")
             return
         rows = []
         for item, free in girl_rows:
@@ -1380,7 +1455,7 @@ def register_telegram_booking(
         if support:
             rows.append([support])
         set_session(user_id, chat_id, "choose_girl", {"date": day})
-        send_message(chat_id, render_text(cfg.get("text_choose_girl"), date=escape(day)), inline_keyboard(rows))
+        send_tutu_message(chat_id, render_text(cfg.get("text_choose_girl"), date=escape(day)), inline_keyboard(rows), mood="available")
 
     def choose_girl(chat_id, user_id, day, girl_ref):
         item = next((x for x in eligible_girls(day)
@@ -1393,14 +1468,14 @@ def register_telegram_booking(
         with conn() as c:
             free = free_ranges(c, day, girl, item["shift"])
         if not free:
-            send_message(chat_id, f"{girl} 当天已经没有空闲时间。",
-                         flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
+            send_tutu_message(chat_id, f"{girl} 当天已经没有空闲时间。",
+                              flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"), mood="full")
             return
         free_text = "、".join(f"{min_to_time(a)}-{min_to_time(b)}" for a, b in free)
         set_session(user_id, chat_id, "await_time", {"date": day, "girl": girl})
         cfg = settings()
-        send_message(chat_id, render_text(cfg.get("text_time_prompt"), girl=escape(girl), free_time=escape(free_text)),
-                     flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
+        send_tutu_message(chat_id, render_text(cfg.get("text_time_prompt"), girl=escape(girl), free_time=escape(free_text)),
+                          flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"), mood="available")
 
     def parse_time_text(text):
         if "包夜" in str(text or ""):
@@ -1418,8 +1493,8 @@ def register_telegram_booking(
         parsed = parse_time_text(message.get("text") or "")
         if not parsed:
             day = session["payload"].get("date")
-            send_message(chat.get("id"), "时间格式没有看懂，请按 <code>19-20</code> 或 <code>19:30-21:00</code> 发送。",
-                         flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
+            send_tutu_message(chat.get("id"), "时间格式没有看懂，请按 <code>19-20</code> 或 <code>19:30-21:00</code> 发送。",
+                              flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"), mood="question")
             return
         start_text, end_text = parsed
         day, girl = session["payload"].get("date"), session["payload"].get("girl")
@@ -1443,8 +1518,8 @@ def register_telegram_booking(
             free = free_ranges(c, day, girl, item["shift"])
             if not any(a >= fa and b <= fb for fa, fb in free):
                 free_text = "、".join(f"{min_to_time(fa)}-{min_to_time(fb)}" for fa, fb in free) or "无"
-                send_message(chat.get("id"), f"这个时间当前不可预约。可预约时间：{escape(free_text)}",
-                             flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"))
+                send_tutu_message(chat.get("id"), f"这个时间当前不可预约。可预约时间：{escape(free_text)}",
+                                  flow_keyboard(f"flow:girls:{day}", "⬅️ 重新选择女孩"), mood="full")
                 return
             if not confirmed:
                 set_session(user.get("id"), chat.get("id"), "confirm_time", {
@@ -1456,10 +1531,10 @@ def register_telegram_booking(
                      callback_button(cfg.get("button_reselect_girl") or "重新选女孩", f"flow:girls:{day}")],
                     [callback_button(cfg.get("button_cancel") or "❌ 取消预约", "flow:cancel")],
                 ] + ([[support_url_button(cfg)]] if support_url_button(cfg) else []))
-                send_message(chat.get("id"),
-                             render_text(cfg.get("text_confirm"), girl=escape(girl), date=escape(day),
-                                         start_time=escape(start_text), end_time=escape(end_text)),
-                             keyboard)
+                send_tutu_message(chat.get("id"),
+                                  render_text(cfg.get("text_confirm"), girl=escape(girl), date=escape(day),
+                                              start_time=escape(start_text), end_time=escape(end_text)),
+                                  keyboard, mood="waiting")
                 return
             price = int(item["profile"].get("list_price") or 15000)
             cur = c.execute("""INSERT INTO customer_reservations(
@@ -1494,8 +1569,8 @@ def register_telegram_booking(
         support = support_url_button(cfg)
         if support:
             submitted_rows.append([support])
-        send_message(chat.get("id"), cfg.get("text_submitted") or "预约已经交给店长审核，请稍等。",
-                     inline_keyboard(submitted_rows))
+        send_tutu_message(chat.get("id"), cfg.get("text_submitted") or "预约已经交给店长审核，请稍等。",
+                          inline_keyboard(submitted_rows), mood="waiting")
 
     def target_thread_id(row, cfg):
         target = str(row.get("telegram_group_chat_id") or cfg.get("default_review_chat_id") or "")
@@ -1713,7 +1788,8 @@ def register_telegram_booking(
         else:
             # 新客没有积分，不向客人展示无意义的积分确认/使用明细。
             points_text = f"<b>客人实际支付：¥{actual:,}</b>"
-        send_message(chat_id, f"{success_text}\n\n{points_text}\n\n{policy_text}", booking_action_keyboard(row, cfg))
+        send_tutu_message(chat_id, f"{success_text}\n\n{points_text}\n\n{policy_text}",
+                          booking_action_keyboard(row, cfg), mood="reserved", force_sticker=True)
         send_approved_chain(row, order_row, cfg, cfg.get("default_review_chat_id"))
         set_session(user.get("id"), chat_id, "booked", {"reservation_id": int(rid)})
 
@@ -1853,7 +1929,7 @@ def register_telegram_booking(
                          replied_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                       (feedback_text, int(feedback['id'])))
         cfg = settings()
-        send_message(chat.get('id'), str(cfg.get('customer_feedback_thanks') or DEFAULT_SETTINGS['customer_feedback_thanks']))
+        send_tutu_message(chat.get('id'), str(cfg.get('customer_feedback_thanks') or DEFAULT_SETTINGS['customer_feedback_thanks']), mood="thanks")
         return True
 
     def rate_customer_feedback(callback, reservation_id, rating):
@@ -1869,7 +1945,7 @@ def register_telegram_booking(
             c.execute("""UPDATE telegram_customer_feedback SET rating=?,status='等待文字',
                          updated_at=CURRENT_TIMESTAMP WHERE id=?""", (int(rating), int(row['id'])))
         answer_callback(callback.get('id'), f'已记录 {int(rating)} 分，谢谢主人♡')
-        prompt = send_message(chat_id, '🎀 谢谢主人评分～如果愿意的话，请直接回复这条消息写下真实感受，兔兔会认真收好♡')
+        prompt = send_tutu_message(chat_id, '🎀 谢谢主人评分～如果愿意的话，请直接回复这条消息写下真实感受，兔兔会认真收好♡', mood="thanks")
         with conn() as c:
             c.execute("""UPDATE telegram_customer_feedback SET reply_prompt_message_id=?,updated_at=CURRENT_TIMESTAMP
                          WHERE reservation_id=?""", (int((prompt or {}).get('message_id') or 0), int(reservation_id)))
@@ -1941,8 +2017,8 @@ def register_telegram_booking(
                          telegram_hotel_message_ids=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                       (file_id, caption, str(target), json.dumps([x for x in sent_message_ids if x]), rid))
         clear_session(user.get("id"))
-        send_message(chat.get("id"), "酒店地址和资料已经发送成功啦～如有变化，可以再次点击“发送酒店信息”更新。",
-                     booking_action_keyboard(row, cfg))
+        send_tutu_message(chat.get("id"), "酒店地址和资料已经发送成功啦～如有变化，可以再次点击“发送酒店信息”更新。",
+                          booking_action_keyboard(row, cfg), mood="reserved")
 
     def delete_bot_group_message(chat_id, message_id):
         if not chat_id or not int(message_id or 0):
@@ -3480,6 +3556,8 @@ def register_telegram_booking(
                             value = str(max(0, min(1440, int(float(value or 60)))))
                         elif key == "ai_single_token_warning":
                             value = str(max(1000, min(100000, int(float(value or 8000)))))
+                        elif key == "ai_sticker_frequency":
+                            value = str(max(0, min(100, int(float(value or 85)))))
                         elif key in ("ai_assistant_persona", "ai_customer_privacy_rules"):
                             value = value[:1500]
                         elif key in ("ai_customer_limit_message", "ai_customer_error_message", "customer_feedback_prompt", "customer_feedback_thanks"):

@@ -473,6 +473,7 @@ body:not(.role-boss) .boss-only{display:none!important}
     <select id="tgCustomerFeedbackEnabled"><option value="1">服务后询问真实反馈</option><option value="0">暂停服务后反馈询问</option></select>
     <label class="small">服务结束后多久询问（分钟）<br><input id="tgCustomerFeedbackDelay" type="number" min="0" max="1440" step="10"></label>
     <select id="tgAiGirlEnabled"><option value="1">女孩专属群开启</option><option value="0">女孩专属群关闭</option></select>
+    <select id="tgAiStickerFrequency"><option value="100">每次回复都配表情</option><option value="85">经常配表情（推荐）</option><option value="60">适量配表情</option><option value="0">暂不发送表情</option></select>
     <select id="tgAiModel"><option value="gpt-5-mini">经济：GPT-5 Mini</option><option value="gpt-5.6-luna">经济新版：GPT-5.6 Luna</option><option value="gpt-5.6-terra">智能：GPT-5.6 Terra</option><option value="gpt-5.6-sol">高智能：GPT-5.6 Sol</option></select>
     <label class="small">最大回答 Token<br><input id="tgAiMaxTokens" type="number" min="100" max="3000" step="50"></label>
     <select id="tgAiLearningEnabled"><option value="1">启用主人教学记忆</option><option value="0">暂停教学记忆</option></select>
@@ -2839,6 +2840,7 @@ async function loadTelegramSettings(){
   tgCustomerFeedbackEnabled.value=String(s.customer_feedback_enabled||'1');
   tgCustomerFeedbackDelay.value=s.customer_feedback_delay_minutes||60;
   tgAiGirlEnabled.value=String(s.ai_girl_group_enabled||'1');
+  tgAiStickerFrequency.value=String(s.ai_sticker_frequency||'85');
   tgAiModel.value=s.ai_model||telegramConfig.ai_model||'gpt-5-mini';
   tgAiMaxTokens.value=s.ai_max_output_tokens||700;
   tgAiLearningEnabled.value=String(s.ai_learning_enabled||'1');
@@ -2976,6 +2978,7 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     customer_feedback_enabled:tgCustomerFeedbackEnabled.value==='1'?'1':'0',
     customer_feedback_delay_minutes:Number(tgCustomerFeedbackDelay.value||60),
     ai_girl_group_enabled:tgAiGirlEnabled.value==='1'?'1':'0',
+    ai_sticker_frequency:Number(tgAiStickerFrequency.value||85),
     ai_model:nextModel,
     ai_max_output_tokens:Number(tgAiMaxTokens.value||700),
     ai_learning_enabled:tgAiLearningEnabled.value==='1'?'1':'0',
