@@ -34,7 +34,7 @@ GIRL_PRAISE_DIR=Path(os.environ.get('ALICE_GIRL_PRAISE_DIR') or (DB_PATH.parent/
 app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/static')
 
 app.config['JSON_AS_ASCII'] = False
-APP_VERSION = "v146_keep_manual_chain_messages"
+APP_VERSION = "v147_feedback_rank_and_mascot"
 
 @app.after_request
 def compress_large_json(response):
@@ -309,6 +309,14 @@ def _init_db_schema():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_customer ON telegram_customer_cancellations(customer_id, created_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_tg_cancel_user ON telegram_customer_cancellations(telegram_user_id, created_at)")
+        c.execute("""CREATE TABLE IF NOT EXISTS telegram_customer_feedback(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,reservation_id INTEGER NOT NULL UNIQUE,
+            order_id INTEGER DEFAULT 0,girl_name TEXT NOT NULL DEFAULT '',telegram_user_id TEXT DEFAULT '',
+            telegram_chat_id TEXT DEFAULT '',rating INTEGER DEFAULT 0,feedback_text TEXT DEFAULT '',
+            status TEXT DEFAULT '待邀请',invitation_message_id INTEGER DEFAULT 0,
+            reply_prompt_message_id INTEGER DEFAULT 0,invited_at TEXT DEFAULT '',replied_at TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_tg_customer_feedback_girl ON telegram_customer_feedback(girl_name,replied_at)")
         c.execute("""CREATE TABLE IF NOT EXISTS telegram_full_sync_days(
             sync_date TEXT PRIMARY KEY, full_synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
             late_auto_enabled INTEGER DEFAULT 0, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -373,7 +381,9 @@ def _init_db_schema():
         for column, definition in (
             ('publish_status', "TEXT DEFAULT '未上架'"), ('wp_post_id', 'INTEGER DEFAULT 0'),
             ('wp_attachment_id', 'INTEGER DEFAULT 0'), ('published_at', "TEXT DEFAULT ''"),
-            ('publish_error', "TEXT DEFAULT ''")):
+            ('publish_error', "TEXT DEFAULT ''"), ('ocr_text', "TEXT DEFAULT ''"),
+            ('ocr_status', "TEXT DEFAULT '待识别'"), ('ocr_error', "TEXT DEFAULT ''"),
+            ('ocr_model', "TEXT DEFAULT ''"), ('ocr_at', "TEXT DEFAULT ''")):
             if column not in praise_cols:
                 c.execute(f"ALTER TABLE girl_praises ADD COLUMN {column} {definition}")
         c.execute("UPDATE girl_praises SET publish_status='未上架' WHERE COALESCE(publish_status,'')='' ")
@@ -3787,7 +3797,20 @@ def all_data():
             'ok': True,
             'version': APP_VERSION,
             'customers':rows(c.execute('''SELECT c.*, COALESCE(o.total_orders,0) AS total_orders, COALESCE(o.total_spent, c.total_spent, 0) AS total_spent FROM customers c LEFT JOIN (SELECT customer_id, COUNT(*) AS total_orders, SUM(received_amount) AS total_spent FROM orders GROUP BY customer_id) o ON o.customer_id=c.id ORDER BY c.id DESC''').fetchall()),
-            'girls':rows(c.execute('SELECT * FROM girls ORDER BY id DESC').fetchall()),
+            'girls':rows(c.execute('''SELECT g.*,
+                                      COALESCE(f.feedback_count,0) AS feedback_count,
+                                      COALESCE(f.rating_count,0) AS feedback_rating_count,
+                                      ROUND(COALESCE(f.avg_rating,0),1) AS feedback_avg_rating
+                               FROM girls g
+                               LEFT JOIN (
+                                 SELECT girl_name,COUNT(*) AS feedback_count,
+                                        SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END) AS rating_count,
+                                        AVG(CASE WHEN rating>0 THEN rating END) AS avg_rating
+                                 FROM telegram_customer_feedback
+                                 WHERE status='已完成' OR rating>0
+                                 GROUP BY girl_name
+                               ) f ON f.girl_name=g.name
+                               ORDER BY g.id DESC''').fetchall()),
             'orders':rows(c.execute('''SELECT o.*, COALESCE(c.customer_type,'新客') AS customer_type,
                                              COALESCE(oc.customer_total_orders,0) AS customer_total_orders
                                       FROM orders o
@@ -3807,7 +3830,8 @@ def all_data():
             'quick_links':rows(c.execute('SELECT * FROM quick_links ORDER BY sort_order, id').fetchall()),
             'girl_praises':rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
                                                     gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
-                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
+                                                    gp.published_at, gp.publish_error, gp.ocr_text, gp.ocr_status,
+                                                    gp.ocr_error, gp.ocr_model, gp.ocr_at, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
@@ -4183,7 +4207,8 @@ def api_girl_praises():
                 if g:
                     data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
                                                     gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
-                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
+                                                    gp.published_at, gp.publish_error, gp.ocr_text, gp.ocr_status,
+                                                    gp.ocr_error, gp.ocr_model, gp.ocr_at, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     COALESCE(g.name, gp.girl_name) AS display_girl_name
                                              FROM girl_praises gp
@@ -4194,7 +4219,8 @@ def api_girl_praises():
                 else:
                     data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
                                                     gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
-                                                    gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
+                                                    gp.published_at, gp.publish_error, gp.ocr_text, gp.ocr_status,
+                                                    gp.ocr_error, gp.ocr_model, gp.ocr_at, gp.created_at, gp.updated_at,
                                                     CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                     gp.girl_name AS display_girl_name
                                              FROM girl_praises gp
@@ -4204,7 +4230,8 @@ def api_girl_praises():
             else:
                 data = rows(c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
                                                 gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
-                                                gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
+                                                gp.published_at, gp.publish_error, gp.ocr_text, gp.ocr_status,
+                                                gp.ocr_error, gp.ocr_model, gp.ocr_at, gp.created_at, gp.updated_at,
                                                 CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                                 COALESCE(g.name, gp.girl_name) AS display_girl_name
                                          FROM girl_praises gp
@@ -4213,6 +4240,15 @@ def api_girl_praises():
         return jsonify(ok=True, praises=data)
 
     d = request.json or {}
+    extract_text_id = d.get('extract_text_id')
+    if extract_text_id:
+        try:
+            return jsonify(ok=True, ocr=extract_girl_praise_text(int(extract_text_id)))
+        except Exception as exc:
+            with conn() as c:
+                c.execute("""UPDATE girl_praises SET ocr_status='识别失败',ocr_error=?,
+                             updated_at=CURRENT_TIMESTAMP WHERE id=?""", (str(exc)[:1000], int(extract_text_id)))
+            return jsonify(ok=False, error=str(exc)), 502
     publish_id = d.get('publish_id')
     if publish_id:
         try:
@@ -4276,13 +4312,17 @@ def api_girl_praises():
                         (g['id'], g['name'], source_name or '客人好评', rel, mime, sqlite3.Binary(raw)))
         row = c.execute('''SELECT gp.id, gp.girl_id, gp.girl_name, gp.source_name, gp.image_path,
                                   gp.image_mime, gp.publish_status, gp.wp_post_id, gp.wp_attachment_id,
-                                  gp.published_at, gp.publish_error, gp.created_at, gp.updated_at,
+                                  gp.published_at, gp.publish_error, gp.ocr_text, gp.ocr_status,
+                                  gp.ocr_error, gp.ocr_model, gp.ocr_at, gp.created_at, gp.updated_at,
                                   CASE WHEN gp.image_blob IS NOT NULL THEN 1 ELSE 0 END AS has_image_blob,
                                   COALESCE(g.name, gp.girl_name) AS display_girl_name
                            FROM girl_praises gp
                            LEFT JOIN girls g ON g.id=gp.girl_id
                            WHERE gp.id=?''', (cur.lastrowid,)).fetchone()
-    return jsonify(ok=True, praise=dict(row))
+    praise = dict(row)
+    threading.Thread(target=extract_girl_praise_text_background, args=(int(praise['id']),),
+                     name=f"alice-praise-ocr-{int(praise['id'])}", daemon=True).start()
+    return jsonify(ok=True, praise=praise, ocr_started=True)
 
 @app.route('/api/orders',methods=['POST'])
 def orders():
@@ -5884,6 +5924,75 @@ def pure_shift_rows_for_date(c, date_str):
     except Exception:
         pass
     return shifts
+
+def extract_girl_praise_text(praise_id):
+    """OCR a saved real-review screenshot with vision; never invent text not visible in the image."""
+    api_key = str(os.environ.get('OPENAI_API_KEY') or '').strip()
+    if not api_key:
+        raise RuntimeError('服务器尚未配置图片文字识别服务')
+    with conn() as c:
+        row = c.execute('SELECT * FROM girl_praises WHERE id=?', (int(praise_id),)).fetchone()
+    if not row:
+        raise ValueError('好评图片不存在')
+    item = dict(row)
+    raw = bytes(item.get('image_blob') or b'')
+    if not raw:
+        path = GIRL_PRAISE_DIR / Path(str(item.get('image_path') or '')).name
+        if path.exists():
+            raw = path.read_bytes()
+    if not raw:
+        raise ValueError('好评图片文件已丢失')
+    mime = str(item.get('image_mime') or 'image/png')
+    image_data = f'data:{mime};base64,' + base64.b64encode(raw).decode('ascii')
+    instructions = (
+        '你是图片文字归档助手。只逐字提取截图中由客户写下的评价正文；不要解释、总结、润色或补写。'
+        '忽略网页导航、按钮、时间、电量、用户名、联系方式、广告、店名和系统提示。'
+        '如果没有可辨认的客户评价正文，返回空字符串。只返回纯文本，不要Markdown。')
+    body = json.dumps({
+        'model': OPENAI_REVIEW_MODEL, 'instructions': instructions, 'store': False,
+        'input': [{'role': 'user', 'content': [
+            {'type': 'input_text', 'text': '请提取这张真实评价截图中的客户评价正文。'},
+            {'type': 'input_image', 'image_url': image_data, 'detail': 'high'},
+        ]}], 'max_output_tokens': 1200,
+    }, ensure_ascii=False).encode('utf-8')
+    req = Request('https://api.openai.com/v1/responses', data=body, method='POST', headers={
+        'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json',
+        'User-Agent': 'AliceMCR/1.0'})
+    try:
+        with urlopen(req, timeout=90) as response:
+            payload = json.loads(response.read(2_000_000).decode('utf-8'))
+    except HTTPError as exc:
+        detail = exc.read(1200).decode('utf-8', errors='replace')
+        raise RuntimeError(f'图片文字识别失败（HTTP {exc.code}）：{detail[:180]}') from exc
+    text_value = _openai_response_text(payload).strip()[:8000]
+    status = '已识别' if text_value else '无文字'
+    with conn() as c:
+        c.execute("""UPDATE girl_praises SET ocr_text=?,ocr_status=?,ocr_error='',ocr_model=?,
+                     ocr_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                  (text_value, status, str(payload.get('model') or OPENAI_REVIEW_MODEL), int(praise_id)))
+        source_page = f'mcr-girl-praise:{int(praise_id)}'
+        c.execute('DELETE FROM scraped_reviews WHERE source_page=?', (source_page,))
+        if text_value:
+            digest = hashlib.sha256((source_page + '|' + text_value).encode('utf-8')).hexdigest()
+            c.execute("""INSERT OR IGNORE INTO scraped_reviews(
+                         source_url,source_page,girl_name,review_text,rating,review_date,tags,review_hash,
+                         material_type,author_name,source_title,access_scope,created_at,updated_at)
+                         VALUES(?,?,?,?,0,?,?,?,'真实好评截图','匿名客户','MCR女孩表好评截图','internal',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)""",
+                      (source_page, source_page, str(item.get('girl_name') or ''), text_value,
+                       str(item.get('created_at') or '')[:10], ','.join(_review_tags(text_value)), digest))
+    return {'id': int(praise_id), 'status': status, 'text': text_value,
+            'model': str(payload.get('model') or OPENAI_REVIEW_MODEL)}
+
+def extract_girl_praise_text_background(praise_id):
+    try:
+        extract_girl_praise_text(praise_id)
+    except Exception as exc:
+        try:
+            with conn() as c:
+                c.execute("""UPDATE girl_praises SET ocr_status='识别失败',ocr_error=?,
+                             updated_at=CURRENT_TIMESTAMP WHERE id=?""", (str(exc)[:1000], int(praise_id)))
+        except Exception:
+            pass
 
 def copy_yesterday_pure_if_empty(c, date_str):
     try:

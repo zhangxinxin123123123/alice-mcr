@@ -406,15 +406,15 @@ body:not(.role-boss) .boss-only{display:none!important}
     <details class="manual-block" open data-search="学院总览 收益 客户数 订单数 刷新"><summary>🏫 学院总览</summary><div class="manual-body"><ul><li>显示今日及本月收益、客户数、订单数、支付构成和女孩收益。</li><li><b>强制读取全部数据：</b>立即从服务器重新读取全部 MCR 数据；页面数据不一致时使用。</li><li>图表随订单、结算和筛选日期自动更新。</li></ul></div></details>
     <details class="manual-block" data-search="订单 预约 编辑 删除 筛选 批量结算 积分折扣"><summary>🧾 订单 / 预约</summary><div class="manual-body"><ul><li>日期、女孩、客户、备注和结算状态均可组合筛选；“清空筛选”恢复全部。</li><li>点击一行的编辑按钮修改预约；删除后会同步影响客户消费、积分和接龙。</li><li><b>批量结算 / 批量未结算 / 批量删除：</b>先勾选左侧预约，再执行对应操作。</li><li>普通预约按客人实际服务费的 4% 累计积分，小数点后一律舍去；取消单不累计。</li><li>活动期间新人首次预约赠500积分、百字好评赠1000积分，由客服在“积分 / 充值”中核对后补发并填写原因。</li><li>备注含“积分折扣”时，仅在符合条件的可用积分满1000时抵扣并写入金额；使用后本单赠500积分。积分不足1000则不抵扣，订单仍正常导入。</li></ul></div></details>
     <details class="manual-block" data-search="客户 编号 类型 VIP SVIP 排名 TAG 积分 充值 流水 回滚 到期 提醒 联系"><summary>🐰 客户表 / 类型 / 积分充值</summary><div class="manual-body"><h4>客户类型自动规则</h4><ul><li><b>新客：</b>历史有效预约 0–1 单；<b>回头客：</b>历史有效预约达到 2 单。</li><li><b>VIP：</b>当月有效订单实付总额动态前 3；<b>SVIP：</b>当月有效预约总时长动态前 5。</li><li>榜单在当月随订单动态变化；月底最终入榜者获得保留身份。下月重新计算新榜，但以前获得的 VIP/SVIP 不消失，直到老板在“积分 / 充值”窗口人工取消。</li><li>VIP 与 SVIP 分开计算，同一客户可以同时拥有；取消订单不计入排名。窗口会分别显示“历史保留原因”和“本月动态名次”。</li></ul><h4>自动客户 TAG</h4><ul><li>至少 3 个有效订单后，根据近 90 天数据生成；近 30 天订单加倍权重。</li><li>优先顺序：女孩偏好（萝莉控/熟女控/服务控）→ 消费偏好 → 积分习惯 → 活跃程度。</li><li>客户表最多显示 4 个，其他标签以“…”表示，鼠标悬停可查看全部及生成原因；人工填写的偏好 TAG 始终保留。</li></ul><h4>积分与充值操作</h4><ol><li>找到客户，点击最左侧<b>“积分 / 充值”</b>，顶部可查看当前身份、当月名次和成为原因。</li><li>充值只可选择 ¥30,000 / ¥50,000 / ¥100,000 / ¥150,000 / ¥200,000 固定档位；确认后充值余额和永久赠送积分一次入账。</li><li>¥30,000、¥50,000、¥100,000档赠送积分不能用于每小时价格超过¥20,000的女孩；¥200,000档仅限VIP/SVIP。</li><li>其他人工积分调整或充值余额扣除必须填写原因，并留下操作人流水。</li></ol><ul><li>旧客户第一次打开时只建立“期初余额”快照，不修改任何旧订单或旧余额。</li><li>普通积分按新订单实际服务费的4%向下取整累计，有效期1个月；充值赠送积分永久有效。</li><li>普通积分超过 1,000 时，仅在到期前最后 1–5 天进入红色警报，并在内部群隔日提醒（通常第 5、3、1 天）。</li><li>备注含“积分减免、积分抵扣、积分折扣、积分全扣”时触发符合条件的积分使用，使用后本单赠送500积分。</li><li>老板在“管理日志”顶部修改全局积分比例或账本开关；新比例统一应用于所有客户之后的新订单，修改记录包含操作人及新旧值。</li></ul></div></details>
-    <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 TAG 群绑定 好评"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩类型会自动同时成为女孩 TAG，并带入纯出勤表；纯出勤表原来记忆的所有 TAG 都会保留，不会被类型或推荐词库覆盖。</li><li>推荐词库参考多纳多纳的常用风格，只保留新人、萝莉系、熟女系、服务系、大美女、清纯、可爱、性感、温柔、健谈、巨乳、长腿等实用标签；仍可自由输入。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
+    <details class="manual-block" data-search="女孩 头像 YY 定价 到手 标签 TAG 群绑定 好评 识别 反馈 推荐"><summary>🎀 女孩表</summary><div class="manual-body"><ul><li>维护女孩名、马甲、状态、每小时到手、对客定价、标签及联系方式。</li><li>女孩类型会自动同时成为女孩 TAG，并带入纯出勤表；纯出勤表原来记忆的所有 TAG 都会保留，不会被类型或推荐词库覆盖。</li><li>推荐词库参考多纳多纳的常用风格，只保留新人、萝莉系、熟女系、服务系、大美女、清纯、可爱、性感、温柔、健谈、巨乳、长腿等实用标签；仍可自由输入。</li><li>女孩名是业务主键，改名会同步关联订单；不要创建重名女孩。</li><li><b>女孩照片：</b>打开照片文件夹；YY 头像同步后会存入女孩表。</li><li><b>客人好评：</b>上传的真实评价截图会自动识别文字；失败时可点“重新识别文字”。识别结果会成为兔兔推荐女孩的参考资料。</li><li>女孩必须绑定 Telegram 专属群，批准后的接龙和酒店资料才会发到该群；未绑定时发内部审核群。</li></ul></div></details>
     <details class="manual-block" data-search="金额 结算 签收 通报 截图 内部审核群"><summary>💴 金额结算</summary><div class="manual-body"><ul><li>按日期统计未结算订单；勾选签收后保存，超过三天未结算会红色提醒。</li><li><b>保存应收金额：</b>保存当天人工调整；<b>结算所有：</b>把当前列表全部结算。</li><li><b>发送今日结算截图 / 当日结算通报：</b>生成当天结算图并发送到内部审核群，图中会标明每位女孩已签收、部分签收或未签收。</li></ul></div></details>
     <details class="manual-block" data-search="链接跳转 常用短语 保存 打开 复制"><summary>🔗 链接跳转</summary><div class="manual-body"><ul><li>保存官网、酒店等网址或常用短语；填写名称、内容和排序后点“保存”。</li><li>网址使用“打开”，普通文字使用“复制”；编辑后需再次保存。</li></ul></div></details>
     <details class="manual-block" data-search="接龙导入 微信 LINE 日期 女孩 客户编号 新客户"><summary>📥 接龙导入</summary><div class="manual-body"><ol><li>首行写日期和女孩，例如 <code>0908娜娜子</code>。</li><li>预约行写 <code>序号.时间/价格/客户</code>；首次预约写客户名，以后写四位客户编号。</li><li>纯数字客户名使用双斜线，例如 <code>8-9/10000//123</code>。</li><li>导入前会与旧接龙核对：不变的不重复新增，新增的写入，修改的同步修改。</li></ol></div></details>
-    <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li></ol></div></details>
+    <details class="manual-block" data-search="TEL Telegram Bot 预约 审批 酒店 取消 客服 群 反馈 评分 推荐"><summary>✈️ TEL 预约流程</summary><div class="manual-body"><ol><li>客户打开 Bot，选择日期、女孩并输入 24 小时时间。</li><li>Bot 只读取 MCR 中女孩当天的出勤和空闲时间，冲突或已满不可预约。</li><li>客户确认后，预约先发内部群，由店长点击批准或拒绝。</li><li>批准后写入 MCR；女孩专属群只收到当天完整接龙。新增预约会在旧接龙基础上追加。</li><li>客户通过“发送酒店”提交地址、定位或截图后，资料写入 MCR 并发女孩群。</li><li>取消预约会同步取消 MCR 与专属群接龙；第一次取消扣累计积分，第二次按规则拉黑。</li><li>“人工客服”按钮跳转到 TEL 设置中填写的客服 username。</li><li>预约结束后，兔兔按后台设定的延迟私聊客户收集 1–5 分和真实文字反馈；每张预约只询问一次。</li><li>推荐时先检查 MCR 空档，再综合女孩 TAG、近期预约热度、Bot 服务后反馈和女孩表真实好评截图；内部排名和数字不会告诉客户。</li></ol></div></details>
     <details class="manual-block" data-search="TEL 关键词 Alice AI 助手 经营建议 导入 最新接龙 自动导入 出勤 积分查询 编号查询 绑定"><summary>⌨️ TEL 群关键词</summary><div class="manual-body">
      <div class="manual-command"><code>兔兔 + 问题</code><span>内部群和女孩专属群先说“兔兔”触发，之后的问题不限制主题，由 AI 理解自然语言；<code>@AliceCuteGril</code> 为最高权限主人账号，但女孩群的业务数据仍只读取本女孩资料。客户私聊仅回答TEL预约与女孩介绍/推荐，可直接说问题，或只叫一次兔兔后连续对话；询问月牙时固定引导至 <code>@aliceyueya</code>。发送 <code>继续预约</code> 可退出 AI，发送 <code>兔兔 清空</code> 可清除自己的最近对话。</span></div>
      <div class="manual-command"><code>教学：正确回答</code><span>内部群回复兔兔的消息发送，会存为相似问题的经营回答范例；不回复直接发送时会存为长期规则。也可点击回答下方的“采纳/不准确”。</span></div>
-     <div class="manual-command"><code>AI助手开启 / 关闭 / 状态</code><span>店长、客服或群管理员控制内部 AI 助手；状态会同时显示 OpenAI API 是否配置。</span></div>
+     <div class="manual-command"><code>AI助手开启 / 关闭 / 状态</code><span>店长、客服或群管理员控制兔兔；状态会显示服务是否已经配置。</span></div>
      <div class="manual-command"><code>导入</code><span>回复一张接龙消息发送；也可把“导入”写在当天四位日期前。与旧数据核对后仅新增或修改。</span></div>
      <div class="manual-command"><code>最新接龙</code><span>在群里重新发送该女孩当天最新接龙。</span></div>
      <div class="manual-command"><code>自动导入开启 / 关闭 / 状态</code><span>内部群控制每 30 分钟扫描；“状态”同时显示下次检查时间。专属群重发当天接龙时，即使关闭也会即时检查。</span></div>
@@ -461,15 +461,17 @@ body:not(.role-boss) .boss-only{display:none!important}
  </section>
 
  <section id="operationAudit" class="panel">
-  <div class="card"><h2>兔兔 AI 助手设置</h2>
+   <div class="card"><h2>兔兔｜爱丽丝 AI 客服助手兼吉祥物</h2>
    <p class="note">内部群、客户私聊与女孩专属群使用三套严格隔离的资料权限。客户默认可以轻松闲聊和获得 TEL 预约协助，但店内经营、后台、其他客户和员工等核心隐私始终不会对外提供。</p>
    <div class="form">
-    <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
+    <select id="tgAiEnabled"><option value="1">开启兔兔</option><option value="0">让兔兔休息</option></select>
     <input id="tgAiName" placeholder="助手名字，例如 兔兔">
     <input id="tgAiOwnerTitle" placeholder="内部群称呼，例如 主人">
     <select id="tgAiCustomerEnabled"><option value="1">客户私聊开启</option><option value="0">客户私聊关闭</option></select>
     <input id="tgAiCustomerTitle" placeholder="客户称呼，例如 主人">
     <select id="tgAiCustomerChatMode"><option value="general">客户可预约＋轻松闲聊</option><option value="booking_only">客户仅限预约咨询</option></select>
+    <select id="tgCustomerFeedbackEnabled"><option value="1">服务后询问真实反馈</option><option value="0">暂停服务后反馈询问</option></select>
+    <label class="small">服务结束后多久询问（分钟）<br><input id="tgCustomerFeedbackDelay" type="number" min="0" max="1440" step="10"></label>
     <select id="tgAiGirlEnabled"><option value="1">女孩专属群开启</option><option value="0">女孩专属群关闭</option></select>
     <select id="tgAiModel"><option value="gpt-5-mini">经济：GPT-5 Mini</option><option value="gpt-5.6-luna">经济新版：GPT-5.6 Luna</option><option value="gpt-5.6-terra">智能：GPT-5.6 Terra</option><option value="gpt-5.6-sol">高智能：GPT-5.6 Sol</option></select>
     <label class="small">最大回答 Token<br><input id="tgAiMaxTokens" type="number" min="100" max="3000" step="50"></label>
@@ -489,10 +491,12 @@ body:not(.role-boss) .boss-only{display:none!important}
    <label class="small">客户聊天与隐私补充规则<textarea id="tgAiCustomerPrivacy" rows="3" placeholder="可补充允许聊什么、如何推荐；系统固定的核心隐私保护不能关闭"></textarea></label>
    <label class="small">客户当日流量用完文案<textarea id="tgAiCustomerLimitMessage" rows="2" placeholder="前台不会显示 API、接口、Token 或余额等技术信息"></textarea></label>
    <label class="small">客户服务临时异常文案<textarea id="tgAiCustomerErrorMessage" rows="2" placeholder="例如：主人，兔兔今天有一点点累啦…"></textarea></label>
+   <label class="small">服务后反馈邀请文案<textarea id="tgCustomerFeedbackPrompt" rows="3" placeholder="可使用 {girl}、{date}、{start_time}、{end_time}"></textarea></label>
+   <label class="small">收到真实反馈后的感谢文案<textarea id="tgCustomerFeedbackThanks" rows="2"></textarea></label>
    <div id="tgAiStatus" class="note"></div>
    <div id="tgAiUsage" class="note"></div>
    <p class="note warn">⚠️ 更换更强模型会增加 OpenAI API 费用；系统只做预警或按设定暂停，不会自动充值、升级模型或 Render 套餐。</p>
-   <button class="primary" onclick="saveTelegramSettings('兔兔 AI 助手设置已保存')">保存 AI 助手设置</button>
+   <button class="primary" onclick="saveTelegramSettings('兔兔设置已保存')">保存兔兔设置</button>
   </div>
   <div class="card"><div class="card-title-row"><h2>兔兔经营教学</h2><button class="soft" onclick="loadAiLearning()">刷新</button></div>
    <p class="note">在内部群回复兔兔发送 <code>教学：正确回答</code>，可保存为相似问题的回答范例；不回复消息直接发送时，会保存为长期经营规则。</p>
@@ -896,7 +900,9 @@ function renderGirlPraiseFolder(){
     const name=escHtml(p.source_name||p.display_girl_name||p.girl_name||"客人好评");
     const published=String(p.publish_status||'未上架')==='已上架';
     const statusTitle=p.publish_error?` title="${escHtml(p.publish_error)}"`:'';
-    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span><span class="${published?'log-ok':'log-warn'}"${statusTitle}>官网状态：${published?'已上架':'未上架'}</span></div><div class="acts"><button class="primary" onclick="publishPraiseImage(${id})" ${published?'disabled':''}>${published?'已上架':'一键上架官网'}</button><button class="soft" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button><button class="danger" onclick="deletePraiseImage(${id})">删除</button></div></div>`;
+    const ocrStatus=String(p.ocr_status||'待识别'),ocrOk=ocrStatus==='已识别';
+    const ocrTitle=p.ocr_error?` title="${escHtml(p.ocr_error)}"`:'';
+    return `<div class="praise-tile"><img src="${escHtml(src)}" title="点击复制图片" alt="图片文件不存在，请重新保存" onclick="copyPraiseImage(${id})" onerror="this.closest('.praise-tile')?.classList.add('missing')"><div class="praise-meta"><b>${name}</b><span>${escHtml(p.created_at||"")}</span><span class="${published?'log-ok':'log-warn'}"${statusTitle}>官网状态：${published?'已上架':'未上架'}</span><span class="${ocrOk?'log-ok':(ocrStatus==='识别失败'?'log-fail':'log-warn')}"${ocrTitle}>真实评价文字：${escHtml(ocrStatus)}</span>${p.ocr_text?`<details><summary>查看识别文字</summary><span style="white-space:pre-wrap">${escHtml(p.ocr_text)}</span></details>`:''}</div><div class="acts"><button class="primary" onclick="publishPraiseImage(${id})" ${published?'disabled':''}>${published?'已上架':'一键上架官网'}</button><button class="soft" onclick="extractPraiseText(${id})">${ocrOk?'重新识别文字':'识别评价文字'}</button><button class="soft" onclick="copyPraiseImage(${id})">复制图片</button><button class="soft" onclick="downloadPraiseImage(${id})">下载</button><button class="danger" onclick="deletePraiseImage(${id})">删除</button></div></div>`;
   }).join("");
 }
 async function copyImageFromUrl(url){
@@ -940,6 +946,11 @@ async function publishPraiseImage(id){
  try{await api('/api/girl_praises',{publish_id:id});await loadAll();renderGirlPraiseFolder();alert('官网上架成功');}
  catch(e){console.error(e);await loadAll();renderGirlPraiseFolder();alert(e.message||'官网上架失败');}
  finally{endBusy();}
+}
+async function extractPraiseText(id){
+ beginBusy('正在识别真实评价文字…');
+ try{await api('/api/girl_praises',{extract_text_id:id});await loadAll();renderGirlPraiseFolder();alert('评价文字识别完成，已加入兔兔推荐资料');}
+ catch(e){alert(`识别失败：${e.message}`);}finally{endBusy();}
 }
 async function copyLatestPraiseImage(){
   const rows=currentPraiseRows();
@@ -2722,7 +2733,7 @@ function costMeta(filter,map){const roomCost=(data.room_assignments||[]).filter(
 function render(){applyRole();refreshSelects();refreshRoomControls();const isUser=!(canAccessModule('home')||canAccessModule('stats')||canAccessModule('settlement'));kCustomers.textContent=canAccessModule('customers')?data.customers.length:"—";kOrders.textContent=canAccessModule('orders')?data.orders.length:"—";let month=todayStr.slice(0,7);const amtKey=isUser?"received_amount":"store_profit";kToday.textContent=yen(data.orders.filter(o=>o.order_date===todayStr).reduce((s,o)=>s+Number(o[amtKey]||0),0));kMonth.textContent=yen(data.orders.filter(o=>String(o.order_date).startsWith(month)).reduce((s,o)=>s+Number(o.store_profit||0),0));
  table("ordersTable",filteredOrders(),[{k:"__select",t:'<input type="checkbox" onchange="toggleAllVisibleOrders(this.checked)">',f:(v,o)=>`<input type="checkbox" ${selectedOrders.has(Number(o.id))?"checked":""} onchange="toggleOrderSelect(${o.id},this.checked)">`},{k:"order_date",t:"日期"},{k:"service_time",t:"时间"},{k:"hours",t:"小时"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"customer_no",t:"客户ID",f:linkOrderCustomerNo},{k:"customer_name",t:"客户名",f:linkCustomerName},{k:"customer_type",t:"客户类型",f:customerTypeBadge},{k:"customer_total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"received_amount",t:"客人支付",f:yen},{k:"points_used",t:"使用积分",f:pointsValue},{k:"girl_take_home",t:"女孩到手",f:yen},{k:"store_profit",t:"店铺收益",f:yen},{k:"points",t:"新增积分",f:pointsValue},{k:"order_status",t:"订单状态"},{k:"settlement_status",t:"结算"},{k:"payment_method",t:"支付",f:v=>v||"现金"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"orders","editOrder");
  table("customersTable",filteredCustomers().map(c=>{const r=customerRetention(c), e=customerPointExpire(c);return {...c,ledger_action:c.id,preference_tags:customerTagsHtml(c),point_expire:e.txt,point_expire_cls:e.cls,retention:`${r.days}天｜${r.status}`,retention_cls:r.cls};}),[{k:"ledger_action",t:"积分 / 充值",f:(v,r)=>data.loyalty_settings?.enabled===false?`<button class="soft" onclick='event.stopPropagation();editCustomer(${JSON.stringify(r).replaceAll("'","&#39;")})'>旧方式编辑</button>`:`<button class="primary" onclick="event.stopPropagation();openCustomerLedger(${Number(r.id)})">打开</button>`},{k:"customer_no",t:"客户ID",f:linkCustomerNo},{k:"name",t:"昵称"},{k:"customer_type",t:"类型",f:customerTypeBadge},{k:"total_orders",t:"预约总单数",f:linkOrderTotalByCustomer},{k:"total_spent",t:"总消费金额",f:yen},{k:"recharge_balance",t:"充值余额",f:balanceValue},{k:"points",t:"积分",f:pointsValue},{k:"point_expire",t:"积分期限",f:(v,r)=>`<span class="${r.point_expire_cls||''}">${v}</span>`},{k:"retention",t:"留存状态",f:(v,r)=>`<span class="${r.retention_cls||''}">${v}</span>`},{k:"preference_tags",t:"客户 TAG",f:v=>v},{k:"source",t:"来源"},{k:"contact",t:"联系方式"},{k:"remark",t:"备注"}],"customers","editCustomer");
- table("girlsTable",filteredGirls().map(g=>({...g,__praises:praiseRowsForGirl(g).length})),[{k:"avatar_url",t:"YY头像",f:girlAvatarCell},{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"__praises",t:"客人好评",f:girlPraiseCell},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
+ table("girlsTable",filteredGirls().map(g=>({...g,__praises:praiseRowsForGirl(g).length,__feedback:Number(g.feedback_count||0)?`${Number(g.feedback_count)}条${Number(g.feedback_rating_count||0)?` / ${Number(g.feedback_avg_rating||0).toFixed(1)}分`:''}`:'—'})),[{k:"avatar_url",t:"YY头像",f:girlAvatarCell},{k:"name",t:"女孩名"},{k:"girl_alias",t:"马甲"},{k:"girl_type",t:"类型"},{k:"girl_status",t:"状态"},{k:"enrollment",t:"在籍"},{k:"take_home_per_hour",t:"每小时到手",f:yen},{k:"list_price",t:"定价",f:v=>Number(v||0)?yen(v):""},{k:"__praises",t:"客人好评",f:girlPraiseCell},{k:"__feedback",t:"服务后反馈"},{k:"contact",t:"联系方式"},{k:"tags",t:"标签"},{k:"remark",t:"备注"},{k:"remark2",t:"备注2"}],"girls","editGirl");
  if(window.scheduleTable){table("scheduleTable", data.schedules||[], [{k:"schedule_date",t:"日期"},{k:"girl_name",t:"女孩",f:linkGirlName},{k:"start_time",t:"开始"},{k:"end_time",t:"结束"},{k:"price",t:"价格",f:yen},{k:"status",t:"状态"},{k:"note",t:"备注"}], "schedules", "editSchedule");renderCuteSchedule();try{renderAttAll();}catch(e){console.error(e);}}
  renderImportCheck();renderEnums();renderRooms();renderSettlement();renderQuickLinks();if(document.getElementById("girlPraiseFolder")?.classList.contains("on"))renderGirlPraiseFolder();
  if(isUser){sDay.value=todayStr; sDay.disabled=true;}else{sDay.disabled=false;} let sd=sDay.value,sm=sMonth.value;
@@ -2825,6 +2836,8 @@ async function loadTelegramSettings(){
   tgAiCustomerEnabled.value=String(s.ai_customer_enabled||'1');
   tgAiCustomerTitle.value=s.ai_customer_title||'主人';
   tgAiCustomerChatMode.value=s.ai_customer_chat_mode||'general';
+  tgCustomerFeedbackEnabled.value=String(s.customer_feedback_enabled||'1');
+  tgCustomerFeedbackDelay.value=s.customer_feedback_delay_minutes||60;
   tgAiGirlEnabled.value=String(s.ai_girl_group_enabled||'1');
   tgAiModel.value=s.ai_model||telegramConfig.ai_model||'gpt-5-mini';
   tgAiMaxTokens.value=s.ai_max_output_tokens||700;
@@ -2843,6 +2856,8 @@ async function loadTelegramSettings(){
   tgAiCustomerPrivacy.value=s.ai_customer_privacy_rules||'';
   tgAiCustomerLimitMessage.value=s.ai_customer_limit_message||'';
   tgAiCustomerErrorMessage.value=s.ai_customer_error_message||'';
+  tgCustomerFeedbackPrompt.value=s.customer_feedback_prompt||'';
+  tgCustomerFeedbackThanks.value=s.customer_feedback_thanks||'';
   const rates=(telegramConfig.ai_model_pricing||{})[telegramConfig.ai_model]||{};
   tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜异常私聊：<b>${s.ai_alert_chat_id?'已绑定':'等待该账号给 Bot 发消息'}</b>｜单价备忘：输入 $${Number(rates.input||0).toFixed(2)} / 输出 $${Number(rates.output||0).toFixed(2)}（每百万 Token）｜内部群提问：<code>${escHtml(s.ai_assistant_name||'兔兔')} 今天经营怎么样？</code>`;
   renderAiUsage(telegramConfig.ai_usage||{});
@@ -2958,6 +2973,8 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_customer_enabled:tgAiCustomerEnabled.value==='1'?'1':'0',
     ai_customer_title:tgAiCustomerTitle.value.trim()||'主人',
     ai_customer_chat_mode:tgAiCustomerChatMode.value,
+    customer_feedback_enabled:tgCustomerFeedbackEnabled.value==='1'?'1':'0',
+    customer_feedback_delay_minutes:Number(tgCustomerFeedbackDelay.value||60),
     ai_girl_group_enabled:tgAiGirlEnabled.value==='1'?'1':'0',
     ai_model:nextModel,
     ai_max_output_tokens:Number(tgAiMaxTokens.value||700),
@@ -2976,6 +2993,8 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_customer_privacy_rules:tgAiCustomerPrivacy.value.trim(),
     ai_customer_limit_message:tgAiCustomerLimitMessage.value.trim(),
     ai_customer_error_message:tgAiCustomerErrorMessage.value.trim(),
+    customer_feedback_prompt:tgCustomerFeedbackPrompt.value.trim(),
+    customer_feedback_thanks:tgCustomerFeedbackThanks.value.trim(),
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();

@@ -63,7 +63,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "telegram_customer_cancellations", "telegram_daily_chain_messages",
                           "telegram_chain_inbox", "telegram_attendance_inquiries",
                           "telegram_closing_confirmations", "telegram_full_sync_days", "telegram_customer_digests",
-                          "telegram_point_alert_digests", "telegram_point_expiry_events", "telegram_point_maintenance_runs", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger",
+                          "telegram_point_alert_digests", "telegram_point_expiry_events", "telegram_point_maintenance_runs", "scraped_reviews", "girl_praises", "operation_logs", "customer_ledger", "telegram_customer_feedback",
                           "customer_recharge_bonus_lots",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
@@ -217,6 +217,12 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             c.execute("UPDATE girls SET remark='温柔爱聊天',tags='服务系' WHERE name='娜娜子'")
             c.execute("UPDATE pure_shifts SET tags='新人 服务系' WHERE girl_name='娜娜子' AND shift_date=?", (self.day,))
+            c.execute("""INSERT INTO orders(order_date,girl_name,service_time,received_amount,order_status)
+                         VALUES(?,?,?,?,?)""", (self.day, '娜娜子', '19-20', 15000, '预约中'))
+            c.execute("""INSERT INTO telegram_customer_feedback(reservation_id,order_id,girl_name,rating,feedback_text,status,replied_at)
+                         VALUES(90001,1,'娜娜子',5,'本人很温柔，聊天自然，服务也很认真。','已完成',CURRENT_TIMESTAMP)""")
+            c.execute("""INSERT INTO girl_praises(girl_name,image_path,ocr_text,ocr_status,ocr_at)
+                         VALUES('娜娜子','/girl_praises/test.png','客人评价：很会照顾气氛，见面体验很好。','已识别',CURRENT_TIMESTAMP)""")
         captured = []
         old_urlopen = self.telegram_module.urlopen
 
@@ -233,23 +239,102 @@ class TelegramBookingFlowTest(unittest.TestCase):
             self.webhook({"message": {"message_id": 3, "chat": {"id": 9125, "type": "private"},
                                       "from": customer, "text": "明天怎么预约？"}})
             self.webhook({"message": {"message_id": 4, "chat": girl_chat, "from": manager,
-                                      "text": "艾莉兔 我明天几点出勤？"}})
+                                      "text": "兔兔 我明天几点出勤？"}})
         finally:
             self.telegram_module.urlopen = old_urlopen
             os.environ.pop("OPENAI_API_KEY", None)
             os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
 
-        self.assertEqual(len(captured), 2)
+        with self.app_module.conn() as c:
+            ai_failure = c.execute("SELECT detail FROM telegram_ai_audit_logs WHERE response_status=500 ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertEqual(len(captured), 2, str(ai_failure[0] if ai_failure else captured))
         customer_body, girl_body = captured
         self.assertIn("称呼对方为“主人”", customer_body["instructions"])
         self.assertIn("陪客户轻松聊天", customer_body["instructions"])
         self.assertIn("推荐女孩时只能依据", customer_body["instructions"])
+        self.assertIn("爱丽丝的AI客服助手兼吉祥物", customer_body["instructions"])
         self.assertIn("温柔爱聊天", customer_body["input"][-1]["content"])
         self.assertIn("新人 服务系", customer_body["input"][-1]["content"])
+        self.assertIn("推荐参考", customer_body["input"][-1]["content"])
+        self.assertIn("聊天自然", customer_body["input"][-1]["content"])
+        self.assertIn("照顾气氛", customer_body["input"][-1]["content"])
         self.assertNotIn("店铺收益", customer_body["input"][-1]["content"])
         self.assertIn("称呼对方为“姐姐”", girl_body["instructions"])
         self.assertIn("本群绑定女孩", girl_body["input"][-1]["content"])
         self.assertNotIn("客户身份", girl_body["input"][-1]["content"])
+
+    def test_completed_booking_invites_and_saves_customer_feedback(self):
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO customer_reservations(
+                reserve_date,girl_name,start_time,end_time,status,order_id,
+                telegram_user_id,telegram_chat_id,telegram_username)
+                VALUES(?,?,?,?,?,?,?,?,?)""",
+                      (self.day, '娜娜子', '19:00', '20:00', '已确认', 7788,
+                       '9128', '9128', 'guest9128'))
+            reservation_id = int(c.execute('SELECT last_insert_rowid()').fetchone()[0])
+        boss = self.client.post('/api/login', json={'username': 'Star', 'password': '9941'})
+        result = self.client.post('/api/telegram/customer-feedback/run',
+                                  headers={'X-Alice-Role': 'boss', 'X-Alice-User': 'Star',
+                                           'X-Alice-Session': boss.json['session_token']},
+                                  json={'force': True})
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        self.assertEqual(result.json['sent'], 1)
+        with self.app_module.conn() as c:
+            feedback = dict(c.execute('SELECT * FROM telegram_customer_feedback WHERE reservation_id=?',
+                                      (reservation_id,)).fetchone())
+        self.assertEqual(feedback['status'], '已邀请')
+        self.webhook({'callback_query': {
+            'id': 'feedback-rate', 'from': {'id': 9128, 'first_name': '客人'},
+            'data': f'customer_feedback:rating:{reservation_id}:5',
+            'message': {'message_id': feedback['invitation_message_id'],
+                        'chat': {'id': 9128, 'type': 'private'}}}})
+        with self.app_module.conn() as c:
+            rated = dict(c.execute('SELECT * FROM telegram_customer_feedback WHERE reservation_id=?',
+                                   (reservation_id,)).fetchone())
+        self.assertEqual(rated['rating'], 5)
+        self.assertEqual(rated['status'], '等待文字')
+        self.webhook({'message': {
+            'message_id': 99, 'chat': {'id': 9128, 'type': 'private'},
+            'from': {'id': 9128, 'first_name': '客人'}, 'text': '聊天很自然，整体很开心。',
+            'reply_to_message': {'message_id': rated['reply_prompt_message_id']}}})
+        with self.app_module.conn() as c:
+            saved = dict(c.execute('SELECT * FROM telegram_customer_feedback WHERE reservation_id=?',
+                                   (reservation_id,)).fetchone())
+        self.assertEqual(saved['status'], '已完成')
+        self.assertIn('整体很开心', saved['feedback_text'])
+
+    def test_girl_praise_screenshot_ocr_becomes_recommendation_material(self):
+        with self.app_module.conn() as c:
+            c.execute("""INSERT INTO girl_praises(girl_name,image_path,image_mime,image_blob)
+                         VALUES('娜娜子','/girl_praises/review.png','image/png',?)""", (b'fake-image',))
+            praise_id = int(c.execute('SELECT last_insert_rowid()').fetchone()[0])
+        old_urlopen = self.app_module.urlopen
+
+        def fake_openai(req, timeout=90):
+            self.assertEqual(req.full_url, 'https://api.openai.com/v1/responses')
+            request_body = json.loads(req.data.decode('utf-8'))
+            self.assertEqual(request_body['input'][0]['content'][1]['type'], 'input_image')
+            return FakeTelegramResponse({'model': 'gpt-5-mini',
+                                         'output_text': '本人体验很好，聊天自然，也很会照顾气氛。'})
+
+        os.environ['OPENAI_API_KEY'] = 'test-openai-key'
+        self.app_module.urlopen = fake_openai
+        login = self.client.post('/api/login', json={'username': 'admin', 'password': 'admin123'})
+        try:
+            result = self.client.post('/api/girl_praises',
+                                      headers={'X-Alice-Session': login.json['session_token']},
+                                      json={'extract_text_id': praise_id})
+        finally:
+            self.app_module.urlopen = old_urlopen
+            os.environ.pop('OPENAI_API_KEY', None)
+        self.assertEqual(result.status_code, 200, result.get_data(as_text=True))
+        self.assertEqual(result.json['ocr']['status'], '已识别')
+        with self.app_module.conn() as c:
+            praise = dict(c.execute('SELECT * FROM girl_praises WHERE id=?', (praise_id,)).fetchone())
+            material = dict(c.execute("SELECT * FROM scraped_reviews WHERE source_page=?",
+                                      (f'mcr-girl-praise:{praise_id}',)).fetchone())
+        self.assertIn('照顾气氛', praise['ocr_text'])
+        self.assertEqual(material['material_type'], '真实好评截图')
 
     def test_owner_and_girl_general_questions_are_not_treated_as_out_of_scope(self):
         internal = {"id": -90135, "type": "supergroup", "title": "Alice内部群"}
