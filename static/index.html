@@ -462,12 +462,14 @@ body:not(.role-boss) .boss-only{display:none!important}
 
  <section id="operationAudit" class="panel">
   <div class="card"><h2>兔兔 AI 助手设置</h2>
-   <p class="note">内部群、客户私聊与女孩专属群使用三套严格隔离的资料权限。内部群可看经营摘要；客户只能获得 TEL 预约协助；女孩只能询问本人出勤、接龙和结算。</p>
+   <p class="note">内部群、客户私聊与女孩专属群使用三套严格隔离的资料权限。客户默认可以轻松闲聊和获得 TEL 预约协助，但店内经营、后台、其他客户和员工等核心隐私始终不会对外提供。</p>
    <div class="form">
     <select id="tgAiEnabled"><option value="1">开启 AI 助手</option><option value="0">关闭 AI 助手</option></select>
     <input id="tgAiName" placeholder="助手名字，例如 兔兔">
     <input id="tgAiOwnerTitle" placeholder="内部群称呼，例如 主人">
     <select id="tgAiCustomerEnabled"><option value="1">客户私聊开启</option><option value="0">客户私聊关闭</option></select>
+    <input id="tgAiCustomerTitle" placeholder="客户称呼，例如 主人">
+    <select id="tgAiCustomerChatMode"><option value="general">客户可预约＋轻松闲聊</option><option value="booking_only">客户仅限预约咨询</option></select>
     <select id="tgAiGirlEnabled"><option value="1">女孩专属群开启</option><option value="0">女孩专属群关闭</option></select>
     <select id="tgAiModel"><option value="gpt-5-mini">经济：GPT-5 Mini</option><option value="gpt-5.6-luna">经济新版：GPT-5.6 Luna</option><option value="gpt-5.6-terra">智能：GPT-5.6 Terra</option><option value="gpt-5.6-sol">高智能：GPT-5.6 Sol</option></select>
     <label class="small">最大回答 Token<br><input id="tgAiMaxTokens" type="number" min="100" max="3000" step="50"></label>
@@ -480,11 +482,13 @@ body:not(.role-boss) .boss-only{display:none!important}
     <select id="tgAiBudgetAction"><option value="warn">达到后提醒，继续回答</option><option value="block">达到后提醒并暂停回答</option></select>
     <select id="tgAiAbnormalAlerts"><option value="1">异常调用私聊提醒</option><option value="0">异常调用只记日志</option></select>
     <input id="tgAiAlertUsername" placeholder="提醒账号，例如 @AliceCuteGril">
-    <select id="tgAiBlockOutOfScope"><option value="1">拦截无关问题（节省费用）</option><option value="0">无关问题也调用 AI</option></select>
     <label class="small">单次 Token 预警线<br><input id="tgAiSingleTokenWarning" type="number" min="1000" max="100000" step="500"></label>
     <input id="tgAiTeacherIds" placeholder="允许教学的 Telegram ID，逗号分隔；留空=群管理员">
    </div>
-   <textarea id="tgAiPersona" rows="3" placeholder="语气设定，例如：温柔、聪明、可爱，回答简洁"></textarea>
+   <label class="small">兔兔整体语气设定<textarea id="tgAiPersona" rows="3" placeholder="例如：温柔、聪明、可爱，回答简洁"></textarea></label>
+   <label class="small">客户聊天与隐私补充规则<textarea id="tgAiCustomerPrivacy" rows="3" placeholder="可补充允许聊什么、如何推荐；系统固定的核心隐私保护不能关闭"></textarea></label>
+   <label class="small">客户当日流量用完文案<textarea id="tgAiCustomerLimitMessage" rows="2" placeholder="前台不会显示 API、接口、Token 或余额等技术信息"></textarea></label>
+   <label class="small">客户服务临时异常文案<textarea id="tgAiCustomerErrorMessage" rows="2" placeholder="例如：主人，兔兔今天有一点点累啦…"></textarea></label>
    <div id="tgAiStatus" class="note"></div>
    <div id="tgAiUsage" class="note"></div>
    <p class="note warn">⚠️ 更换更强模型会增加 OpenAI API 费用；系统只做预警或按设定暂停，不会自动充值、升级模型或 Render 套餐。</p>
@@ -2819,6 +2823,8 @@ async function loadTelegramSettings(){
   tgAiName.value=s.ai_assistant_name||'兔兔';
   tgAiOwnerTitle.value=s.ai_owner_title||'主人';
   tgAiCustomerEnabled.value=String(s.ai_customer_enabled||'1');
+  tgAiCustomerTitle.value=s.ai_customer_title||'主人';
+  tgAiCustomerChatMode.value=s.ai_customer_chat_mode||'general';
   tgAiGirlEnabled.value=String(s.ai_girl_group_enabled||'1');
   tgAiModel.value=s.ai_model||telegramConfig.ai_model||'gpt-5-mini';
   tgAiMaxTokens.value=s.ai_max_output_tokens||700;
@@ -2831,10 +2837,12 @@ async function loadTelegramSettings(){
   tgAiBudgetAction.value=s.ai_budget_action||'warn';
   tgAiAbnormalAlerts.value=String(s.ai_abnormal_alerts_enabled||'1');
   tgAiAlertUsername.value='@'+String(s.ai_alert_username||'AliceCuteGril').replace(/^@/,'');
-  tgAiBlockOutOfScope.value=String(s.ai_block_out_of_scope||'1');
   tgAiSingleTokenWarning.value=s.ai_single_token_warning||8000;
   tgAiTeacherIds.value=s.ai_teacher_user_ids||'';
   tgAiPersona.value=s.ai_assistant_persona||'';
+  tgAiCustomerPrivacy.value=s.ai_customer_privacy_rules||'';
+  tgAiCustomerLimitMessage.value=s.ai_customer_limit_message||'';
+  tgAiCustomerErrorMessage.value=s.ai_customer_error_message||'';
   const rates=(telegramConfig.ai_model_pricing||{})[telegramConfig.ai_model]||{};
   tgAiStatus.innerHTML=`API：<b>${telegramConfig.ai_configured?'已配置':'未配置'}</b>｜模型：<b>${escHtml(telegramConfig.ai_model||'')}</b>｜异常私聊：<b>${s.ai_alert_chat_id?'已绑定':'等待该账号给 Bot 发消息'}</b>｜单价备忘：输入 $${Number(rates.input||0).toFixed(2)} / 输出 $${Number(rates.output||0).toFixed(2)}（每百万 Token）｜内部群提问：<code>${escHtml(s.ai_assistant_name||'兔兔')} 今天经营怎么样？</code>`;
   renderAiUsage(telegramConfig.ai_usage||{});
@@ -2948,6 +2956,8 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_assistant_name:tgAiName.value.trim()||'兔兔',
     ai_owner_title:tgAiOwnerTitle.value.trim()||'主人',
     ai_customer_enabled:tgAiCustomerEnabled.value==='1'?'1':'0',
+    ai_customer_title:tgAiCustomerTitle.value.trim()||'主人',
+    ai_customer_chat_mode:tgAiCustomerChatMode.value,
     ai_girl_group_enabled:tgAiGirlEnabled.value==='1'?'1':'0',
     ai_model:nextModel,
     ai_max_output_tokens:Number(tgAiMaxTokens.value||700),
@@ -2960,10 +2970,12 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_budget_action:tgAiBudgetAction.value,
     ai_abnormal_alerts_enabled:tgAiAbnormalAlerts.value==='1'?'1':'0',
     ai_alert_username:tgAiAlertUsername.value.trim().replace(/^@/,''),
-    ai_block_out_of_scope:tgAiBlockOutOfScope.value==='1'?'1':'0',
     ai_single_token_warning:Number(tgAiSingleTokenWarning.value||8000),
     ai_teacher_user_ids:tgAiTeacherIds.value.trim(),
     ai_assistant_persona:tgAiPersona.value.trim(),
+    ai_customer_privacy_rules:tgAiCustomerPrivacy.value.trim(),
+    ai_customer_limit_message:tgAiCustomerLimitMessage.value.trim(),
+    ai_customer_error_message:tgAiCustomerErrorMessage.value.trim(),
     booking_enabled:tgEnabled.value==='1'
   });
   await loadTelegramSettings();

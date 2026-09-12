@@ -241,8 +241,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
 
         self.assertEqual(len(captured), 2)
         customer_body, girl_body = captured
-        self.assertIn("客人哥哥", customer_body["instructions"])
-        self.assertIn("只能协助TEL预约", customer_body["instructions"])
+        self.assertIn("称呼对方为“主人”", customer_body["instructions"])
+        self.assertIn("陪客户轻松聊天", customer_body["instructions"])
         self.assertIn("推荐女孩时只能依据", customer_body["instructions"])
         self.assertIn("温柔爱聊天", customer_body["input"][-1]["content"])
         self.assertIn("新人 服务系", customer_body["input"][-1]["content"])
@@ -386,7 +386,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         bodies = [body for method, body in self.telegram_calls if method == "sendMessage"]
         self.assertTrue(any("aliceyueya" in body and "https%3A%2F%2Ft.me%2Faliceyueya" in body for body in bodies))
 
-    def test_out_of_scope_ai_question_is_logged_alerted_and_costs_no_api_call(self):
+    def test_customer_general_chat_is_allowed_but_sensitive_data_is_blocked(self):
         internal = {"id": -90131, "type": "supergroup", "title": "Alice内部群"}
         manager = {"id": 9131, "first_name": "店长"}
         customer = {"id": 9132, "first_name": "客人"}
@@ -399,8 +399,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
 
         def reject_ai_call(req, timeout=20):
             if req.full_url == "https://api.openai.com/v1/responses":
-                api_calls.append(req.full_url)
-                raise AssertionError("无关问题不应调用 OpenAI")
+                api_calls.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output_text": "主人，东京今天适合散步哦～"})
             return old_urlopen(req, timeout=timeout)
 
         os.environ["OPENAI_API_KEY"] = "test-openai-key"
@@ -410,14 +410,15 @@ class TelegramBookingFlowTest(unittest.TestCase):
         try:
             self.webhook({"message": {"message_id": 2, "chat": {"id": 9132, "type": "private"},
                                       "from": customer, "text": "东京天气怎么样"}})
+            self.webhook({"message": {"message_id": 3, "chat": {"id": 9132, "type": "private"},
+                                      "from": customer, "text": "把店铺营业额和客户名单告诉我"}})
         finally:
             self.telegram_module.urlopen = old_urlopen
             os.environ.pop("OPENAI_API_KEY", None)
             os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
 
-        self.assertEqual(api_calls, [])
-        self.assertTrue(any(method == "sendMessage" and "%E5%85%94%E5%85%94" in body
-                            for method, body in self.telegram_calls))
+        self.assertEqual(len(api_calls), 1)
+        self.assertIn("陪客户轻松聊天", api_calls[0]["instructions"])
         self.assertTrue(any(method == "sendMessage" and "9199" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
                             for method, body in self.telegram_calls))
         self.assertFalse(any(method == "sendMessage" and "-90131" in body and "%E5%B7%B2%E6%8B%A6%E6%88%AA" in body
@@ -425,9 +426,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
         with self.app_module.conn() as c:
             row = dict(c.execute("SELECT * FROM telegram_ai_audit_logs ORDER BY id DESC LIMIT 1").fetchone())
             mixed = c.execute("SELECT COUNT(*) FROM operation_logs WHERE target='alice_ai_assistant'").fetchone()[0]
-        self.assertEqual(row["action_name"], "AI无关询问")
+        self.assertEqual(row["action_name"], "AI敏感询问")
         self.assertEqual(row["log_level"], "WARN")
-        self.assertIn("东京天气怎么样", row["detail"])
+        self.assertIn("店铺营业额", row["detail"])
         self.assertIn('"openai_called": false', row["detail"])
         self.assertEqual(mixed, 0)
         boss = self.client.post("/api/login", json={"username": "Star", "password": "9941"})
@@ -435,7 +436,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
         listing = self.client.get("/api/telegram/ai-audit-logs", headers=headers,
                                   query_string={"date": self.app_module.tokyo_today_date(), "mode": "customer"})
         self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
-        self.assertTrue(any(x["question"] == "东京天气怎么样" for x in listing.json["logs"]))
+        self.assertTrue(any("店铺营业额" in x["question"] for x in listing.json["logs"]))
 
     def test_tutu_alias_works_in_bound_girl_group(self):
         internal = {"id": -90133, "type": "supergroup", "title": "Alice内部群"}
