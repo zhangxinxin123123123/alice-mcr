@@ -424,12 +424,17 @@ def register_telegram_booking(
         username = str(cfg.get("support_username") or "").strip().lstrip("@")
         return url_button(cfg.get("button_support") or "人工客服", f"https://t.me/{username}") if username else None
 
-    def send_message(chat_id, text, keyboard=None, thread_id=0):
+    def send_message(chat_id, text, keyboard=None, thread_id=0, reply_to_message_id=0):
         data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         if keyboard:
             data["reply_markup"] = keyboard
         if int(thread_id or 0):
             data["message_thread_id"] = int(thread_id)
+        if int(reply_to_message_id or 0):
+            data["reply_parameters"] = {
+                "message_id": int(reply_to_message_id),
+                "allow_sending_without_reply": True,
+            }
         return tg("sendMessage", data)
 
     def tutu_sticker_mood(text):
@@ -1682,6 +1687,12 @@ def register_telegram_booking(
                                         ORDER BY id DESC LIMIT 1""",
                                      (day, girl, str(target))).fetchone()
                 message_id = int(previous["telegram_chain_message_id"] or 0) if previous else 0
+            manual_source = c.execute("""SELECT message_id,message_thread_id,chain_text
+                                           FROM telegram_chain_inbox
+                                           WHERE chat_id=? AND order_date=? AND girl_name=?
+                                             AND status IN ('pending','imported')
+                                           ORDER BY message_id DESC LIMIT 1""",
+                                      (str(target), day, girl)).fetchone()
 
         def order_sort_key(order):
             period = service_range_minutes(order.get("service_time"))
@@ -1690,12 +1701,25 @@ def register_telegram_booking(
                     period[0] if period else 99 * 60, int(order.get("id") or 0))
 
         orders.sort(key=order_sort_key)
+        manual_orders = [order for order in orders if int(order.get("id") or 0) not in bot_order_ids]
+        render_orders = ([order for order in orders if int(order.get("id") or 0) in bot_order_ids]
+                         if manual_source else orders)
         dt = datetime.strptime(day, "%Y-%m-%d")
-        lines = [f"<b>{escape(f'{dt.month}月{dt.day}日 {girl} 接龙')}</b>"]
-        if not orders:
-            lines.append("暂无预约")
+        if manual_source:
+            lines = ["🟣 <b>Bot 新增预约（接在上方人工接龙后）</b>"]
+            if not render_orders:
+                # 导入人工接龙时不另发一份；已有 Bot 追加表则改成取消提示，避免留下旧订单。
+                if not message_id:
+                    return int(manual_source["message_id"] or 0)
+                lines.append("暂无 Bot 新增预约，以人工接龙为准。")
+        else:
+            lines = [f"<b>{escape(f'{dt.month}月{dt.day}日 {girl} 接龙')}</b>"]
+            if not render_orders:
+                lines.append("暂无预约")
         contact_rows = []
-        for index, order in enumerate(orders, 1):
+        start_index = len(manual_orders) if manual_source else 0
+        for local_index, order in enumerate(render_orders, 1):
+            index = start_index + local_index
             display_order = dict(order)
             remark = str(display_order.get("remark") or "").strip()
             display_order["remark"] = ""
@@ -1738,10 +1762,12 @@ def register_telegram_booking(
             try:
                 edit_message_text(target, message_id, text, keyboard)
             except Exception:
-                sent = send_message(target, text, keyboard, thread_id=thread_id)
+                sent = send_message(target, text, keyboard, thread_id=thread_id,
+                                    reply_to_message_id=int(manual_source["message_id"] or 0) if manual_source else 0)
                 sent_message_id = int(sent.get("message_id") or 0)
         else:
-            sent = send_message(target, text, keyboard, thread_id=thread_id)
+            sent = send_message(target, text, keyboard, thread_id=thread_id,
+                                reply_to_message_id=int(manual_source["message_id"] or 0) if manual_source else 0)
             sent_message_id = int(sent.get("message_id") or 0)
 
         with conn() as c:
@@ -1757,15 +1783,30 @@ def register_telegram_booking(
                       (str(target), int(sent_message_id), day, girl, str(target)))
         return sent_message_id
 
-    def adopt_manual_chain_message(chat_id, message_id, day, girl_name, cfg):
-        """Copy a human-written chain into the bot-maintained table while preserving the original message."""
+    def adopt_manual_chain_message(chat_id, message_id, day, girl_name, cfg, chain_text="",
+                                   chat_title="", thread_id=0):
+        """Remember the staff-written chain as canonical without reposting or deleting it."""
         if not message_id or not valid_group_chat_id(chat_id):
             return 0
-        row = {"reserve_date": day, "girl_name": girl_name, "telegram_group_chat_id": str(chat_id)}
-        canonical_id = refresh_daily_chain(row, cfg)
+        with conn() as c:
+            existing = c.execute("SELECT chain_text FROM telegram_chain_inbox WHERE chat_id=? AND message_id=?",
+                                 (str(chat_id), int(message_id))).fetchone()
+            source_text = str(chain_text or (existing["chain_text"] if existing else "") or "").strip()
+            if source_text:
+                c.execute("""INSERT INTO telegram_chain_inbox(
+                                chat_id,message_id,chat_title,message_thread_id,chain_text,
+                                order_date,girl_name,status,last_error,processed_at,updated_at)
+                             VALUES(?,?,?,?,?,?,?,'imported','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                             ON CONFLICT(chat_id,message_id) DO UPDATE SET
+                                chat_title=excluded.chat_title,message_thread_id=excluded.message_thread_id,
+                                chain_text=excluded.chain_text,order_date=excluded.order_date,
+                                girl_name=excluded.girl_name,status='imported',last_error='',
+                                processed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP""",
+                          (str(chat_id), int(message_id), str(chat_title or ""), int(thread_id or 0),
+                           source_text, str(day), str(girl_name)))
         # Telegram bots cannot edit a user's message. Keep the human source as an archive and maintain
         # subsequent automatic changes in the bot-owned canonical table; never delete the source.
-        return canonical_id
+        return int(message_id)
 
     def send_approved_chain(row, order_row, cfg, review_chat_id):
         try:
@@ -2289,7 +2330,9 @@ def register_telegram_booking(
                 raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
             if binding:
                 adopt_manual_chain_message(str(chat.get("id")), int(source_message_id or 0),
-                                           result["order_date"], result["girl_name"], cfg)
+                                           result["order_date"], result["girl_name"], cfg,
+                                           chain_text=chain_text, chat_title=str(chat.get("title") or ""),
+                                           thread_id=int((reply or message).get("message_thread_id") or 0))
             notify_internal(
                 f"✅ 管理系统接龙导入完成\n来源群：<b>{escape(chat.get('title') or str(chat.get('id')))}</b>"
                 f"\n女孩：<b>{escape(result['girl_name'])}</b>\n日期：{escape(result['order_date'])}"
@@ -2436,7 +2479,9 @@ def register_telegram_booking(
                 source_chat_id=row["chat_id"], source_message_id=row["message_id"])
             if int(imported.get("count") or 0) == 0:
                 raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
-            adopt_manual_chain_message(row["chat_id"], row["message_id"], order_date, girl_name, settings())
+            adopt_manual_chain_message(row["chat_id"], row["message_id"], order_date, girl_name, settings(),
+                                       chain_text=chain_text, chat_title=row["chat_title"],
+                                       thread_id=int(message.get("message_thread_id") or 0))
             with conn() as c:
                 c.execute("""UPDATE telegram_chain_inbox SET status='imported',last_error='',processed_at=CURRENT_TIMESTAMP,
                              order_date=?,girl_name=? WHERE chat_id=? AND message_id=?""",
@@ -2520,7 +2565,9 @@ def register_telegram_booking(
                 if int(imported.get("count") or 0) == 0:
                     raise ValueError("没有识别到有效预约行，请检查时间/价格/客人字段。")
                 if int(row.get("preferred_girl_id") or 0):
-                    adopt_manual_chain_message(row["chat_id"], row["message_id"], day, girl_name, settings())
+                    adopt_manual_chain_message(row["chat_id"], row["message_id"], day, girl_name, settings(),
+                                               chain_text=row["chain_text"], chat_title=row.get("chat_title") or "",
+                                               thread_id=int(row.get("message_thread_id") or 0))
                 with conn() as c:
                     c.execute("""UPDATE telegram_chain_inbox SET status='imported',last_error='',processed_at=CURRENT_TIMESTAMP,
                                  order_date=?,girl_name=? WHERE chat_id=? AND message_id=?""",

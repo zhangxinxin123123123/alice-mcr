@@ -682,6 +682,17 @@ async function api(url,body){
   return j;
  }finally{endBusy();}
 }
+async function apiGet(url){
+ beginBusy("正在读取数据…");
+ try{
+  const r=await timedFetch(url,{method:"GET",cache:"no-store",headers:authHeaders()});
+  const responseText=await r.text();let j;
+  try{j=responseText?JSON.parse(responseText):{};}catch(e){console.error("API returned non-JSON",url,r.status,responseText);j={ok:false,error:`接口返回异常 HTTP ${r.status}`};}
+  if(r.status===401){clearAuthAndShowLogin(j.error||'登录已失效，请重新登录');}
+  if(!r.ok||j.ok===false){alert(j.error||("读取失败 HTTP "+r.status));throw new Error(j.error||"读取失败");}
+  return j;
+ }finally{endBusy();}
+}
 
 let floatingTableTarget=null,floatingTableSyncing=false,tableScrollFrame=0;
 function tableScrollRatio(source,target){
@@ -2882,7 +2893,7 @@ function renderAiUsage(usage={}){
 }
 async function loadAiLearning(){
  if(!auth||auth.role!=='boss')return;
- const result=await api('/api/telegram/ai-learning',{});
+ const result=await apiGet('/api/telegram/ai-learning');
  aiTeachingRows=result.teachings||[];renderAiUsage(result.usage||{});renderAiTeachingRows();
 }
 function renderAiTeachingRows(){

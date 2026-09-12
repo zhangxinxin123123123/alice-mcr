@@ -4622,11 +4622,18 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
 
             price_token = parts.pop(0)[0]
             rec = yen_to_int(price_token)
-            if rec <= 0:
+            explicit_zero = bool(re.fullmatch(r'0+(?:\.0+)?', re.sub(r'[^\d.]', '', str(price_token or ''))))
+            if rec < 0 or (rec == 0 and not explicit_zero):
                 raise ValueError(f'接龙行价格无法识别：{line}。请填写例如 15000。')
             if not parts:
                 raise ValueError(f'接龙行缺少客人字段：{line}。格式：时间/价格/客人用户名 或 时间/价格/客人ID。')
             cust_token, force_name = parts.pop(0)
+            # 客服常把四位客户编号和备注连写，例如：0221余额抵扣7.2。
+            # 余额里的小数是备注，不得被当作 7.2 万的实收金额。
+            fused = re.match(r'^(\d{4})((?:余额|积分|抵扣|折扣|减免|全扣|现金|转账|备注).+)$', cust_token)
+            if fused and not force_name:
+                cust_token = fused.group(1)
+                parts.insert(0, (fused.group(2), False))
             cust = ('__NAME__:' + cust_token) if force_name else cust_token
             remark_parts = [p[0] for p in parts]
             parsed.append((sequence_no, normalize_chain_import_line(line), {
@@ -4640,7 +4647,7 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
                 'raw_text': line
             }))
 
-        legacy_orders = c.execute("""SELECT id,raw_text FROM orders
+        legacy_orders = c.execute("""SELECT id,raw_text,service_time,received_amount FROM orders
                                      WHERE order_date=? AND girl_id=? AND COALESCE(raw_text,'')<>''
                                      ORDER BY id""", (od, g['id'])).fetchall()
         legacy_by_sequence = {}
@@ -4655,13 +4662,19 @@ def import_chain_text(text, order_date='', girl_id=None, settlement_status='未�
                                    WHERE order_date=? AND girl_id=? AND sequence_no=?""",
                                 (od, g['id'], sequence_no)).fetchone()
             order_id = int(mapping['order_id']) if mapping else 0
-            existing_order = c.execute("SELECT id,raw_text FROM orders WHERE id=?", (order_id,)).fetchone() if order_id else None
+            existing_order = c.execute("SELECT id,raw_text,service_time,received_amount FROM orders WHERE id=?",
+                                       (order_id,)).fetchone() if order_id else None
             if not existing_order and sequence_no in legacy_by_sequence:
                 existing_order = legacy_by_sequence[sequence_no]
                 order_id = int(existing_order['id'])
 
             previous_normalized = normalize_chain_import_line(existing_order['raw_text']) if existing_order else ''
-            if existing_order and previous_normalized == normalized:
+            parsed_values_still_match = bool(
+                existing_order
+                and str(existing_order['service_time'] or '') == str(order_data['service_time'] or '')
+                and int(existing_order['received_amount'] or 0) == int(order_data['received_amount'] or 0)
+            )
+            if existing_order and previous_normalized == normalized and parsed_values_still_match:
                 unchanged += 1
             elif existing_order:
                 assert_no_duplicate_customer_name_for_chain(c, order_data['customer_raw'], current_order_id=order_id)

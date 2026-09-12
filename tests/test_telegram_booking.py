@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 class FakeTelegramResponse:
@@ -1048,6 +1049,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
             c.execute("INSERT INTO customers(customer_no,name) VALUES('0016','编号0016')")
         self.webhook({"message": {"message_id": 100, "chat": internal, "from": manager, "text": "/绑定审核群"}})
         self.webhook({"message": {"message_id": 101, "chat": girl_chat, "from": manager, "text": "/绑定女孩 娜娜子"}})
+        self.telegram_calls.clear()
         self.webhook({"message": {
             "message_id": 102, "chat": girl_chat, "from": member, "text": "/导入",
             "reply_to_message": {"message_id": 99, "text": chain},
@@ -1057,6 +1059,9 @@ class TelegramBookingFlowTest(unittest.TestCase):
                              (self.day,)).fetchall()
         self.assertEqual([(row["service_time"], row["received_amount"], row["customer_no"]) for row in rows],
                          [("19:00-20:00", 16000, "1547"), ("20:00-22:00", 33000, "0016")])
+        # 人工接龙是唯一主表；导入只同步 MCR 和内部群，不在女孩群复制完整接龙。
+        self.assertFalse(any(method == "sendMessage" and "chat_id=-39999" in body
+                             for method, body in self.telegram_calls), self.telegram_calls)
 
         self.telegram_calls.clear()
         self.webhook({"message": {"message_id": 103, "chat": girl_chat, "from": member, "text": "导入" + chain}})
@@ -1066,6 +1071,42 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertTrue(any("chat_id=-30003" in body and "%E6%9C%AA%E5%8F%98%E5%8C%96%EF%BC%9A2" in body
                             for body in sent_bodies), sent_bodies)
         self.assertFalse(any("chat_id=-39999" in body for body in sent_bodies))
+
+    def test_chain_zero_amount_with_fused_balance_remark_is_not_parsed_as_72000(self):
+        with self.app_module.conn() as c:
+            girl_id = c.execute("SELECT id FROM girls WHERE name='娜娜子'").fetchone()[0]
+            c.execute("INSERT INTO customers(customer_no,name) VALUES('0221','余额客户')")
+        login = self.client.post("/api/login", json={"username": "admin", "password": "admin123"})
+        headers = {"X-Alice-Role": "admin", "X-Alice-Session": login.json["session_token"]}
+        response = self.client.post('/api/import_chain', json={
+            'order_date': self.day,
+            'girl_id': girl_id,
+            'text': f"{self.day} 娜娜子\n1.9-11（0）0221余额抵扣7.2",
+        }, headers=headers)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        with self.app_module.conn() as c:
+            row = c.execute("SELECT * FROM orders WHERE customer_no='0221' ORDER BY id DESC LIMIT 1").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["received_amount"], 0)
+        self.assertEqual(row["customer_name"], "余额客户")
+        self.assertIn("余额抵扣7.2", row["remark"])
+
+        # 旧版本即使已经用同一条 raw_text 错存成 72000，重发原接龙也必须自动纠正。
+        with self.app_module.conn() as c:
+            c.execute("UPDATE orders SET received_amount=72000 WHERE id=?", (row["id"],))
+        corrected = self.client.post('/api/import_chain', json={
+            'order_date': self.day, 'girl_id': girl_id,
+            'text': f"{self.day} 娜娜子\n1.9-11（0）0221余额抵扣7.2",
+        }, headers=headers)
+        self.assertEqual(corrected.status_code, 200, corrected.get_data(as_text=True))
+        self.assertEqual(corrected.json["updated"], 1)
+        with self.app_module.conn() as c:
+            self.assertEqual(c.execute("SELECT received_amount FROM orders WHERE id=?", (row["id"],)).fetchone()[0], 0)
+
+    def test_ai_learning_panel_reads_with_get_instead_of_empty_teaching_post(self):
+        html = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("apiGet('/api/telegram/ai-learning')", html)
+        self.assertNotIn("api('/api/telegram/ai-learning',{})", html)
 
     def test_points_discount_clears_old_points_adds_500_and_bot_queries_customer(self):
         with self.app_module.conn() as c:
@@ -1258,23 +1299,27 @@ class TelegramBookingFlowTest(unittest.TestCase):
                 (future_day,)).fetchone())
             self.assertEqual(c.execute(
                 "SELECT COUNT(*) FROM telegram_daily_chain_messages WHERE booking_date=? AND girl_name='娜娜子'",
-                (future_day,)).fetchone()[0], 1)
-        self.assertTrue(any(method == "sendMessage" and "chat_id=-39103" in body
-                            for method, body in self.telegram_calls))
+                (future_day,)).fetchone()[0], 0)
+        self.assertFalse(any(method == "sendMessage" and "chat_id=-39103" in body
+                             for method, body in self.telegram_calls))
         self.assertFalse(any(method == "deleteMessage" and "message_id=902" in body
                              for method, body in self.telegram_calls))
 
         self.telegram_calls.clear()
         self.webhook({"message": {"message_id": 903, "chat": girl_chat, "from": manager,
                                   "text": f"{keyword}\n1.18-19/15000/人工未来客人\n2.20-21/15000/新增未来客人"}})
-        self.assertTrue(any(method == "editMessageText" and "chat_id=-39103" in body
-                            for method, body in self.telegram_calls))
+        self.assertFalse(any(method in ("sendMessage", "editMessageText") and "chat_id=-39103" in body
+                             for method, body in self.telegram_calls))
         self.assertFalse(any(method == "deleteMessage" and "message_id=903" in body
                              for method, body in self.telegram_calls))
         with self.app_module.conn() as c:
             self.assertEqual(c.execute(
                 "SELECT COUNT(*) FROM telegram_daily_chain_messages WHERE booking_date=? AND girl_name='娜娜子'",
-                (future_day,)).fetchone()[0], 1)
+                (future_day,)).fetchone()[0], 0)
+            latest = c.execute("""SELECT status,message_id FROM telegram_chain_inbox
+                                  WHERE chat_id=? AND order_date=? ORDER BY message_id DESC LIMIT 1""",
+                               (str(girl_chat["id"]), future_day)).fetchone()
+            self.assertEqual((latest["status"], latest["message_id"]), ("imported", 903))
 
     def test_attendance_inquiry_writes_mcr_shift_and_unanswered_expires(self):
         manager = {"id": 9700, "first_name": "店长"}
