@@ -12,7 +12,7 @@ import os
 # the application module and in-memory response buffers in every worker.
 workers = max(1, min(2, int(os.environ.get("ALICE_WEB_CONCURRENCY", "1"))))
 worker_class = "gthread"
-threads = max(2, min(8, int(os.environ.get("ALICE_WEB_THREADS", "4"))))
+threads = max(2, min(6, int(os.environ.get("ALICE_WEB_THREADS", "2"))))
 preload_app = False
 timeout = 120
 graceful_timeout = 30

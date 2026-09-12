@@ -36,7 +36,7 @@ app=Flask(__name__, static_folder=str(APP_DIR/'static'), static_url_path='/stati
 
 app.config['JSON_AS_ASCII'] = False
 app.config['MAX_CONTENT_LENGTH'] = 28 * 1024 * 1024
-APP_VERSION = "v148_memory_guardrails"
+APP_VERSION = "v149_stable_snapshot_memory"
 _OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="alice-praise-ocr")
 
 def process_rss_mb():
@@ -54,6 +54,7 @@ def compress_large_json(response):
     """Reduce transfer time for the large MCR snapshot on mobile connections."""
     if (response.status_code < 200 or response.status_code >= 300 or response.direct_passthrough
             or response.headers.get('Content-Encoding') or response.mimetype != 'application/json'
+            or request.path == '/api/all'
             or 'gzip' not in request.headers.get('Accept-Encoding', '').lower()):
         return response
     raw = response.get_data()
