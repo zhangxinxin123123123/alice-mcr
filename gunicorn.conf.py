@@ -20,8 +20,8 @@ keepalive = 5
 
 # Recycle the sole worker periodically so native image/font allocations cannot
 # accumulate indefinitely. Jitter avoids a predictable restart boundary.
-max_requests = 400
-max_requests_jitter = 60
+max_requests = 80
+max_requests_jitter = 20
 
 
 def _patch(log=None):
