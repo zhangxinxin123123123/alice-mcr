@@ -4427,7 +4427,18 @@ def register_telegram_booking(
             except Exception:
                 pass
 
+    startup_started = time.monotonic()
+    print("[alice-startup] preparing Telegram database", flush=True)
     ensure_db()
+    print(f"[alice-startup] Telegram database ready in {time.monotonic() - startup_started:.2f}s", flush=True)
     if str(os.environ.get("ALICE_DISABLE_CHAIN_SCHEDULER") or "") != "1":
-        threading.Thread(target=telegram_webhook_worker, name="alice-telegram-queue", daemon=True).start()
-        threading.Thread(target=auto_chain_import_loop, name="alice-chain-import", daemon=True).start()
+        def start_background_services():
+            # Let Gunicorn finish loading and expose port 10000 before any
+            # Telegram network call or queue replay begins.
+            time.sleep(5)
+            threading.Thread(target=telegram_webhook_worker, name="alice-telegram-queue", daemon=True).start()
+            print("[alice-startup] Telegram queue worker started", flush=True)
+            auto_chain_import_loop()
+
+        threading.Thread(target=start_background_services, name="alice-background-bootstrap", daemon=True).start()
+    print("[alice-startup] Telegram routes registered", flush=True)
