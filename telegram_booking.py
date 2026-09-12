@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import re
@@ -19,7 +20,10 @@ from flask import jsonify, request
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 
-_AI_MAX_WORKERS = max(1, min(4, int(os.environ.get("ALICE_AI_WORKERS", "2"))))
+# One concurrent model call is enough for Render's 512 MB Starter instance.
+# Extra requests wait briefly or receive the friendly busy response instead of
+# creating parallel TLS/JSON work that competes with the MCR web application.
+_AI_MAX_WORKERS = max(1, min(4, int(os.environ.get("ALICE_AI_WORKERS", "1"))))
 _AI_EXECUTOR = ThreadPoolExecutor(max_workers=_AI_MAX_WORKERS, thread_name_prefix="alice-ai")
 _AI_QUEUE_SLOTS = threading.BoundedSemaphore(_AI_MAX_WORKERS * 2)
 
@@ -159,6 +163,10 @@ def register_telegram_booking(
     sync_wordpress_attendance=None,
     parse_chain_header=None,
 ):
+    # Telegram must be acknowledged quickly.  Slow AI/Telegram API/database work
+    # is handled by a durable worker so a burst cannot occupy every web thread.
+    webhook_wakeup = threading.Event()
+
     def ensure_db():
         init_main_db()
         with conn() as c:
@@ -288,6 +296,13 @@ def register_telegram_booking(
                 id INTEGER PRIMARY KEY CHECK(id=1), last_started_at TEXT, last_completed_at TEXT,
                 last_result TEXT DEFAULT '')""")
             c.execute("INSERT OR IGNORE INTO telegram_chain_sync_state(id) VALUES(1)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_webhook_updates(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, update_key TEXT NOT NULL UNIQUE,
+                payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT DEFAULT '',
+                received_at TEXT DEFAULT CURRENT_TIMESTAMP, processed_at TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_tg_webhook_queue ON telegram_webhook_updates(status,id)")
             c.execute("""INSERT OR IGNORE INTO telegram_ai_audit_logs(
                 source_operation_log_id,actor_name,mode,question,action_name,detail,response_status,log_level,created_at)
                 SELECT id,actor_name,
@@ -3611,20 +3626,86 @@ def register_telegram_booking(
         elif data.startswith("reject:"):
             review_reservation(callback, False)
 
-    @app.route("/telegram/webhook", methods=["POST"])
-    def telegram_webhook():
-        configured_secret = str(os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
-        if configured_secret and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != configured_secret:
-            return jsonify(ok=False, error="webhook secret 错误"), 403
-        ensure_db()
-        update = request.json or {}
+    def dispatch_telegram_update(update):
+        """Process one Telegram update outside the HTTP request when enabled."""
         if update.get("callback_query"):
             handle_callback(update["callback_query"])
         elif update.get("message"):
             handle_message(update["message"])
         elif update.get("edited_message"):
             handle_message(update["edited_message"], edited=True)
-        return jsonify(ok=True)
+
+    def webhook_async_enabled():
+        if str(os.environ.get("ALICE_TELEGRAM_WEBHOOK_ASYNC") or "1") == "0":
+            return False
+        # Unit tests and local maintenance runs intentionally keep the old,
+        # deterministic synchronous behaviour.
+        return str(os.environ.get("ALICE_DISABLE_CHAIN_SCHEDULER") or "") != "1"
+
+    def enqueue_telegram_update(update):
+        raw = json.dumps(update, ensure_ascii=False, separators=(",", ":"))
+        update_id = update.get("update_id")
+        update_key = str(update_id) if update_id is not None else "hash:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        with conn() as c:
+            c.execute("""INSERT OR IGNORE INTO telegram_webhook_updates(update_key,payload,status)
+                         VALUES(?,?,'pending')""", (update_key, raw))
+        webhook_wakeup.set()
+
+    def claim_telegram_update():
+        with conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row = c.execute("""SELECT * FROM telegram_webhook_updates
+                               WHERE status='pending' ORDER BY id LIMIT 1""").fetchone()
+            if not row:
+                return None
+            changed = c.execute("""UPDATE telegram_webhook_updates
+                                   SET status='processing',attempts=attempts+1,updated_at=CURRENT_TIMESTAMP
+                                   WHERE id=? AND status='pending'""", (int(row["id"]),)).rowcount
+            return dict(row) if changed else None
+
+    def telegram_webhook_worker():
+        # Anything left in processing belonged to a worker that was restarted.
+        with conn() as c:
+            c.execute("""UPDATE telegram_webhook_updates SET status='pending',updated_at=CURRENT_TIMESTAMP
+                         WHERE status='processing'""")
+            c.execute("DELETE FROM telegram_webhook_updates WHERE status='done' AND processed_at<datetime('now','-2 days')")
+            c.execute("DELETE FROM telegram_webhook_updates WHERE status='failed' AND updated_at<datetime('now','-14 days')")
+        while True:
+            row = claim_telegram_update()
+            if not row:
+                webhook_wakeup.clear()
+                webhook_wakeup.wait(5)
+                continue
+            try:
+                dispatch_telegram_update(json.loads(row["payload"] or "{}"))
+                with conn() as c:
+                    c.execute("""UPDATE telegram_webhook_updates
+                                 SET status='done',payload='',last_error='',processed_at=CURRENT_TIMESTAMP,
+                                     updated_at=CURRENT_TIMESTAMP WHERE id=?""", (int(row["id"]),))
+            except Exception as exc:
+                attempts = int(row.get("attempts") or 0) + 1
+                status = "failed" if attempts >= 3 else "pending"
+                with conn() as c:
+                    c.execute("""UPDATE telegram_webhook_updates
+                                 SET status=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                              (status, str(exc)[:1000], int(row["id"])))
+                if status == "pending":
+                    webhook_wakeup.clear()
+                    webhook_wakeup.wait(min(30, 2 ** attempts))
+                else:
+                    print(f"[telegram-queue] update {row['update_key']} failed after {attempts} attempts: {exc}", flush=True)
+
+    @app.route("/telegram/webhook", methods=["POST"])
+    def telegram_webhook():
+        configured_secret = str(os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+        if configured_secret and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != configured_secret:
+            return jsonify(ok=False, error="webhook secret 错误"), 403
+        update = request.get_json(silent=True) or {}
+        if webhook_async_enabled():
+            enqueue_telegram_update(update)
+            return jsonify(ok=True, queued=True)
+        dispatch_telegram_update(update)
+        return jsonify(ok=True, queued=False)
 
     @app.route("/api/telegram/settings", methods=["GET", "POST"])
     def telegram_settings_api():
@@ -4348,4 +4429,5 @@ def register_telegram_booking(
 
     ensure_db()
     if str(os.environ.get("ALICE_DISABLE_CHAIN_SCHEDULER") or "") != "1":
+        threading.Thread(target=telegram_webhook_worker, name="alice-telegram-queue", daemon=True).start()
         threading.Thread(target=auto_chain_import_loop, name="alice-chain-import", daemon=True).start()

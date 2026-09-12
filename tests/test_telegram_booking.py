@@ -69,7 +69,7 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
                           "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs",
-                          "telegram_ai_customer_throttle"):
+                          "telegram_ai_customer_throttle", "telegram_webhook_updates"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -92,6 +92,25 @@ class TelegramBookingFlowTest(unittest.TestCase):
         response = self.client.post("/telegram/webhook", json=payload)
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response
+
+    def test_async_webhook_is_durable_and_deduplicated_before_processing(self):
+        previous = os.environ.get("ALICE_DISABLE_CHAIN_SCHEDULER")
+        os.environ["ALICE_DISABLE_CHAIN_SCHEDULER"] = "0"
+        try:
+            payload = {"update_id": 88001, "message": {"message_id": 1, "chat": {"id": 99, "type": "private"},
+                                                           "from": {"id": 99}, "text": "/start"}}
+            first = self.client.post("/telegram/webhook", json=payload)
+            second = self.client.post("/telegram/webhook", json=payload)
+            self.assertEqual(first.status_code, 200)
+            self.assertTrue(first.json["queued"])
+            self.assertEqual(second.status_code, 200)
+            with self.app_module.conn() as c:
+                rows = c.execute("SELECT * FROM telegram_webhook_updates WHERE update_key='88001'").fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["status"], "pending")
+            self.assertEqual(self.telegram_calls, [])
+        finally:
+            os.environ["ALICE_DISABLE_CHAIN_SCHEDULER"] = previous or "1"
 
     def test_fixed_recharge_tiers_are_idempotent_and_price_restricted(self):
         login = self.client.post('/api/login', json={'username':'admin','password':'admin123'})
