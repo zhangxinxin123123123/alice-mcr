@@ -100,6 +100,9 @@ DEFAULT_SETTINGS = {
     "ai_monthly_budget_usd": "20",
     "ai_budget_action": "warn",
     "ai_customer_daily_limit": "20",
+    "ai_customer_burst_limit": "10",
+    "ai_customer_burst_window_minutes": "10",
+    "ai_customer_cooldown_minutes": "60",
     "ai_girl_daily_limit": "40",
     "ai_teacher_user_ids": "",
     "ai_abnormal_alerts_enabled": "1",
@@ -252,6 +255,10 @@ def register_telegram_booking(
                 output_tokens INTEGER DEFAULT 0,total_tokens INTEGER DEFAULT 0,estimated_cost_usd REAL DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("CREATE INDEX IF NOT EXISTS idx_tg_ai_usage_date ON telegram_ai_usage(usage_date,mode,user_id)")
+            c.execute("""CREATE TABLE IF NOT EXISTS telegram_ai_customer_throttle(
+                user_id TEXT PRIMARY KEY,window_started_at INTEGER DEFAULT 0,call_count INTEGER DEFAULT 0,
+                muted_until INTEGER DEFAULT 0,notice_sent_at INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
             c.execute("""CREATE TABLE IF NOT EXISTS telegram_ai_budget_alerts(
                 alert_key TEXT PRIMARY KEY,estimated_cost_usd REAL DEFAULT 0,
                 sent_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
@@ -705,6 +712,38 @@ def register_telegram_booking(
         if monthly_budget and float(usage["this_month"]["cost"] or 0) >= monthly_budget:
             raise AiPublicLimitError("monthly_budget_limit")
 
+    def customer_ai_throttle(user_id, cfg):
+        """Return allow, notify, or silent for a customer's short-window AI traffic."""
+        now_epoch = int(time.time())
+        limit = max(1, min(100, int(float(cfg.get("ai_customer_burst_limit") or 10))))
+        window_seconds = max(60, min(3600, int(float(
+            cfg.get("ai_customer_burst_window_minutes") or 10)) * 60))
+        cooldown_seconds = max(60, min(86400, int(float(
+            cfg.get("ai_customer_cooldown_minutes") or 60)) * 60))
+        uid = str(user_id or "")
+        with conn() as c:
+            row = c.execute("SELECT * FROM telegram_ai_customer_throttle WHERE user_id=?", (uid,)).fetchone()
+            if row and int(row["muted_until"] or 0) > now_epoch:
+                return {"action": "silent", "muted_until": int(row["muted_until"] or 0),
+                        "count": int(row["call_count"] or 0), "limit": limit}
+            started = int(row["window_started_at"] or 0) if row else 0
+            count = int(row["call_count"] or 0) if row else 0
+            if not started or now_epoch - started >= window_seconds:
+                started, count = now_epoch, 1
+            else:
+                count += 1
+            muted_until = now_epoch + cooldown_seconds if count > limit else 0
+            notice_sent_at = now_epoch if muted_until else 0
+            c.execute("""INSERT INTO telegram_ai_customer_throttle(
+                user_id,window_started_at,call_count,muted_until,notice_sent_at,updated_at)
+                VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET
+                window_started_at=excluded.window_started_at,call_count=excluded.call_count,
+                muted_until=excluded.muted_until,notice_sent_at=excluded.notice_sent_at,
+                updated_at=CURRENT_TIMESTAMP""",
+                      (uid, started, count, muted_until, notice_sent_at))
+        return {"action": "notify" if muted_until else "allow", "muted_until": muted_until,
+                "count": count, "limit": limit}
+
     def record_ai_usage(cfg, mode, user_id, model, payload):
         usage = payload.get("usage") or {}
         input_tokens = max(0, int(usage.get("input_tokens") or 0))
@@ -1147,6 +1186,26 @@ def register_telegram_booking(
                          if mode == "girl" else "主人尽管吩咐兔兔，可以问客户编号、近期业绩、出勤安排、经营建议或其他问题"))
             send_tutu_message(chat.get("id"), f"🎀 兔兔是爱丽丝的AI客服助手兼吉祥物～\n{help_text}。", mood="hello")
             return True
+        if mode == "customer":
+            throttle = customer_ai_throttle(user.get("id"), cfg)
+            if throttle["action"] == "silent":
+                return True
+            if throttle["action"] == "notify":
+                cooldown = max(1, int(float(cfg.get("ai_customer_cooldown_minutes") or 60)))
+                rest_label = "一个小时" if cooldown == 60 else f"{cooldown} 分钟"
+                tired_text = ("🎀 主人，兔兔刚刚陪大家说了好多话，现在有一点点累啦～"
+                              f"先休息{rest_label}哦♡\n\n"
+                              "有预约或紧急问题，请联系人工客服姐姐帮您处理～")
+                support = support_url_button(cfg)
+                keyboard = inline_keyboard([[support]]) if support else None
+                log_ai_monitor(user, mode, question, "WARN", "AI客户短时限流", {
+                    "reason": f"短时间内第 {throttle['count']} 次询问，休息 {cooldown} 分钟",
+                    "openai_called": False, "muted_until_epoch": throttle["muted_until"],
+                })
+                notify_ai_monitor(cfg, user, mode, question,
+                                  f"短时调用超过 {throttle['limit']} 次，已休息 {cooldown} 分钟")
+                send_tutu_message(chat.get("id"), tired_text, keyboard, mood="busy", force_sticker=True)
+                return True
         if len(question) > 1200:
             log_ai_monitor(user, mode, question, "WARN", "AI异常询问", {"reason": "问题超过1200字", "openai_called": False})
             notify_ai_monitor(cfg, user, mode, question, "异常询问：问题超过1200字")
@@ -3552,6 +3611,11 @@ def register_telegram_booking(
                             value = str(max(0.0, min(10000.0, float(value or 0))))
                         elif key in ("ai_customer_daily_limit", "ai_girl_daily_limit"):
                             value = str(max(1, min(1000, int(float(value or 1)))))
+                        elif key == "ai_customer_burst_limit":
+                            value = str(max(1, min(100, int(float(value or 10)))))
+                        elif key in ("ai_customer_burst_window_minutes", "ai_customer_cooldown_minutes"):
+                            fallback = 60 if key == "ai_customer_cooldown_minutes" else 10
+                            value = str(max(1, min(1440, int(float(value or fallback)))))
                         elif key == "customer_feedback_delay_minutes":
                             value = str(max(0, min(1440, int(float(value or 60)))))
                         elif key == "ai_single_token_warning":

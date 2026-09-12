@@ -67,7 +67,8 @@ class TelegramBookingFlowTest(unittest.TestCase):
                           "customer_recharge_bonus_lots",
                           "points_records", "recharge_records", "girl_tag_memory", "telegram_customer_name_reviews",
                           "telegram_ai_sessions", "telegram_ai_interactions", "telegram_ai_teachings",
-                          "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs"):
+                          "telegram_ai_usage", "telegram_ai_budget_alerts", "telegram_ai_audit_logs",
+                          "telegram_ai_customer_throttle"):
                 c.execute(f"DELETE FROM {table}")
             c.execute("DELETE FROM customer_membership_history")
             c.execute("DELETE FROM financial_settings WHERE setting_key='membership_retention_v2_initialized'")
@@ -463,6 +464,52 @@ class TelegramBookingFlowTest(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", edits[-1])
         self.assertNotIn("Render", edits[-1])
         self.assertNotIn("AI+%E6%B2%A1%E6%9C%89%E8%BF%94%E5%9B%9E", edits[-1])
+
+    def test_customer_ai_burst_limit_notifies_once_then_stays_silent_for_an_hour(self):
+        customer = {"id": 9140, "first_name": "高频客人"}
+        chat = {"id": 9140, "type": "private"}
+        api_calls = []
+        old_urlopen = self.telegram_module.urlopen
+
+        def fake_ai(req, timeout=20):
+            if req.full_url == "https://api.openai.com/v1/responses":
+                api_calls.append(json.loads(req.data.decode("utf-8")))
+                return FakeTelegramResponse({"model": "gpt-5-mini", "output_text": "主人，兔兔在哦～",
+                                             "usage": {"input_tokens": 10, "output_tokens": 5,
+                                                       "total_tokens": 15}})
+            return old_urlopen(req, timeout=timeout)
+
+        with self.app_module.conn() as c:
+            c.execute("UPDATE telegram_settings SET setting_value='0' WHERE setting_key='ai_sticker_frequency'")
+        os.environ["OPENAI_API_KEY"] = "test-openai-key"
+        os.environ["ALICE_AI_ASSISTANT_SYNC"] = "1"
+        self.telegram_module.urlopen = fake_ai
+        try:
+            for index in range(1, 11):
+                self.webhook({"message": {"message_id": index, "chat": chat, "from": customer,
+                                          "text": f"兔兔 第{index}个问题"}})
+            self.webhook({"message": {"message_id": 11, "chat": chat, "from": customer,
+                                      "text": "兔兔 第11个问题"}})
+            calls_after_notice = len(self.telegram_calls)
+            self.webhook({"message": {"message_id": 12, "chat": chat, "from": customer,
+                                      "text": "兔兔 还在吗"}})
+        finally:
+            self.telegram_module.urlopen = old_urlopen
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("ALICE_AI_ASSISTANT_SYNC", None)
+
+        self.assertEqual(len(api_calls), 10)
+        self.assertEqual(len(self.telegram_calls), calls_after_notice)
+        sent = [body for method, body in self.telegram_calls if method == "sendMessage"]
+        self.assertEqual(sum("%E4%BC%91%E6%81%AF%E4%B8%80%E4%B8%AA%E5%B0%8F%E6%97%B6" in body for body in sent), 1)
+        with self.app_module.conn() as c:
+            throttle = dict(c.execute("SELECT * FROM telegram_ai_customer_throttle WHERE user_id='9140'").fetchone())
+            log = dict(c.execute("SELECT * FROM telegram_ai_audit_logs WHERE user_id='9140' "
+                                 "ORDER BY id DESC LIMIT 1").fetchone())
+        self.assertEqual(throttle["call_count"], 11)
+        self.assertGreater(throttle["muted_until"], int(datetime.now().timestamp()))
+        self.assertEqual(log["action_name"], "AI客户短时限流")
+        self.assertIn('"openai_called": false', log["detail"])
 
     def test_customer_asking_about_yueya_gets_second_tel_contact(self):
         customer = {"id": 9137, "first_name": "客人"}

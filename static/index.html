@@ -479,6 +479,9 @@ body:not(.role-boss) .boss-only{display:none!important}
     <select id="tgAiLearningEnabled"><option value="1">启用主人教学记忆</option><option value="0">暂停教学记忆</option></select>
     <label class="small">每次最多参考教学数<br><input id="tgAiMemoryLimit" type="number" min="0" max="20"></label>
     <label class="small">客户每日 AI 次数<br><input id="tgAiCustomerLimit" type="number" min="1" max="1000"></label>
+    <label class="small">客户短时调用上限<br><input id="tgAiCustomerBurstLimit" type="number" min="1" max="100" value="10"></label>
+    <label class="small">短时统计窗口（分钟）<br><input id="tgAiCustomerBurstWindow" type="number" min="1" max="60" value="10"></label>
+    <label class="small">超限休息时间（分钟）<br><input id="tgAiCustomerCooldown" type="number" min="1" max="1440" value="60"></label>
     <label class="small">女孩每日 AI 次数<br><input id="tgAiGirlLimit" type="number" min="1" max="1000"></label>
     <label class="small">每日费用预警（USD）<br><input id="tgAiDailyBudget" type="number" min="0" step="0.1"></label>
     <label class="small">每月费用预警（USD）<br><input id="tgAiMonthlyBudget" type="number" min="0" step="1"></label>
@@ -2846,6 +2849,9 @@ async function loadTelegramSettings(){
   tgAiLearningEnabled.value=String(s.ai_learning_enabled||'1');
   tgAiMemoryLimit.value=s.ai_memory_limit||6;
   tgAiCustomerLimit.value=s.ai_customer_daily_limit||20;
+  tgAiCustomerBurstLimit.value=s.ai_customer_burst_limit||10;
+  tgAiCustomerBurstWindow.value=s.ai_customer_burst_window_minutes||10;
+  tgAiCustomerCooldown.value=s.ai_customer_cooldown_minutes||60;
   tgAiGirlLimit.value=s.ai_girl_daily_limit||40;
   tgAiDailyBudget.value=s.ai_daily_budget_usd||2;
   tgAiMonthlyBudget.value=s.ai_monthly_budget_usd||20;
@@ -2984,6 +2990,9 @@ async function saveTelegramSettings(successMessage='TEL 预约设置已保存'){
     ai_learning_enabled:tgAiLearningEnabled.value==='1'?'1':'0',
     ai_memory_limit:Number(tgAiMemoryLimit.value||0),
     ai_customer_daily_limit:Number(tgAiCustomerLimit.value||20),
+    ai_customer_burst_limit:Number(tgAiCustomerBurstLimit.value||10),
+    ai_customer_burst_window_minutes:Number(tgAiCustomerBurstWindow.value||10),
+    ai_customer_cooldown_minutes:Number(tgAiCustomerCooldown.value||60),
     ai_girl_daily_limit:Number(tgAiGirlLimit.value||40),
     ai_daily_budget_usd:Number(tgAiDailyBudget.value||0),
     ai_monthly_budget_usd:Number(tgAiMonthlyBudget.value||0),
